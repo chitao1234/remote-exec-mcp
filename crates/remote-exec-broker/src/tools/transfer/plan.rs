@@ -2,8 +2,8 @@ use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint, Trans
 use remote_exec_proto::transfer::{TransferCompression, TransferOverwrite, TransferSymlinkMode};
 
 use super::endpoints::{
-    ensure_absolute, ensure_distinct_endpoints, ensure_multi_source_basenames_are_unique,
-    negotiate_transfer_compression, resolve_destination,
+    PlannedSource, TransferPlanningContext, ensure_absolute, ensure_distinct_endpoints,
+    ensure_multi_source_basenames_are_unique, negotiate_transfer_compression, resolve_destination,
 };
 
 pub(super) struct TransferPlanRequest {
@@ -17,7 +17,7 @@ pub(super) struct TransferPlanRequest {
 }
 
 pub(super) struct TransferPlan {
-    pub(super) sources: Vec<TransferEndpoint>,
+    pub(super) sources: Vec<PlannedSource>,
     pub(super) requested_destination: TransferEndpoint,
     pub(super) destination: TransferEndpoint,
     pub(super) overwrite: TransferOverwrite,
@@ -72,14 +72,14 @@ impl TransferPlan {
     pub(super) fn first_source_target(&self) -> &str {
         self.sources
             .first()
-            .map(|source| source.target.as_str())
+            .map(|source| source.endpoint.target.as_str())
             .unwrap_or("unknown")
     }
 
     pub(super) fn first_source_path(&self) -> &str {
         self.sources
             .first()
-            .map(|source| source.path.as_str())
+            .map(|source| source.endpoint.path.as_str())
             .unwrap_or("unknown")
     }
 }
@@ -88,33 +88,40 @@ pub(super) async fn plan_transfer(
     state: &crate::BrokerState,
     request: TransferPlanRequest,
 ) -> anyhow::Result<TransferPlan> {
-    let compression =
-        negotiate_transfer_compression(state, &request.sources, &request.requested_destination)
+    let planning =
+        TransferPlanningContext::new(state, &request.sources, &request.requested_destination)
             .await?;
-
-    for source in &request.sources {
-        ensure_absolute(state, source).await?;
-    }
-    ensure_absolute(state, &request.requested_destination).await?;
-    ensure_multi_source_basenames_are_unique(
-        state,
+    let compression = negotiate_transfer_compression(
+        &planning,
+        state.enable_transfer_compression,
         &request.sources,
         &request.requested_destination,
-    )
-    .await?;
+    )?;
+
+    for source in &request.sources {
+        ensure_absolute(&planning, source)?;
+    }
+    ensure_absolute(&planning, &request.requested_destination)?;
+    ensure_multi_source_basenames_are_unique(
+        &planning,
+        &request.sources,
+        &request.requested_destination,
+    )?;
     let destination = resolve_destination(
         state,
+        &planning,
         &request.sources,
         &request.requested_destination,
         &request.destination_mode,
     )
     .await?;
     for source in &request.sources {
-        ensure_distinct_endpoints(state, source, &destination).await?;
+        ensure_distinct_endpoints(&planning, source, &destination)?;
     }
+    let sources = planning.planned_sources(&request.sources)?;
 
     Ok(TransferPlan {
-        sources: request.sources,
+        sources,
         requested_destination: request.requested_destination,
         destination,
         overwrite: request.overwrite,

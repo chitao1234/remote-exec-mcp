@@ -7,12 +7,11 @@ use remote_exec_proto::transfer::{
 };
 
 use super::backend::{TransferArchiveStream, TransferBackend, backend_for_endpoint};
-use super::endpoints::endpoint_policy;
+use super::endpoints::PlannedSource;
 use super::plan::{TransferExecutionOptions, TransferPlan};
 
 struct ExportedSourceArchive {
-    endpoint: TransferEndpoint,
-    source_policy: remote_exec_proto::path::PathPolicy,
+    source: PlannedSource,
     source_type: TransferSourceType,
     temp_path: tempfile::TempPath,
 }
@@ -23,7 +22,9 @@ pub(super) async fn execute_transfer_plan(
 ) -> anyhow::Result<(TransferSourceType, TransferImportResponse)> {
     let options = plan.execution_options();
     match plan.sources.as_slice() {
-        [source] => transfer_single_source(state, source, &plan.destination, options).await,
+        [source] => {
+            transfer_single_source(state, &source.endpoint, &plan.destination, options).await
+        }
         _ => transfer_multiple_sources(state, &plan.sources, &plan.destination, options).await,
     }
 }
@@ -56,7 +57,7 @@ async fn transfer_single_source(
 
 async fn transfer_multiple_sources(
     state: &crate::BrokerState,
-    sources: &[TransferEndpoint],
+    sources: &[PlannedSource],
     destination: &TransferEndpoint,
     options: TransferExecutionOptions<'_>,
 ) -> anyhow::Result<(TransferSourceType, TransferImportResponse)> {
@@ -64,10 +65,9 @@ async fn transfer_multiple_sources(
     for source in sources {
         let temp = tempfile::NamedTempFile::new()?;
         let temp_path = temp.into_temp_path();
-        let source_policy = endpoint_policy(state, source).await?;
         let exported = export_endpoint_to_archive(
             state,
-            source,
+            &source.endpoint,
             temp_path.as_ref(),
             options.compression,
             options.exclude,
@@ -75,8 +75,7 @@ async fn transfer_multiple_sources(
         )
         .await?;
         exported_sources.push(ExportedSourceArchive {
-            endpoint: source.clone(),
-            source_policy,
+            source: source.clone(),
             source_type: exported.source_type,
             temp_path,
         });
@@ -88,8 +87,8 @@ async fn transfer_multiple_sources(
         exported_sources
             .iter()
             .map(|source| crate::local::transfer::BundledArchiveSource {
-                source_path: source.endpoint.path.clone(),
-                source_policy: source.source_policy,
+                source_path: source.source.endpoint.path.clone(),
+                source_policy: source.source.policy,
                 source_type: source.source_type.clone(),
                 compression: options.compression.clone(),
                 archive_path: source.temp_path.to_path_buf(),

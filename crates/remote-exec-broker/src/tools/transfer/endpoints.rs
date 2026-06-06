@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use remote_exec_host::path_compare;
@@ -12,6 +13,17 @@ use crate::daemon_client::{RpcToolErrorMode, normalize_tool_error};
 use crate::local::BrokerHostOrTarget;
 
 use super::backend::{TransferBackend, backend_for_endpoint};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TransferPlanningContext {
+    targets: BTreeMap<String, EndpointTargetContext>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct PlannedSource {
+    pub(super) endpoint: TransferEndpoint,
+    pub(super) policy: PathPolicy,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointTargetContext {
@@ -50,20 +62,68 @@ async fn endpoint_target_context(
     }
 }
 
-pub(super) async fn endpoint_policy(
-    state: &crate::BrokerState,
-    endpoint: &TransferEndpoint,
-) -> anyhow::Result<PathPolicy> {
-    Ok(endpoint_target_context(state, &endpoint.target)
-        .await?
-        .policy())
+impl TransferPlanningContext {
+    pub(super) async fn new(
+        state: &crate::BrokerState,
+        sources: &[TransferEndpoint],
+        destination: &TransferEndpoint,
+    ) -> anyhow::Result<Self> {
+        let mut targets = BTreeMap::new();
+        for target in sources
+            .iter()
+            .map(|source| source.target.as_str())
+            .chain(std::iter::once(destination.target.as_str()))
+        {
+            if !targets.contains_key(target) {
+                targets.insert(
+                    target.to_string(),
+                    endpoint_target_context(state, target).await?,
+                );
+            }
+        }
+        Ok(Self { targets })
+    }
+
+    pub(super) fn endpoint_policy(
+        &self,
+        endpoint: &TransferEndpoint,
+    ) -> anyhow::Result<PathPolicy> {
+        Ok(self.endpoint_context(endpoint)?.policy())
+    }
+
+    pub(super) fn planned_sources(
+        &self,
+        sources: &[TransferEndpoint],
+    ) -> anyhow::Result<Vec<PlannedSource>> {
+        sources
+            .iter()
+            .map(|source| {
+                Ok(PlannedSource {
+                    endpoint: source.clone(),
+                    policy: self.endpoint_policy(source)?,
+                })
+            })
+            .collect()
+    }
+
+    fn endpoint_context(
+        &self,
+        endpoint: &TransferEndpoint,
+    ) -> anyhow::Result<EndpointTargetContext> {
+        self.targets.get(&endpoint.target).copied().ok_or_else(|| {
+            anyhow::anyhow!(
+                "missing transfer planning context for target `{}`",
+                endpoint.target
+            )
+        })
+    }
 }
 
-pub(super) async fn ensure_absolute(
-    state: &crate::BrokerState,
+pub(super) fn ensure_absolute(
+    planning: &TransferPlanningContext,
     endpoint: &TransferEndpoint,
 ) -> anyhow::Result<()> {
-    let context = endpoint_target_context(state, &endpoint.target).await?;
+    let context = planning.endpoint_context(endpoint)?;
     anyhow::ensure!(
         context.is_absolute_path(&endpoint.path),
         "transfer endpoint path `{}` is not absolute",
@@ -72,8 +132,8 @@ pub(super) async fn ensure_absolute(
     Ok(())
 }
 
-pub(super) async fn ensure_distinct_endpoints(
-    state: &crate::BrokerState,
+pub(super) fn ensure_distinct_endpoints(
+    planning: &TransferPlanningContext,
     source: &TransferEndpoint,
     destination: &TransferEndpoint,
 ) -> anyhow::Result<()> {
@@ -81,8 +141,8 @@ pub(super) async fn ensure_distinct_endpoints(
         return Ok(());
     }
 
-    let policy = endpoint_policy(state, source).await?;
-    let context = endpoint_target_context(state, &source.target).await?;
+    let policy = planning.endpoint_policy(source)?;
+    let context = planning.endpoint_context(source)?;
     anyhow::ensure!(
         !paths_match_for_preflight(context, policy, &source.path, &destination.path),
         "source and destination must differ"
@@ -90,8 +150,8 @@ pub(super) async fn ensure_distinct_endpoints(
     Ok(())
 }
 
-pub(super) async fn ensure_multi_source_basenames_are_unique(
-    state: &crate::BrokerState,
+pub(super) fn ensure_multi_source_basenames_are_unique(
+    planning: &TransferPlanningContext,
     sources: &[TransferEndpoint],
     destination: &TransferEndpoint,
 ) -> anyhow::Result<()> {
@@ -99,11 +159,11 @@ pub(super) async fn ensure_multi_source_basenames_are_unique(
         return Ok(());
     }
 
-    let destination_context = endpoint_target_context(state, &destination.target).await?;
-    let destination_policy = endpoint_policy(state, destination).await?;
+    let destination_context = planning.endpoint_context(destination)?;
+    let destination_policy = planning.endpoint_policy(destination)?;
     let mut seen_paths: Vec<String> = Vec::with_capacity(sources.len());
     for source in sources {
-        let source_policy = endpoint_policy(state, source).await?;
+        let source_policy = planning.endpoint_policy(source)?;
         let basename = source_policy.basename(&source.path).ok_or_else(|| {
             anyhow::anyhow!(
                 "transfer source path `{}` has no usable basename for multi-source transfer",
@@ -128,6 +188,7 @@ pub(super) async fn ensure_multi_source_basenames_are_unique(
 
 pub(super) async fn resolve_destination(
     state: &crate::BrokerState,
+    planning: &TransferPlanningContext,
     sources: &[TransferEndpoint],
     destination: &TransferEndpoint,
     destination_mode: &TransferDestinationMode,
@@ -135,15 +196,15 @@ pub(super) async fn resolve_destination(
     let resolved_path = match destination_mode {
         TransferDestinationMode::Exact => destination.path.clone(),
         TransferDestinationMode::IntoDirectory => {
-            resolve_into_directory_destination(state, sources, destination).await?
+            resolve_into_directory_destination(planning, sources, destination)?
         }
         TransferDestinationMode::Auto => {
-            let context = endpoint_target_context(state, &destination.target).await?;
+            let context = planning.endpoint_context(destination)?;
             if sources.len() == 1
                 && (path_looks_like_directory(context, &destination.path)
                     || existing_destination_is_directory(state, destination).await?)
             {
-                resolve_into_directory_destination(state, sources, destination).await?
+                resolve_into_directory_destination(planning, sources, destination)?
             } else {
                 destination.path.clone()
             }
@@ -156,16 +217,16 @@ pub(super) async fn resolve_destination(
     })
 }
 
-async fn resolve_into_directory_destination(
-    state: &crate::BrokerState,
+fn resolve_into_directory_destination(
+    planning: &TransferPlanningContext,
     sources: &[TransferEndpoint],
     destination: &TransferEndpoint,
 ) -> anyhow::Result<String> {
-    let destination_context = endpoint_target_context(state, &destination.target).await?;
+    let destination_context = planning.endpoint_context(destination)?;
     let destination_policy = destination_context.policy();
     let mut candidates: Vec<String> = Vec::with_capacity(sources.len());
     for source in sources {
-        let source_policy = endpoint_policy(state, source).await?;
+        let source_policy = planning.endpoint_policy(source)?;
         let basename = source_policy.basename(&source.path).ok_or_else(|| {
             anyhow::anyhow!(
                 "transfer source path `{}` has no usable basename for destination directory mode",
@@ -274,18 +335,19 @@ fn path_info_missing_or_unsupported(err: &crate::daemon_client::DaemonClientErro
     }
 }
 
-pub(super) async fn negotiate_transfer_compression(
-    state: &crate::BrokerState,
+pub(super) fn negotiate_transfer_compression(
+    planning: &TransferPlanningContext,
+    enable_transfer_compression: bool,
     sources: &[TransferEndpoint],
     destination: &TransferEndpoint,
 ) -> anyhow::Result<TransferCompression> {
-    if !state.enable_transfer_compression {
+    if !enable_transfer_compression {
         return Ok(TransferCompression::None);
     }
 
     let mut has_remote_endpoint = false;
     for endpoint in sources.iter().chain(std::iter::once(destination)) {
-        let context = endpoint_target_context(state, &endpoint.target).await?;
+        let context = planning.endpoint_context(endpoint)?;
         let Some(supports_transfer_compression) = context.supports_transfer_compression() else {
             continue;
         };

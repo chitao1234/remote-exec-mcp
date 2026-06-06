@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use remote_exec_host::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
-use remote_exec_proto::path::{PathPolicy, host_policy};
+use remote_exec_host::sandbox::CompiledFilesystemSandbox;
+use remote_exec_proto::path::PathPolicy;
 use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferPathInfoResponse,
 };
@@ -104,44 +104,8 @@ pub fn path_info(
     path: &str,
     sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> Result<TransferPathInfoResponse, DaemonClientError> {
-    let policy = host_policy();
-    if !policy.is_absolute(path) {
-        return Err(crate::local::backend::map_local_transfer_error(
-            remote_exec_host::TransferError::path_not_absolute(format!(
-                "transfer endpoint path `{path}` is not absolute"
-            )),
-        ));
-    }
-    let path = PathBuf::from(policy.normalize_for_system(path));
-    authorize_path(sandbox, SandboxAccess::Write, &path).map_err(|err| {
-        crate::local::backend::map_local_transfer_error(
-            remote_exec_host::TransferError::sandbox_denied(err.to_string()),
-        )
-    })?;
-
-    match std::fs::symlink_metadata(&path) {
-        Ok(metadata) => {
-            if metadata.file_type().is_symlink() {
-                return Err(crate::local::backend::map_local_transfer_error(
-                    remote_exec_host::TransferError::destination_unsupported(format!(
-                        "destination path contains unsupported symlink `{}`",
-                        path.display()
-                    )),
-                ));
-            }
-            Ok(TransferPathInfoResponse {
-                exists: true,
-                is_directory: metadata.is_dir(),
-            })
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(TransferPathInfoResponse {
-            exists: false,
-            is_directory: false,
-        }),
-        Err(err) => Err(crate::local::backend::map_local_transfer_error(
-            remote_exec_host::TransferError::internal(err.to_string()),
-        )),
-    }
+    remote_exec_host::transfer::path_info_for_path(path, sandbox, None)
+        .map_err(crate::local::backend::map_local_transfer_error)
 }
 
 pub async fn bundle_archives_to_file(

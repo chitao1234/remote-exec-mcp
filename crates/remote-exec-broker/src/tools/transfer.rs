@@ -37,9 +37,14 @@ pub async fn transfer_files(
     );
 
     let (source_type, summary) = execute_transfer_plan(state, &plan).await?;
+    let sources = plan
+        .sources
+        .iter()
+        .map(|source| source.endpoint.clone())
+        .collect::<Vec<_>>();
 
     finish_transfer(
-        &plan.sources,
+        &sources,
         CompletedTransfer {
             requested_destination: plan.requested_destination.clone(),
             destination: plan.destination.clone(),
