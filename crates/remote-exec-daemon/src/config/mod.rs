@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use remote_exec_host::HostRuntimeConfig;
+use remote_exec_host::config::HostRuntimeConfigSource;
 pub use remote_exec_proto::auth::HttpAuthConfig;
 use remote_exec_proto::sandbox::FilesystemSandbox;
 use remote_exec_proto::transfer::TransferLimits;
@@ -119,11 +120,24 @@ impl From<HostRuntimeConfig> for DaemonConfig {
 }
 
 impl DaemonConfig {
-    fn normalized_default_workdir(&self) -> PathBuf {
-        remote_exec_host::config::normalize_configured_workdir(
-            &self.default_workdir,
-            self.windows_posix_root.as_deref(),
-        )
+    fn host_runtime_config_source(&self) -> HostRuntimeConfigSource<'_> {
+        HostRuntimeConfigSource {
+            target: &self.target,
+            default_workdir: &self.default_workdir,
+            windows_posix_root: self.windows_posix_root.as_deref(),
+            sandbox: self.sandbox.as_ref(),
+            enable_transfer_compression: self.enable_transfer_compression,
+            transfer_limits: self.transfer_limits,
+            max_open_sessions: self.max_open_sessions,
+            allow_login_shell: self.allow_login_shell,
+            pty: self.pty,
+            default_shell: self.default_shell.as_deref(),
+            yield_time: self.yield_time,
+            port_forward_limits: self.port_forward_limits,
+            experimental_apply_patch_target_encoding_autodetect: self
+                .experimental_apply_patch_target_encoding_autodetect,
+            process_environment: &self.process_environment,
+        }
     }
 
     fn validate_http_auth(&self) -> anyhow::Result<()> {
@@ -135,11 +149,15 @@ impl DaemonConfig {
     }
 
     pub fn normalize_paths(&mut self) {
-        self.default_workdir = self.normalized_default_workdir();
+        let mut host_config = HostRuntimeConfig::from_source(self.host_runtime_config_source());
+        host_config.normalize_paths();
+        self.default_workdir = host_config.default_workdir;
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
-        HostRuntimeConfig::from(self).validate()?;
+        HostRuntimeConfig::from(self)
+            .into_normalized_validated()
+            .map(|_| ())?;
         self.validate_http_auth()?;
         anyhow::ensure!(
             self.request_timeout_ms > 0,
@@ -196,23 +214,7 @@ impl From<DaemonConfig> for HostRuntimeConfig {
 
 impl From<&DaemonConfig> for HostRuntimeConfig {
     fn from(value: &DaemonConfig) -> Self {
-        Self {
-            target: value.target.clone(),
-            default_workdir: value.default_workdir.clone(),
-            windows_posix_root: value.windows_posix_root.clone(),
-            sandbox: value.sandbox.clone(),
-            enable_transfer_compression: value.enable_transfer_compression,
-            transfer_limits: value.transfer_limits,
-            max_open_sessions: value.max_open_sessions,
-            allow_login_shell: value.allow_login_shell,
-            pty: value.pty,
-            default_shell: value.default_shell.clone(),
-            yield_time: value.yield_time,
-            port_forward_limits: value.port_forward_limits,
-            experimental_apply_patch_target_encoding_autodetect: value
-                .experimental_apply_patch_target_encoding_autodetect,
-            process_environment: value.process_environment.clone(),
-        }
+        Self::from_source(value.host_runtime_config_source())
     }
 }
 

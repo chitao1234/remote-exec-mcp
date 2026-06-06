@@ -182,6 +182,30 @@ async fn load_rejects_missing_local_default_workdir() {
     );
 }
 
+#[tokio::test]
+async fn load_rejects_invalid_local_host_runtime_limits() {
+    let dir = tempfile::tempdir().unwrap();
+    let err = load_config(
+        &dir,
+        format!(
+            r#"[local]
+default_workdir = {}
+
+[local.port_forward_limits]
+connect_timeout_ms = 0
+"#,
+            toml_string(dir.path())
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("port_forward_limits.connect_timeout_ms must be greater than zero"),
+        "unexpected error: {err}"
+    );
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn load_accepts_local_windows_posix_root() {

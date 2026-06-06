@@ -49,6 +49,73 @@ pub struct HostRuntimeConfig {
     pub process_environment: ProcessEnvironment,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct HostRuntimeConfigValidation {
+    default_workdir_field: &'static str,
+}
+
+impl HostRuntimeConfigValidation {
+    pub const fn new(default_workdir_field: &'static str) -> Self {
+        Self {
+            default_workdir_field,
+        }
+    }
+}
+
+impl Default for HostRuntimeConfigValidation {
+    fn default() -> Self {
+        Self::new("default_workdir")
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct HostRuntimeConfigSource<'a> {
+    pub target: &'a str,
+    pub default_workdir: &'a Path,
+    pub windows_posix_root: Option<&'a Path>,
+    pub sandbox: Option<&'a FilesystemSandbox>,
+    pub enable_transfer_compression: bool,
+    pub transfer_limits: TransferLimits,
+    pub max_open_sessions: usize,
+    pub allow_login_shell: bool,
+    pub pty: PtyMode,
+    pub default_shell: Option<&'a str>,
+    pub yield_time: YieldTimeConfig,
+    pub port_forward_limits: HostPortForwardLimits,
+    pub experimental_apply_patch_target_encoding_autodetect: bool,
+    pub process_environment: &'a ProcessEnvironment,
+}
+
+impl HostRuntimeConfigSource<'_> {
+    pub fn into_config(self) -> HostRuntimeConfig {
+        HostRuntimeConfig {
+            target: self.target.to_string(),
+            default_workdir: self.default_workdir.to_path_buf(),
+            windows_posix_root: self.windows_posix_root.map(Path::to_path_buf),
+            sandbox: self.sandbox.cloned(),
+            enable_transfer_compression: self.enable_transfer_compression,
+            transfer_limits: self.transfer_limits,
+            max_open_sessions: self.max_open_sessions,
+            allow_login_shell: self.allow_login_shell,
+            pty: self.pty,
+            default_shell: self.default_shell.map(str::to_string),
+            yield_time: self.yield_time,
+            port_forward_limits: self.port_forward_limits,
+            experimental_apply_patch_target_encoding_autodetect: self
+                .experimental_apply_patch_target_encoding_autodetect,
+            process_environment: self.process_environment.clone(),
+        }
+    }
+
+    pub fn into_normalized_validated_config(
+        self,
+        validation: HostRuntimeConfigValidation,
+    ) -> anyhow::Result<HostRuntimeConfig> {
+        self.into_config()
+            .into_normalized_validated_with(validation)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(default)]
 pub struct HostPortForwardLimits {
@@ -160,6 +227,10 @@ impl HostPortForwardTimeouts {
 }
 
 impl HostRuntimeConfig {
+    pub fn from_source(source: HostRuntimeConfigSource<'_>) -> Self {
+        source.into_config()
+    }
+
     fn normalized_default_workdir(&self) -> PathBuf {
         normalize_configured_workdir(&self.default_workdir, self.windows_posix_root.as_deref())
     }
@@ -180,9 +251,29 @@ impl HostRuntimeConfig {
         self.default_workdir = self.normalized_default_workdir();
     }
 
+    pub fn into_normalized_validated(self) -> anyhow::Result<Self> {
+        self.into_normalized_validated_with(HostRuntimeConfigValidation::default())
+    }
+
+    pub fn into_normalized_validated_with(
+        mut self,
+        validation: HostRuntimeConfigValidation,
+    ) -> anyhow::Result<Self> {
+        self.normalize_paths();
+        self.validate_with(validation)?;
+        Ok(self)
+    }
+
     pub fn validate(&self) -> anyhow::Result<()> {
+        self.validate_with(HostRuntimeConfigValidation::default())
+    }
+
+    pub fn validate_with(&self, validation: HostRuntimeConfigValidation) -> anyhow::Result<()> {
         self.validate_windows_posix_root()?;
-        validate_existing_directory(&self.normalized_default_workdir(), "default_workdir")?;
+        validate_existing_directory(
+            &self.normalized_default_workdir(),
+            validation.default_workdir_field,
+        )?;
         self.yield_time.validate()?;
         self.transfer_limits.validate()?;
         anyhow::ensure!(

@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
-use remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS;
+use remote_exec_host::config::{
+    DEFAULT_MAX_OPEN_SESSIONS, HostRuntimeConfigSource, HostRuntimeConfigValidation,
+};
 use remote_exec_host::{
     HostPortForwardLimits, HostRuntimeConfig, ProcessEnvironment, PtyMode, YieldTimeConfig,
 };
@@ -339,11 +341,29 @@ impl TargetConfig {
 }
 
 impl LocalTargetConfig {
-    fn normalized_default_workdir(&self) -> PathBuf {
-        remote_exec_host::config::normalize_configured_workdir(
-            &self.default_workdir,
-            self.windows_posix_root.as_deref(),
-        )
+    fn host_runtime_config_source<'a>(
+        &'a self,
+        sandbox: Option<&'a FilesystemSandbox>,
+        enable_transfer_compression: bool,
+        process_environment: &'a ProcessEnvironment,
+    ) -> HostRuntimeConfigSource<'a> {
+        HostRuntimeConfigSource {
+            target: local::TARGET_NAME,
+            default_workdir: &self.default_workdir,
+            windows_posix_root: self.windows_posix_root.as_deref(),
+            sandbox,
+            enable_transfer_compression,
+            transfer_limits: self.transfer_limits,
+            max_open_sessions: DEFAULT_MAX_OPEN_SESSIONS,
+            allow_login_shell: self.allow_login_shell,
+            pty: self.pty,
+            default_shell: self.default_shell.as_deref(),
+            yield_time: self.yield_time,
+            port_forward_limits: self.port_forward_limits,
+            experimental_apply_patch_target_encoding_autodetect: self
+                .experimental_apply_patch_target_encoding_autodetect,
+            process_environment,
+        }
     }
 
     pub fn host_runtime_config(
@@ -351,23 +371,24 @@ impl LocalTargetConfig {
         sandbox: Option<FilesystemSandbox>,
         enable_transfer_compression: bool,
     ) -> HostRuntimeConfig {
-        HostRuntimeConfig {
-            target: local::TARGET_NAME.to_string(),
-            default_workdir: self.default_workdir.clone(),
-            windows_posix_root: self.windows_posix_root.clone(),
-            sandbox,
+        let process_environment = ProcessEnvironment::capture_current();
+        HostRuntimeConfig::from_source(self.host_runtime_config_source(
+            sandbox.as_ref(),
             enable_transfer_compression,
-            transfer_limits: self.transfer_limits,
-            max_open_sessions: DEFAULT_MAX_OPEN_SESSIONS,
-            allow_login_shell: self.allow_login_shell,
-            pty: self.pty,
-            default_shell: self.default_shell.clone(),
-            yield_time: self.yield_time,
-            port_forward_limits: self.port_forward_limits,
-            experimental_apply_patch_target_encoding_autodetect: self
-                .experimental_apply_patch_target_encoding_autodetect,
-            process_environment: ProcessEnvironment::capture_current(),
-        }
+            &process_environment,
+        ))
+    }
+
+    fn validate_host_runtime_config(
+        &self,
+        sandbox: Option<&FilesystemSandbox>,
+        enable_transfer_compression: bool,
+    ) -> anyhow::Result<HostRuntimeConfig> {
+        let process_environment = ProcessEnvironment::capture_current();
+        self.host_runtime_config_source(sandbox, enable_transfer_compression, &process_environment)
+            .into_normalized_validated_config(HostRuntimeConfigValidation::new(
+                "local.default_workdir",
+            ))
     }
 }
 
@@ -389,7 +410,14 @@ impl McpServerConfig {
 impl BrokerConfig {
     pub(crate) fn normalize_paths(&mut self) {
         if let Some(local) = &mut self.local {
-            local.default_workdir = local.normalized_default_workdir();
+            let process_environment = ProcessEnvironment::capture_current();
+            let mut host_config = HostRuntimeConfig::from_source(local.host_runtime_config_source(
+                None,
+                self.enable_transfer_compression,
+                &process_environment,
+            ));
+            host_config.normalize_paths();
+            local.default_workdir = host_config.default_workdir;
         }
     }
 
@@ -405,11 +433,12 @@ impl BrokerConfig {
             local::TARGET_NAME
         );
         if let Some(local) = &self.local {
-            local.transfer_limits.validate()?;
-            remote_exec_host::config::validate_existing_directory(
-                &local.default_workdir,
-                "local.default_workdir",
-            )?;
+            local
+                .validate_host_runtime_config(
+                    self.host_sandbox.as_ref(),
+                    self.enable_transfer_compression,
+                )
+                .map(|_| ())?;
         }
         for (name, target) in &self.targets {
             target.validate(name)?;

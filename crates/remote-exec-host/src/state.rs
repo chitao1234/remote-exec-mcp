@@ -98,9 +98,8 @@ impl HostRuntimeState {
     }
 }
 
-pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<HostRuntimeState> {
-    config.normalize_paths();
-    config.validate()?;
+pub fn build_runtime_state(config: HostRuntimeConfig) -> anyhow::Result<HostRuntimeState> {
+    let config = config.into_normalized_validated()?;
     let sandbox = config
         .sandbox
         .as_ref()
