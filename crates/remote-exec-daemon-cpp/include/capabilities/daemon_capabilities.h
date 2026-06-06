@@ -1,9 +1,5 @@
 #pragma once
 
-#include "json.hpp"
-
-using Json = nlohmann::json;
-
 struct DaemonCapabilities {
     DaemonCapabilities();
 
@@ -16,4 +12,3 @@ struct DaemonCapabilities {
 };
 
 DaemonCapabilities detect_daemon_capabilities();
-void write_daemon_capabilities(Json* target, const DaemonCapabilities& capabilities);

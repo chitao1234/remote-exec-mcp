@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <sstream>
@@ -8,12 +9,10 @@
 #include "exec/process_session.h"
 #include "exec/session_pump.h"
 #include "exec/session_store.h"
-#include "output_renderer.h"
 #include "platform/deadline.h"
 #include "platform/platform.h"
 #include "rpc/exec_request_utils.h"
 #include "session_pump_internal.h"
-#include "session_response_builder.h"
 
 void erase_session_if_current(BasicMutex& mutex,
                               std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
@@ -60,8 +59,8 @@ struct SessionSnapshot {
     std::uint64_t generation;
 };
 
-Json empty_exec_warnings() {
-    return Json::array();
+std::vector<ExecSessionWarning> empty_exec_warnings() {
+    return std::vector<ExecSessionWarning>();
 }
 
 void add_drain_stop_reason(LogMessageBuilder* message, SessionOutputDrainStopReason reason) {
@@ -70,11 +69,33 @@ void add_drain_stop_reason(LogMessageBuilder* message, SessionOutputDrainStopRea
     }
 }
 
-Json session_limit_warning(const std::string& target, unsigned long open_sessions) {
-    return Json::array({Json{
-        {"code", "exec_session_limit_approaching"},
-        {"message", "Target `" + target + "` now has " + std::to_string(open_sessions) + " open exec sessions."},
-    }});
+std::vector<ExecSessionWarning> session_limit_warning(const std::string& target, unsigned long open_sessions) {
+    std::vector<ExecSessionWarning> warnings;
+    warnings.push_back(ExecSessionWarning("exec_session_limit_approaching",
+                                          "Target `" + target + "` now has " + std::to_string(open_sessions) +
+                                              " open exec sessions."));
+    return warnings;
+}
+
+ExecSessionResult make_exec_session_result(const char* daemon_session_id,
+                                           bool running,
+                                           std::uint64_t started_at_ms,
+                                           bool has_exit_code,
+                                           int exit_code,
+                                           const std::string& output,
+                                           const std::vector<ExecSessionWarning>& warnings) {
+    ExecSessionResult result;
+    if (daemon_session_id != nullptr) {
+        result.daemon_session_id = daemon_session_id;
+        result.has_daemon_session_id = true;
+    }
+    result.running = running;
+    result.started_at_ms = started_at_ms;
+    result.has_exit_code = has_exit_code;
+    result.exit_code = exit_code;
+    result.output = output;
+    result.warnings = warnings;
+    return result;
 }
 
 unsigned long warning_threshold(unsigned long max_open_sessions) {
@@ -203,22 +224,15 @@ void apply_write_stdin_request_locked(LiveSession* session,
     }
 }
 
-Json finalize_completed_write_stdin(BasicMutex& mutex,
-                                    std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
-                                    unsigned long* pending_starts,
-                                    const std::string& daemon_session_id,
-                                    const std::shared_ptr<LiveSession>& session,
-                                    const PollResult& poll_result,
-                                    unsigned long max_output_tokens) {
+ExecSessionResult finalize_completed_write_stdin(BasicMutex& mutex,
+                                                 std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
+                                                 unsigned long* pending_starts,
+                                                 const std::string& daemon_session_id,
+                                                 const std::shared_ptr<LiveSession>& session,
+                                                 const PollResult& poll_result) {
     retire_remove_and_join_session(mutex, sessions, daemon_session_id, session);
-    Json response = build_session_response(nullptr,
-                                           false,
-                                           session->started_at_ms,
-                                           true,
-                                           poll_result.exit_code,
-                                           poll_result.output,
-                                           max_output_tokens,
-                                           empty_exec_warnings());
+    ExecSessionResult result = make_exec_session_result(
+        nullptr, false, session->started_at_ms, true, poll_result.exit_code, poll_result.output, empty_exec_warnings());
     unsigned long open_sessions = 0UL;
     {
         BasicLockGuard lock(mutex);
@@ -230,7 +244,7 @@ Json finalize_completed_write_stdin(BasicMutex& mutex,
         .field("open_sessions", open_sessions);
     add_drain_stop_reason(&message, poll_result.drain_stop_reason);
     log_message(LOG_INFO, "session_store", message.str());
-    return response;
+    return result;
 }
 
 } // namespace
@@ -416,10 +430,10 @@ bool SessionStore::prune_one_session_for_start(unsigned long max_open_sessions) 
     }
 }
 
-Json SessionStore::start_command(const std::string& target,
-                                 const ExecStartRequestSpec& request,
-                                 const YieldTimeConfig& yield_time,
-                                 unsigned long max_open_sessions) {
+ExecSessionResult SessionStore::start_command(const std::string& target,
+                                              const ExecStartRequestSpec& request,
+                                              const YieldTimeConfig& yield_time,
+                                              unsigned long max_open_sessions) {
     if (!reserve_pending_start(max_open_sessions)) {
         throw SessionLimitError("too many open exec sessions");
     }
@@ -449,7 +463,7 @@ Json SessionStore::start_command(const std::string& target,
         throw;
     }
 
-    Json warnings = empty_exec_warnings();
+    std::vector<ExecSessionWarning> warnings = empty_exec_warnings();
     {
         BasicLockGuard lock(mutex_);
         pending_start.release_locked();
@@ -469,42 +483,35 @@ Json SessionStore::start_command(const std::string& target,
 
     if (poll_result.completed) {
         retire_and_join_session(session);
-        Json response = build_session_response(nullptr,
-                                               false,
-                                               session->started_at_ms,
-                                               true,
-                                               poll_result.exit_code,
-                                               poll_result.output,
-                                               request.max_output_tokens,
-                                               empty_exec_warnings());
+        ExecSessionResult result = make_exec_session_result(nullptr,
+                                                            false,
+                                                            session->started_at_ms,
+                                                            true,
+                                                            poll_result.exit_code,
+                                                            poll_result.output,
+                                                            empty_exec_warnings());
         {
             LogMessageBuilder message("command completed before session handoff");
             message.field("exit_code", poll_result.exit_code).field("output_chars", poll_result.output.size());
             add_drain_stop_reason(&message, poll_result.drain_stop_reason);
             log_message(LOG_INFO, "session_store", message.str());
         }
-        return response;
+        return result;
     }
 
-    return build_session_response(session->id.c_str(),
-                                  true,
-                                  session->started_at_ms,
-                                  false,
-                                  0,
-                                  poll_result.output,
-                                  request.max_output_tokens,
-                                  warnings);
+    return make_exec_session_result(
+        session->id.c_str(), true, session->started_at_ms, false, 0, poll_result.output, warnings);
 }
 
-Json SessionStore::write_stdin(const std::string& daemon_session_id,
-                               const std::string& chars,
-                               bool has_yield_time_ms,
-                               unsigned long yield_time_ms,
-                               unsigned long max_output_tokens,
-                               const YieldTimeConfig& yield_time,
-                               bool has_pty_size,
-                               unsigned short pty_rows,
-                               unsigned short pty_cols) {
+ExecSessionResult SessionStore::write_stdin(const std::string& daemon_session_id,
+                                            const std::string& chars,
+                                            bool has_yield_time_ms,
+                                            unsigned long yield_time_ms,
+                                            unsigned long max_output_tokens,
+                                            const YieldTimeConfig& yield_time,
+                                            bool has_pty_size,
+                                            unsigned short pty_rows,
+                                            unsigned short pty_cols) {
     std::shared_ptr<LiveSession> session;
     {
         BasicLockGuard lock(mutex_);
@@ -542,7 +549,7 @@ Json SessionStore::write_stdin(const std::string& daemon_session_id,
 
     if (poll_result.completed) {
         return finalize_completed_write_stdin(
-            mutex_, sessions_, &pending_starts_, daemon_session_id, session, poll_result, max_output_tokens);
+            mutex_, sessions_, &pending_starts_, daemon_session_id, session, poll_result);
     }
 
     {
@@ -551,12 +558,6 @@ Json SessionStore::write_stdin(const std::string& daemon_session_id,
         add_drain_stop_reason(&message, poll_result.drain_stop_reason);
         log_message(LOG_INFO, "session_store", message.str());
     }
-    return build_session_response(session->id.c_str(),
-                                  true,
-                                  session->started_at_ms,
-                                  false,
-                                  0,
-                                  poll_result.output,
-                                  max_output_tokens,
-                                  empty_exec_warnings());
+    return make_exec_session_result(
+        session->id.c_str(), true, session->started_at_ms, false, 0, poll_result.output, empty_exec_warnings());
 }

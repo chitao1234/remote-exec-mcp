@@ -55,6 +55,8 @@ HTTP_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_request.cpp
 
 ROUTE_SRCS = \
+	$(SOURCE_PREFIX)src/rpc/capabilities_http_codec.cpp \
+	$(SOURCE_PREFIX)src/rpc/exec_http_codec.cpp \
 	$(SOURCE_PREFIX)src/rpc/exec_request_utils.cpp \
 	$(IMAGE_SRCS) \
 	$(SOURCE_PREFIX)src/rpc/server_contract.cpp \
@@ -95,9 +97,9 @@ PATH_UTILS_SRCS = $(SOURCE_PREFIX)src/platform/path_utils.cpp
 
 WIN32_ERROR_SRCS = $(SOURCE_PREFIX)src/platform/win32_error.cpp
 
-SESSION_STORE_SUPPORT_SRCS = \
-	$(SOURCE_PREFIX)src/exec/output_renderer.cpp \
-	$(SOURCE_PREFIX)src/exec/session_response_builder.cpp
+SESSION_STORE_SUPPORT_SRCS = $(SOURCE_PREFIX)src/exec/output_renderer.cpp
+
+EXEC_HTTP_CODEC_SRCS = $(SOURCE_PREFIX)src/rpc/exec_http_codec.cpp
 
 SESSION_STORE_SRCS = \
 	$(SESSION_STORE_SUPPORT_SRCS) \
@@ -282,6 +284,7 @@ WINDOWS_SERVER_STREAMING_SRCS = \
 HOST_SESSION_STORE_SRCS = \
 	$(SOURCE_PREFIX)tests/test_session_store.cpp \
 	$(SESSION_STORE_SRCS) \
+	$(EXEC_HTTP_CODEC_SRCS) \
 	$(DAEMON_THREAD_SRCS) \
 	$(POSIX_PROCESS_SESSION_SRCS) \
 	$(PLATFORM_SRCS) \
@@ -454,6 +457,7 @@ WINDOWS_DAEMON_SRCS = \
 WINDOWS_SESSION_STORE_TEST_SRCS = \
 	$(SOURCE_PREFIX)tests/test_session_store.cpp \
 	$(SESSION_STORE_SRCS) \
+	$(EXEC_HTTP_CODEC_SRCS) \
 	$(WINDOWS_DAEMON_SUPPORT_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \

@@ -18,12 +18,3 @@ DaemonCapabilities detect_daemon_capabilities() {
     capabilities.transfer_stream_protocol_version = server_contract::TRANSFER_STREAM_PROTOCOL_VERSION;
     return capabilities;
 }
-
-void write_daemon_capabilities(Json* target, const DaemonCapabilities& capabilities) {
-    (*target)["supports_pty"] = capabilities.supports_pty;
-    (*target)["supports_image_read"] = capabilities.supports_image_read;
-    (*target)["supports_transfer_compression"] = capabilities.supports_transfer_compression;
-    (*target)["supports_port_forward"] = capabilities.supports_port_forward;
-    (*target)["port_forward_protocol_version"] = capabilities.port_forward_protocol_version;
-    (*target)["transfer_stream_protocol_version"] = capabilities.transfer_stream_protocol_version;
-}
