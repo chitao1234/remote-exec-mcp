@@ -64,6 +64,7 @@ ROUTE_SRCS = \
 	$(IMAGE_SRCS) \
 	$(SOURCE_PREFIX)src/rpc/server_contract.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_request_utils.cpp \
+	$(SOURCE_PREFIX)src/rpc/server_route_executor.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_routes.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_common.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_exec.cpp \

@@ -10,15 +10,12 @@
 #include "http/http_request.h"
 #include "http/server_transport.h"
 #include "platform/platform.h"
-#include "port_forward/port_tunnel.h"
 #include "rpc/server_route_common.h"
-#include "rpc/server_route_transfer.h"
-#include "rpc/server_routes.h"
+#include "rpc/server_route_executor.h"
 
 namespace {
 
 const unsigned long HTTP_SHUTDOWN_READ_POLL_MS = 100UL;
-const unsigned long HTTP_STREAMING_TRANSFER_BODY_IDLE_TIMEOUT_MS = 300000UL;
 const unsigned long HTTP_STREAMING_TRANSFER_DRAIN_TIMEOUT_MS = 300000UL;
 
 bool request_connection_close_requested(const HttpRequest& request) {
@@ -87,29 +84,16 @@ void log_request_result(const HttpRequest& request, int status, std::uint64_t st
     log_message(level, "server", message.str());
 }
 
-int handle_streaming_transfer_export_request(const TransferRouteContext& context,
-                                             SOCKET client,
-                                             const HttpRequest& request,
-                                             HttpRequestBodyStream* body,
-                                             bool* close_after_response) {
-    StreamingTransferExport transfer;
-    HttpResponse response = prepare_streaming_transfer_export(context, request, body, &transfer);
-    write_request_id_header(response, request);
-    if (response.status != 200) {
-        if (!try_send_response(client, response)) {
-            *close_after_response = true;
-        }
-        return response.status;
+bool try_send_upgrade_response(SOCKET client,
+                               const std::string& upgrade_token,
+                               const std::map<std::string, std::string>& headers) {
+    try {
+        send_http_upgrade_response(client, upgrade_token, headers);
+        return true;
+    } catch (const SocketSendError& ex) {
+        log_send_failure(ex);
+        return false;
     }
-
-    if (!try_send_response_head(client, response)) {
-        *close_after_response = true;
-        return response.status;
-    }
-
-    HttpChunkedResponseWriter chunks(client);
-    run_streaming_transfer_export(transfer, &chunks);
-    return response.status;
 }
 
 int handle_client_request(const HttpConnectionContext& context,
@@ -122,49 +106,52 @@ int handle_client_request(const HttpConnectionContext& context,
     assign_request_id(request);
     *close_after_response = request_connection_close_requested(request);
     const HttpRequestBodyFraming framing = parse_request_body_framing_or_throw_bad_request(request);
-    const RouteExecutionMode mode = route_execution_mode(request);
+    const RpcRouteBodyPolicy body_policy = rpc_route_body_policy(request, context.max_request_body_bytes);
     HttpReadControl body_read_control = read_control;
-    if (mode == ROUTE_EXECUTION_STREAMING_IMPORT) {
+    if (body_policy.min_idle_timeout_ms > body_read_control.idle_timeout_ms) {
         body_read_control.idle_timeout_ms =
-            std::max(body_read_control.idle_timeout_ms, HTTP_STREAMING_TRANSFER_BODY_IDLE_TIMEOUT_MS);
+            std::max(body_read_control.idle_timeout_ms, body_policy.min_idle_timeout_ms);
         set_socket_timeout_ms(client, body_read_control.idle_timeout_ms);
     }
-    const std::size_t max_body_bytes = mode == ROUTE_EXECUTION_STREAMING_IMPORT
-                                           ? std::numeric_limits<std::size_t>::max()
-                                           : context.max_request_body_bytes;
-    HttpRequestBodyStream body(client, request_head.initial_body, framing, max_body_bytes, &body_read_control);
+    HttpRequestBodyStream body(
+        client, request_head.initial_body, framing, body_policy.max_body_bytes, &body_read_control);
 
-    if (mode == ROUTE_EXECUTION_STREAMING_EXPORT) {
-        const int status = handle_streaming_transfer_export_request(
-            context.routes.transfer, client, request, &body, close_after_response);
-        log_request_result(request, status, started_at_ms);
-        return status;
-    }
-    if (mode == ROUTE_EXECUTION_UPGRADE) {
-        const int status = handle_port_tunnel_upgrade(context.port_tunnel, client, request);
-        log_request_result(request, status, started_at_ms);
+    const RpcRouteExecution execution = execute_rpc_route(context.routes, context.port_tunnel, request, &body);
+    if (execution.kind == RPC_ROUTE_EXECUTION_STREAMING_IMPORT_RESPONSE && execution.close_after_response) {
+        (void)body.discard_remaining_bounded(HTTP_STREAMING_TRANSFER_DRAIN_TIMEOUT_MS,
+                                             std::numeric_limits<std::size_t>::max());
         *close_after_response = true;
-        return status;
     }
 
-    HttpResponse response;
-    if (mode == ROUTE_EXECUTION_STREAMING_IMPORT) {
-        response = handle_streaming_transfer_import(context.routes.transfer, request, &body);
-        if (!body.fully_consumed()) {
-            (void)body.discard_remaining_bounded(HTTP_STREAMING_TRANSFER_DRAIN_TIMEOUT_MS,
-                                                 std::numeric_limits<std::size_t>::max());
+    if (execution.kind == RPC_ROUTE_EXECUTION_STREAMING_RESPONSE) {
+        log_request_result(request, execution.response.status, started_at_ms);
+        if (!try_send_response_head(client, execution.response)) {
             *close_after_response = true;
+            return execution.response.status;
         }
-    } else {
-        request.body = read_request_body_to_string(&body);
-        response = route_request(context.routes, request);
+        HttpChunkedResponseWriter chunks(client);
+        execution.write_streaming_response(&chunks);
+        return execution.response.status;
     }
-    write_request_id_header(response, request);
-    log_request_result(request, response.status, started_at_ms);
-    if (!try_send_response(client, response)) {
+
+    if (execution.kind == RPC_ROUTE_EXECUTION_UPGRADE_HANDLER) {
+        log_request_result(request, execution.response.status, started_at_ms);
+        *close_after_response = true;
+        if (!try_send_upgrade_response(client, execution.upgrade_token, execution.upgrade_headers)) {
+            return execution.response.status;
+        }
+        execution.run_upgrade(client);
+        return execution.response.status;
+    }
+
+    if (execution.close_after_response) {
         *close_after_response = true;
     }
-    return response.status;
+    log_request_result(request, execution.response.status, started_at_ms);
+    if (!try_send_response(client, execution.response)) {
+        *close_after_response = true;
+    }
+    return execution.response.status;
 }
 
 } // namespace
