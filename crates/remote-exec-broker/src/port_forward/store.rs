@@ -315,23 +315,71 @@ impl PortForwardStore {
     }
 
     pub async fn mark_failed(&self, forward_id: &str, error: String) {
-        let mut state = self.state_write();
-        if let Some(record) = state.entries.get_mut(forward_id) {
-            let before = is_reconnecting_entry(record.entry());
-            mark_entry_failed(record.entry_mut(), error);
-            let after = is_reconnecting_entry(record.entry());
-            adjust_reconnecting_count(&mut state.reconnecting_count, before, after);
-        }
+        self.mutate_entry(forward_id, |entry| {
+            mark_entry_failed(entry, error);
+        });
     }
 
-    pub async fn update_entry(&self, forward_id: &str, update: impl FnOnce(&mut ForwardPortEntry)) {
-        let mut state = self.state_write();
-        if let Some(record) = state.entries.get_mut(forward_id) {
-            let before = is_reconnecting_entry(record.entry());
-            update(record.entry_mut());
-            let after = is_reconnecting_entry(record.entry());
-            adjust_reconnecting_count(&mut state.reconnecting_count, before, after);
+    pub(super) async fn record_dropped_tcp_streams(&self, forward_id: &str, count: u64) {
+        if count == 0 {
+            return;
         }
+        self.mutate_entry(forward_id, |entry| {
+            entry.dropped_tcp_streams = entry.dropped_tcp_streams.saturating_add(count);
+        });
+    }
+
+    pub(super) async fn record_dropped_udp_datagrams(&self, forward_id: &str, count: u64) {
+        if count == 0 {
+            return;
+        }
+        self.mutate_entry(forward_id, |entry| {
+            entry.dropped_udp_datagrams = entry.dropped_udp_datagrams.saturating_add(count);
+        });
+    }
+
+    pub(super) async fn record_dropped_tcp_streams_and_release_active(
+        &self,
+        forward_id: &str,
+        count: u64,
+    ) {
+        if count == 0 {
+            return;
+        }
+        self.mutate_entry(forward_id, |entry| {
+            entry.dropped_tcp_streams = entry.dropped_tcp_streams.saturating_add(count);
+            release_active_tcp_streams(entry, count);
+        });
+    }
+
+    pub(super) async fn release_active_tcp_stream(&self, forward_id: &str) {
+        self.mutate_entry(forward_id, |entry| {
+            release_active_tcp_streams(entry, 1);
+        });
+    }
+
+    pub(super) async fn record_dropped_active_tcp_stream(&self, forward_id: &str) {
+        self.mutate_entry(forward_id, |entry| {
+            entry.dropped_tcp_streams = entry.dropped_tcp_streams.saturating_add(1);
+            release_active_tcp_streams(entry, 1);
+        });
+    }
+
+    pub(super) async fn try_reserve_active_tcp_stream(
+        &self,
+        forward_id: &str,
+        max_active_tcp_streams: u64,
+    ) -> bool {
+        let mut saw_entry = false;
+        let mut reserved = false;
+        self.mutate_entry(forward_id, |entry| {
+            saw_entry = true;
+            if entry.active_tcp_streams < max_active_tcp_streams {
+                entry.active_tcp_streams += 1;
+                reserved = true;
+            }
+        });
+        !saw_entry || reserved
     }
 
     pub async fn mark_reconnecting(
@@ -383,7 +431,7 @@ impl PortForwardStore {
     }
 
     pub async fn mark_ready(&self, forward_id: &str, role: ForwardPortSideRole) {
-        self.update_entry(forward_id, |entry| {
+        self.mutate_entry(forward_id, |entry| {
             if entry.status != ForwardPortStatus::Open {
                 return;
             }
@@ -394,19 +442,17 @@ impl PortForwardStore {
             side.health = ForwardPortSideHealth::Ready;
             side.last_error = None;
             entry.phase = derive_phase(entry);
-        })
-        .await;
+        });
     }
 
     pub async fn set_forward_generation(&self, forward_id: &str, generation: u64) {
-        self.update_entry(forward_id, |entry| {
+        self.mutate_entry(forward_id, |entry| {
             if entry.status != ForwardPortStatus::Open {
                 return;
             }
             entry.listen_state.generation = generation;
             entry.connect_state.generation = generation;
-        })
-        .await;
+        });
     }
 
     pub async fn drain(&self) -> Vec<PortForwardRecord> {
@@ -421,6 +467,16 @@ impl PortForwardStore {
 
     fn state_write(&self) -> RwLockWriteGuard<'_, PortForwardStoreState> {
         write_store_state(&self.state)
+    }
+
+    fn mutate_entry(&self, forward_id: &str, mutate: impl FnOnce(&mut ForwardPortEntry)) {
+        let mut state = self.state_write();
+        if let Some(record) = state.entries.get_mut(forward_id) {
+            let before = is_reconnecting_entry(record.entry());
+            mutate(record.entry_mut());
+            let after = is_reconnecting_entry(record.entry());
+            adjust_reconnecting_count(&mut state.reconnecting_count, before, after);
+        }
     }
 }
 
@@ -518,6 +574,10 @@ fn mark_side_reconnecting(side: &mut ForwardPortSideState, error: String) {
 fn mark_side_ready(side: &mut ForwardPortSideState) {
     side.health = ForwardPortSideHealth::Ready;
     side.last_error = None;
+}
+
+fn release_active_tcp_streams(entry: &mut ForwardPortEntry, count: u64) {
+    entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(count);
 }
 
 fn is_reconnecting_entry(entry: &ForwardPortEntry) -> bool {
@@ -895,6 +955,44 @@ mod tests {
             second.last_error.as_deref(),
             Some("port_forward_limit_exceeded: broker reconnecting forward limit reached")
         );
+    }
+
+    #[tokio::test]
+    async fn active_tcp_stream_accounting_is_store_owned() {
+        let store = PortForwardStore::default();
+        store.insert(test_record("fwd_streams")).await;
+
+        assert!(store.try_reserve_active_tcp_stream("fwd_streams", 1).await);
+        assert!(!store.try_reserve_active_tcp_stream("fwd_streams", 1).await);
+        let reserved = store.list(&filter_one("fwd_streams")).await.remove(0);
+        assert_eq!(reserved.active_tcp_streams, 1);
+
+        store.release_active_tcp_stream("fwd_streams").await;
+        let released = store.list(&filter_one("fwd_streams")).await.remove(0);
+        assert_eq!(released.active_tcp_streams, 0);
+    }
+
+    #[tokio::test]
+    async fn drop_accounting_updates_public_counters_without_underflow() {
+        let store = PortForwardStore::default();
+        store.insert(test_record("fwd_drops")).await;
+
+        store.record_dropped_tcp_streams("fwd_drops", 2).await;
+        store.record_dropped_udp_datagrams("fwd_drops", 3).await;
+        assert!(store.try_reserve_active_tcp_stream("fwd_drops", 2).await);
+        store
+            .record_dropped_tcp_streams_and_release_active("fwd_drops", 5)
+            .await;
+
+        let counted = store.list(&filter_one("fwd_drops")).await.remove(0);
+        assert_eq!(counted.dropped_tcp_streams, 7);
+        assert_eq!(counted.dropped_udp_datagrams, 3);
+        assert_eq!(counted.active_tcp_streams, 0);
+
+        store.record_dropped_active_tcp_stream("fwd_drops").await;
+        let active_drop = store.list(&filter_one("fwd_drops")).await.remove(0);
+        assert_eq!(active_drop.dropped_tcp_streams, 8);
+        assert_eq!(active_drop.active_tcp_streams, 0);
     }
 
     #[tokio::test]

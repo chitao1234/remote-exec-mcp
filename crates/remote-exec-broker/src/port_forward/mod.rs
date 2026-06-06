@@ -43,15 +43,13 @@ async fn apply_forward_drop_report(
 ) -> anyhow::Result<()> {
     let meta: ForwardDropMeta = serde_json::from_slice(&frame.meta)?;
     let count = meta.count.max(1);
-    store
-        .update_entry(forward_id, |entry| match meta.kind {
-            ForwardDropKind::TcpStream => {
-                entry.dropped_tcp_streams = entry.dropped_tcp_streams.saturating_add(count);
-            }
-            ForwardDropKind::UdpDatagram => {
-                entry.dropped_udp_datagrams = entry.dropped_udp_datagrams.saturating_add(count);
-            }
-        })
-        .await;
+    match meta.kind {
+        ForwardDropKind::TcpStream => {
+            store.record_dropped_tcp_streams(forward_id, count).await;
+        }
+        ForwardDropKind::UdpDatagram => {
+            store.record_dropped_udp_datagrams(forward_id, count).await;
+        }
+    }
     Ok(())
 }

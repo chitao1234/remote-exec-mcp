@@ -171,62 +171,41 @@ impl ForwardRuntime {
 
     pub(super) async fn record_dropped_datagram(&self) {
         self.store
-            .update_entry(self.forward_id().as_str(), |entry| {
-                entry.dropped_udp_datagrams += 1;
-            })
+            .record_dropped_udp_datagrams(self.forward_id().as_str(), 1)
             .await;
     }
 
     pub(super) async fn record_dropped_stream(&self) {
         self.store
-            .update_entry(self.forward_id().as_str(), |entry| {
-                entry.dropped_tcp_streams += 1;
-            })
+            .record_dropped_tcp_streams(self.forward_id().as_str(), 1)
             .await;
     }
 
     pub(super) async fn record_dropped_streams_and_release_active(&self, count: u64) {
-        if count == 0 {
-            return;
-        }
         self.store
-            .update_entry(self.forward_id().as_str(), |entry| {
-                entry.dropped_tcp_streams += count;
-                entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(count);
-            })
+            .record_dropped_tcp_streams_and_release_active(self.forward_id().as_str(), count)
             .await;
     }
 
     pub(super) async fn release_active_stream(&self) {
         self.store
-            .update_entry(self.forward_id().as_str(), |entry| {
-                entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
-            })
+            .release_active_tcp_stream(self.forward_id().as_str())
             .await;
     }
 
     pub(super) async fn record_dropped_active_stream(&self) {
         self.store
-            .update_entry(self.forward_id().as_str(), |entry| {
-                entry.dropped_tcp_streams += 1;
-                entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
-            })
+            .record_dropped_active_tcp_stream(self.forward_id().as_str())
             .await;
     }
 
     pub(super) async fn try_reserve_active_stream(&self) -> bool {
-        let mut reserved = false;
-        let mut saw_entry = false;
         self.store
-            .update_entry(self.forward_id().as_str(), |entry| {
-                saw_entry = true;
-                if entry.active_tcp_streams < self.limits.max_active_tcp_streams {
-                    entry.active_tcp_streams += 1;
-                    reserved = true;
-                }
-            })
-            .await;
-        !saw_entry || reserved
+            .try_reserve_active_tcp_stream(
+                self.forward_id().as_str(),
+                self.limits.max_active_tcp_streams,
+            )
+            .await
     }
 
     pub(super) async fn mark_reconnecting(
