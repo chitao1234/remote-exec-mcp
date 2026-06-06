@@ -1,4 +1,3 @@
-mod capabilities;
 mod dispatch;
 mod handle;
 

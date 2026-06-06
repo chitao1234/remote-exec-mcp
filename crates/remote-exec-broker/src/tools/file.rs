@@ -28,9 +28,8 @@ pub async fn read(state: &crate::BrokerState, input: ReadInput) -> anyhow::Resul
         max_bytes = state.tools.file.max_read_bytes,
         "file read requested"
     );
-    let target = state.file_tool_target(&target_name).await?;
-    let response = target
-        .file_read_checked(
+    let response = state
+        .file_read(
             &target_name,
             &FileReadRequest {
                 path: input.file_path.clone(),
@@ -58,9 +57,8 @@ pub async fn write(
         content_len = input.content.len(),
         "file write requested"
     );
-    let target = state.file_tool_target(&target_name).await?;
-    let response = target
-        .file_write_checked(
+    let response = state
+        .file_write(
             &target_name,
             &FileWriteRequest {
                 path: input.file_path.clone(),
@@ -94,9 +92,8 @@ pub async fn edit(state: &crate::BrokerState, input: EditInput) -> anyhow::Resul
         replace_all = input.replace_all,
         "file edit requested"
     );
-    let target = state.file_tool_target(&target_name).await?;
-    let response = target
-        .file_edit_checked(
+    let response = state
+        .file_edit(
             &target_name,
             &FileEditRequest {
                 path: input.file_path.clone(),

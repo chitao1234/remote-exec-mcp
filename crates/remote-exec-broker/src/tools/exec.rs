@@ -38,7 +38,7 @@ pub async fn exec_command(
         cmd_preview = %cmd_preview,
         "exec command requested"
     );
-    let (target, path_policy) = state.exec_target(&input.target).await?;
+    let path_policy = state.exec_path_policy(&input.target).await?;
 
     if let Some(output) =
         maybe_intercepted_exec_output(state, &input, &target_name, path_policy).await?
@@ -55,7 +55,7 @@ pub async fn exec_command(
         max_output_tokens: input.max_output_tokens,
         login: input.login,
     };
-    let response = target.exec_start_checked(&input.target, &request).await?;
+    let response = state.exec_start(&input.target, &request).await?;
     validate_exec_response(&response)?;
 
     let session_command = input.cmd.clone();

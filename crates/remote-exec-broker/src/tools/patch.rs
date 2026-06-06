@@ -9,9 +9,8 @@ pub async fn forward_patch(
     patch: String,
     workdir: Option<String>,
 ) -> anyhow::Result<String> {
-    let target = state.patch_target(target_name).await?;
-    let response = target
-        .patch_apply_checked(target_name, &PatchApplyRequest { patch, workdir })
+    let response = state
+        .patch_apply(target_name, &PatchApplyRequest { patch, workdir })
         .await?;
     log_patch_audit(target_name, &response);
     Ok(response.output)

@@ -4,7 +4,11 @@ use std::time::Duration;
 use anyhow::Context;
 use remote_exec_host::sandbox::CompiledFilesystemSandbox;
 use remote_exec_proto::path::PathPolicy;
-use remote_exec_proto::rpc::{ExecResponse, ExecWriteRequest, RpcErrorCode};
+use remote_exec_proto::rpc::{
+    ExecResponse, ExecStartRequest, ExecWriteRequest, FileEditRequest, FileEditResponse,
+    FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse, ImageReadRequest,
+    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, RpcErrorCode,
+};
 use remote_exec_proto::transfer::TransferLimits;
 
 use crate::{
@@ -120,24 +124,40 @@ impl BrokerState {
         Ok(handle)
     }
 
-    pub(crate) async fn exec_target(
-        &self,
-        name: &str,
-    ) -> anyhow::Result<(&TargetHandle, PathPolicy)> {
+    pub(crate) async fn exec_path_policy(&self, name: &str) -> anyhow::Result<PathPolicy> {
         let target = self.verified_target(name).await?;
         let info = target.cached_daemon_info_after_verification(name).await?;
-        Ok((target, info.path_policy()))
+        Ok(info.path_policy())
     }
 
-    pub(crate) async fn patch_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
-        self.verified_target(name).await
+    pub(crate) async fn exec_start(
+        &self,
+        name: &str,
+        req: &ExecStartRequest,
+    ) -> anyhow::Result<ExecResponse> {
+        let target = self.verified_target(name).await?;
+        normalize_tool_result(target.exec_start(req).await, RpcToolErrorMode::Full)
     }
 
-    pub(crate) async fn image_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
-        self.verified_target(name).await
+    pub(crate) async fn patch_apply(
+        &self,
+        name: &str,
+        req: &PatchApplyRequest,
+    ) -> anyhow::Result<PatchApplyResponse> {
+        let target = self.verified_target(name).await?;
+        normalize_tool_result(target.patch_apply(req).await, RpcToolErrorMode::Full)
     }
 
-    pub(crate) async fn session_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
+    pub(crate) async fn image_read(
+        &self,
+        name: &str,
+        req: &ImageReadRequest,
+    ) -> anyhow::Result<ImageReadResponse> {
+        let target = self.verified_target(name).await?;
+        normalize_tool_result(target.image_read(req).await, RpcToolErrorMode::MessageOnly)
+    }
+
+    async fn session_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
         self.verified_target(name).await
     }
 
@@ -230,7 +250,7 @@ impl BrokerState {
         })
     }
 
-    pub(crate) async fn file_tool_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
+    async fn file_tool_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
         let target = self.verified_target(name).await?;
         let info = target.cached_daemon_info_after_verification(name).await?;
         let Some(version) = info.capabilities.file_tool_protocol_version else {
@@ -241,6 +261,33 @@ impl BrokerState {
             "target `{name}` does not support file tool protocol version 1"
         );
         Ok(target)
+    }
+
+    pub(crate) async fn file_read(
+        &self,
+        name: &str,
+        req: &FileReadRequest,
+    ) -> anyhow::Result<FileReadResponse> {
+        let target = self.file_tool_target(name).await?;
+        normalize_tool_result(target.file_read(req).await, RpcToolErrorMode::Full)
+    }
+
+    pub(crate) async fn file_write(
+        &self,
+        name: &str,
+        req: &FileWriteRequest,
+    ) -> anyhow::Result<FileWriteResponse> {
+        let target = self.file_tool_target(name).await?;
+        normalize_tool_result(target.file_write(req).await, RpcToolErrorMode::Full)
+    }
+
+    pub(crate) async fn file_edit(
+        &self,
+        name: &str,
+        req: &FileEditRequest,
+    ) -> anyhow::Result<FileEditResponse> {
+        let target = self.file_tool_target(name).await?;
+        normalize_tool_result(target.file_edit(req).await, RpcToolErrorMode::Full)
     }
 
     pub(crate) async fn invalidate_target_exec_sessions(&self, target: &str) {

@@ -21,9 +21,8 @@ pub async fn view_image(
         has_workdir = input.workdir.is_some(),
         "image read requested"
     );
-    let target = state.image_target(&input.target).await?;
-    let response = target
-        .image_read_checked(
+    let response = state
+        .image_read(
             &input.target,
             &ImageReadRequest {
                 path: input.path,
