@@ -47,7 +47,7 @@ pub async fn transfer_files(
         &sources,
         CompletedTransfer {
             requested_destination: plan.requested_destination.clone(),
-            destination: plan.destination.clone(),
+            destination: plan.destination.endpoint().clone(),
             destination_mode: plan.destination_mode.clone(),
             symlink_mode: plan.symlink_mode.clone(),
             source_type,

@@ -8,11 +8,11 @@ use tempfile::TempDir;
 use super::stub_daemon::{
     ExecStartBehavior, ExecWriteBehavior, StubDaemonState, StubFileEditResponse,
     StubFileReadResponse, StubFileWriteResponse, StubImageReadResponse, StubTransferExportCapture,
-    StubTransferImportCapture, set_exec_start_behavior, set_exec_write_behavior,
-    set_file_edit_response, set_file_read_response, set_file_write_response,
-    set_image_read_response, set_transfer_export_directory_response,
-    set_transfer_export_file_response, set_transfer_path_info_error_response,
-    set_transfer_path_info_response,
+    StubTransferImportCapture, set_daemon_instance_after_next_transfer_path_info,
+    set_exec_start_behavior, set_exec_write_behavior, set_file_edit_response,
+    set_file_read_response, set_file_write_response, set_image_read_response,
+    set_transfer_export_directory_response, set_transfer_export_file_response,
+    set_transfer_path_info_error_response, set_transfer_path_info_response,
 };
 use super::test_helpers::DEFAULT_TEST_TARGET;
 
@@ -137,6 +137,14 @@ impl BrokerFixture {
 
     pub async fn last_transfer_export(&self) -> Option<StubTransferExportCapture> {
         self.stub_state.last_transfer_export.lock().await.clone()
+    }
+
+    pub async fn set_daemon_instance_after_next_transfer_path_info(
+        &self,
+        daemon_instance_id: &str,
+    ) {
+        set_daemon_instance_after_next_transfer_path_info(&self.stub_state, daemon_instance_id)
+            .await;
     }
 
     pub async fn set_transfer_export_file_response(&self, body: &[u8]) {

@@ -23,10 +23,42 @@ pub(super) struct TransferPlanningContext {
 pub(super) struct PlannedSource {
     pub(super) endpoint: TransferEndpoint,
     pub(super) policy: PathPolicy,
+    context: EndpointTargetContext,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EndpointTargetContext {
+#[derive(Debug, Clone)]
+pub(super) struct PlannedEndpoint {
+    endpoint: TransferEndpoint,
+    context: EndpointTargetContext,
+}
+
+impl PlannedEndpoint {
+    pub(super) fn new(
+        planning: &TransferPlanningContext,
+        endpoint: TransferEndpoint,
+    ) -> anyhow::Result<Self> {
+        let context = planning.endpoint_context(&endpoint)?;
+        Ok(Self { endpoint, context })
+    }
+
+    pub(super) fn endpoint(&self) -> &TransferEndpoint {
+        &self.endpoint
+    }
+
+    pub(super) fn context(&self) -> &EndpointTargetContext {
+        &self.context
+    }
+
+    pub(super) fn new_for_source(source: &PlannedSource) -> Self {
+        Self {
+            endpoint: source.endpoint.clone(),
+            context: source.context.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum EndpointTargetContext {
     Local {
         policy: PathPolicy,
     },
@@ -34,6 +66,7 @@ enum EndpointTargetContext {
         policy: PathPolicy,
         accepts_single_slash_windows_absolute: bool,
         supports_transfer_compression: bool,
+        daemon_instance_id: String,
     },
 }
 
@@ -98,19 +131,21 @@ impl TransferPlanningContext {
         sources
             .iter()
             .map(|source| {
+                let context = self.endpoint_context(source)?;
                 Ok(PlannedSource {
                     endpoint: source.clone(),
-                    policy: self.endpoint_policy(source)?,
+                    policy: context.policy(),
+                    context,
                 })
             })
             .collect()
     }
 
-    fn endpoint_context(
+    pub(super) fn endpoint_context(
         &self,
         endpoint: &TransferEndpoint,
     ) -> anyhow::Result<EndpointTargetContext> {
-        self.targets.get(&endpoint.target).copied().ok_or_else(|| {
+        self.targets.get(&endpoint.target).cloned().ok_or_else(|| {
             anyhow::anyhow!(
                 "missing transfer planning context for target `{}`",
                 endpoint.target
@@ -144,7 +179,7 @@ pub(super) fn ensure_distinct_endpoints(
     let policy = planning.endpoint_policy(source)?;
     let context = planning.endpoint_context(source)?;
     anyhow::ensure!(
-        !paths_match_for_preflight(context, policy, &source.path, &destination.path),
+        !paths_match_for_preflight(&context, policy, &source.path, &destination.path),
         "source and destination must differ"
     );
     Ok(())
@@ -173,7 +208,7 @@ pub(super) fn ensure_multi_source_basenames_are_unique(
         let candidate = destination_policy.join(&destination.path, &basename);
         anyhow::ensure!(
             !seen_paths.iter().any(|existing| paths_match_for_preflight(
-                destination_context,
+                &destination_context,
                 destination_policy,
                 existing,
                 &candidate
@@ -201,7 +236,7 @@ pub(super) async fn resolve_destination(
         TransferDestinationMode::Auto => {
             let context = planning.endpoint_context(destination)?;
             if sources.len() == 1
-                && (path_looks_like_directory(context, &destination.path)
+                && (path_looks_like_directory(&context, &destination.path)
                     || existing_destination_is_directory(state, destination).await?)
             {
                 resolve_into_directory_destination(planning, sources, destination)?
@@ -233,10 +268,10 @@ fn resolve_into_directory_destination(
                 source.path
             )
         })?;
-        let candidate = join_child_for_context(destination_context, &destination.path, &basename);
+        let candidate = join_child_for_context(&destination_context, &destination.path, &basename);
         anyhow::ensure!(
             !candidates.iter().any(|existing| paths_match_for_preflight(
-                destination_context,
+                &destination_context,
                 destination_policy,
                 existing,
                 &candidate
@@ -253,7 +288,7 @@ fn resolve_into_directory_destination(
 }
 
 fn paths_match_for_preflight(
-    context: EndpointTargetContext,
+    context: &EndpointTargetContext,
     policy: PathPolicy,
     left: &str,
     right: &str,
@@ -266,7 +301,7 @@ fn paths_match_for_preflight(
     }
 }
 
-fn join_child_for_context(context: EndpointTargetContext, base: &str, child: &str) -> String {
+fn join_child_for_context(context: &EndpointTargetContext, base: &str, child: &str) -> String {
     if matches!(
         context,
         EndpointTargetContext::Remote {
@@ -288,7 +323,7 @@ fn join_child_for_context(context: EndpointTargetContext, base: &str, child: &st
     }
 }
 
-fn path_looks_like_directory(context: EndpointTargetContext, path: &str) -> bool {
+fn path_looks_like_directory(context: &EndpointTargetContext, path: &str) -> bool {
     if path.ends_with('/') {
         return true;
     }
@@ -386,16 +421,26 @@ impl EndpointTargetContext {
             policy: info.path_policy(),
             accepts_single_slash_windows_absolute,
             supports_transfer_compression: info.supports_transfer_compression,
+            daemon_instance_id: info.daemon_instance_id,
         })
     }
 
-    fn policy(self) -> PathPolicy {
+    pub(super) fn planned_daemon_instance_id(&self) -> Option<&str> {
         match self {
-            Self::Local { policy } | Self::Remote { policy, .. } => policy,
+            Self::Local { .. } => None,
+            Self::Remote {
+                daemon_instance_id, ..
+            } => Some(daemon_instance_id),
         }
     }
 
-    fn is_absolute_path(self, path: &str) -> bool {
+    fn policy(&self) -> PathPolicy {
+        match self {
+            Self::Local { policy } | Self::Remote { policy, .. } => *policy,
+        }
+    }
+
+    fn is_absolute_path(&self, path: &str) -> bool {
         self.policy().is_absolute(path)
             || matches!(
                 self,
@@ -406,13 +451,13 @@ impl EndpointTargetContext {
             )
     }
 
-    fn supports_transfer_compression(self) -> Option<bool> {
+    fn supports_transfer_compression(&self) -> Option<bool> {
         match self {
             Self::Local { .. } => None,
             Self::Remote {
                 supports_transfer_compression,
                 ..
-            } => Some(supports_transfer_compression),
+            } => Some(*supports_transfer_compression),
         }
     }
 }

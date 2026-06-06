@@ -115,6 +115,16 @@ pub(crate) async fn set_transfer_path_info_error_response(
         StubTransferPathInfoResponse::Error { status, body };
 }
 
+pub(crate) async fn set_daemon_instance_after_next_transfer_path_info(
+    state: &StubDaemonState,
+    daemon_instance_id: &str,
+) {
+    *state
+        .daemon_instance_after_next_transfer_path_info
+        .lock()
+        .await = Some(daemon_instance_id.to_string());
+}
+
 pub(super) async fn transfer_export(
     State(state): State<StubDaemonState>,
     headers: HeaderMap,
@@ -164,10 +174,19 @@ pub(super) async fn transfer_path_info(
     State(state): State<StubDaemonState>,
     Json(_req): Json<TransferPathInfoRequest>,
 ) -> Result<Json<TransferPathInfoResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    match state.transfer_path_info_response.lock().await.clone() {
+    let response = match state.transfer_path_info_response.lock().await.clone() {
         StubTransferPathInfoResponse::Success(response) => Ok(Json(response)),
         StubTransferPathInfoResponse::Error { status, body } => Err((status, Json(body))),
+    };
+    if let Some(daemon_instance_id) = state
+        .daemon_instance_after_next_transfer_path_info
+        .lock()
+        .await
+        .take()
+    {
+        *state.daemon_instance_id.lock().await = daemon_instance_id;
     }
+    response
 }
 
 pub(super) async fn transfer_import(

@@ -391,6 +391,10 @@ impl RemoteTargetHandle<'_> {
         self.handle.cached_daemon_info().await
     }
 
+    pub(crate) async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {
+        self.handle.target_info().await
+    }
+
     pub(crate) async fn transfer_export_to_file(
         &self,
         req: &TransferExportRequest,

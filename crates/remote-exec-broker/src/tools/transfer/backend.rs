@@ -15,8 +15,9 @@ use remote_exec_proto::transfer::{TransferLimits, TransferSourceType};
 use crate::daemon_client::{
     DaemonClientError, RpcToolErrorMode, TransferExportResponse, normalize_tool_result,
 };
-use crate::local::BrokerHostOrTarget;
 use crate::target::RemoteTargetHandle;
+
+use super::endpoints::PlannedEndpoint;
 
 pub(super) type ArchiveStream = BoxStream<'static, Result<Bytes, std::io::Error>>;
 
@@ -92,20 +93,45 @@ pub(super) async fn backend_for_endpoint<'a>(
     state: &'a crate::BrokerState,
     endpoint: &'a TransferEndpoint,
 ) -> anyhow::Result<TransferEndpointBackend<'a>> {
-    match BrokerHostOrTarget::from_transfer_endpoint(endpoint) {
-        BrokerHostOrTarget::BrokerHost => Ok(TransferEndpointBackend::BrokerHost(
-            BrokerHostTransferBackend {
-                sandbox: state.host_sandbox.as_ref(),
-                limits: state.transfer_limits,
-            },
-        )),
-        BrokerHostOrTarget::Target(target_name) => {
-            let target = state.verified_remote_target(target_name).await?;
-            Ok(TransferEndpointBackend::Remote(RemoteTransferBackend {
-                target,
-            }))
+    Ok(
+        match crate::local::BrokerHostOrTarget::from_transfer_endpoint(endpoint) {
+            crate::local::BrokerHostOrTarget::BrokerHost => broker_host_backend(state),
+            crate::local::BrokerHostOrTarget::Target(target_name) => {
+                let target = state.verified_remote_target(target_name).await?;
+                TransferEndpointBackend::Remote(RemoteTransferBackend { target })
+            }
+        },
+    )
+}
+
+pub(super) async fn backend_for_planned_endpoint<'a>(
+    state: &'a crate::BrokerState,
+    endpoint: &'a PlannedEndpoint,
+) -> anyhow::Result<TransferEndpointBackend<'a>> {
+    let raw_endpoint = endpoint.endpoint();
+    Ok(match endpoint.context().planned_daemon_instance_id() {
+        None => broker_host_backend(state),
+        Some(planned_daemon_instance_id) => {
+            let target = state.verified_remote_target(&raw_endpoint.target).await?;
+            let current = target
+                .target_info()
+                .await
+                .map_err(|err| err.into_tool_error(RpcToolErrorMode::MessageOnly))?;
+            anyhow::ensure!(
+                current.daemon_instance_id == planned_daemon_instance_id,
+                "target `{}` daemon instance changed during transfer planning",
+                raw_endpoint.target
+            );
+            TransferEndpointBackend::Remote(RemoteTransferBackend { target })
         }
-    }
+    })
+}
+
+fn broker_host_backend(state: &crate::BrokerState) -> TransferEndpointBackend<'_> {
+    TransferEndpointBackend::BrokerHost(BrokerHostTransferBackend {
+        sandbox: state.host_sandbox.as_ref(),
+        limits: state.transfer_limits,
+    })
 }
 
 pub(super) struct BrokerHostTransferBackend<'a> {

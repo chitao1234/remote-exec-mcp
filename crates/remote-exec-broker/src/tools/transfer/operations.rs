@@ -6,8 +6,8 @@ use remote_exec_proto::transfer::{
     TransferCompression, TransferOverwrite, TransferSourceType, TransferSymlinkMode,
 };
 
-use super::backend::{TransferArchiveStream, TransferBackend, backend_for_endpoint};
-use super::endpoints::PlannedSource;
+use super::backend::{TransferArchiveStream, TransferBackend, backend_for_planned_endpoint};
+use super::endpoints::{PlannedEndpoint, PlannedSource};
 use super::plan::{TransferExecutionOptions, TransferPlan};
 
 struct ExportedSourceArchive {
@@ -22,21 +22,19 @@ pub(super) async fn execute_transfer_plan(
 ) -> anyhow::Result<(TransferSourceType, TransferImportResponse)> {
     let options = plan.execution_options();
     match plan.sources.as_slice() {
-        [source] => {
-            transfer_single_source(state, &source.endpoint, &plan.destination, options).await
-        }
+        [source] => transfer_single_source(state, source, &plan.destination, options).await,
         _ => transfer_multiple_sources(state, &plan.sources, &plan.destination, options).await,
     }
 }
 
 async fn transfer_single_source(
     state: &crate::BrokerState,
-    source: &TransferEndpoint,
-    destination: &TransferEndpoint,
+    source: &PlannedSource,
+    destination: &PlannedEndpoint,
     options: TransferExecutionOptions<'_>,
 ) -> anyhow::Result<(TransferSourceType, TransferImportResponse)> {
     let export_request = build_export_request(
-        source,
+        &source.endpoint,
         options.compression,
         options.exclude,
         options.symlink_mode,
@@ -44,7 +42,7 @@ async fn transfer_single_source(
     let exported = export_single_source(state, source, &export_request).await?;
     let source_type = exported.source_type().clone();
     let request = build_import_request(
-        destination,
+        destination.endpoint(),
         options.overwrite,
         source_type.clone(),
         options.compression,
@@ -58,7 +56,7 @@ async fn transfer_single_source(
 async fn transfer_multiple_sources(
     state: &crate::BrokerState,
     sources: &[PlannedSource],
-    destination: &TransferEndpoint,
+    destination: &PlannedEndpoint,
     options: TransferExecutionOptions<'_>,
 ) -> anyhow::Result<(TransferSourceType, TransferImportResponse)> {
     let mut exported_sources = Vec::with_capacity(sources.len());
@@ -67,7 +65,7 @@ async fn transfer_multiple_sources(
         let temp_path = temp.into_temp_path();
         let exported = export_endpoint_to_archive(
             state,
-            &source.endpoint,
+            source,
             temp_path.as_ref(),
             options.compression,
             options.exclude,
@@ -101,7 +99,7 @@ async fn transfer_multiple_sources(
 
     let source_type = TransferSourceType::Multiple;
     let request = build_import_request(
-        destination,
+        destination.endpoint(),
         options.overwrite,
         source_type.clone(),
         options.compression,
@@ -129,14 +127,15 @@ fn build_export_request(
 
 async fn export_endpoint_to_archive(
     state: &crate::BrokerState,
-    endpoint: &TransferEndpoint,
+    source: &PlannedSource,
     archive_path: &std::path::Path,
     compression: &TransferCompression,
     exclude: &[String],
     symlink_mode: &TransferSymlinkMode,
 ) -> anyhow::Result<super::backend::ExportedArchive> {
-    let request = build_export_request(endpoint, compression, exclude, symlink_mode);
-    backend_for_endpoint(state, endpoint)
+    let request = build_export_request(&source.endpoint, compression, exclude, symlink_mode);
+    let endpoint = PlannedEndpoint::new_for_source(source);
+    backend_for_planned_endpoint(state, &endpoint)
         .await?
         .export_to_file(&request, archive_path)
         .await
@@ -144,10 +143,11 @@ async fn export_endpoint_to_archive(
 
 async fn export_single_source(
     state: &crate::BrokerState,
-    source: &TransferEndpoint,
+    source: &PlannedSource,
     request: &TransferExportRequest,
 ) -> anyhow::Result<TransferArchiveStream> {
-    backend_for_endpoint(state, source)
+    let endpoint = PlannedEndpoint::new_for_source(source);
+    backend_for_planned_endpoint(state, &endpoint)
         .await?
         .export_stream(request)
         .await
@@ -156,10 +156,10 @@ async fn export_single_source(
 async fn import_archive_to_endpoint(
     state: &crate::BrokerState,
     archive_path: &std::path::Path,
-    endpoint: &TransferEndpoint,
+    endpoint: &PlannedEndpoint,
     request: &TransferImportRequest,
 ) -> anyhow::Result<TransferImportResponse> {
-    backend_for_endpoint(state, endpoint)
+    backend_for_planned_endpoint(state, endpoint)
         .await?
         .import_from_file(archive_path, request)
         .await
@@ -167,11 +167,11 @@ async fn import_archive_to_endpoint(
 
 async fn import_single_source(
     state: &crate::BrokerState,
-    destination: &TransferEndpoint,
+    destination: &PlannedEndpoint,
     request: &TransferImportRequest,
     exported: TransferArchiveStream,
 ) -> anyhow::Result<TransferImportResponse> {
-    backend_for_endpoint(state, destination)
+    backend_for_planned_endpoint(state, destination)
         .await?
         .import_stream(request, exported)
         .await

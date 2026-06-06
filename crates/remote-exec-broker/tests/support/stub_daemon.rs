@@ -70,8 +70,9 @@ pub(crate) use stub_daemon_transfer::{
     StubTransferExportCapture, StubTransferImportCapture, StubTransferPathInfoResponse,
 };
 pub(crate) use stub_daemon_transfer::{
-    set_transfer_export_directory_response, set_transfer_export_file_response,
-    set_transfer_path_info_error_response, set_transfer_path_info_response,
+    set_daemon_instance_after_next_transfer_path_info, set_transfer_export_directory_response,
+    set_transfer_export_file_response, set_transfer_path_info_error_response,
+    set_transfer_path_info_response,
 };
 
 const STUB_READY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -109,6 +110,7 @@ pub(crate) struct StubDaemonState {
     pub(super) file_edit_response: Arc<Mutex<StubFileEditResponse>>,
     transfer_export_response: Arc<Mutex<stub_daemon_transfer::StubTransferExportResponse>>,
     transfer_path_info_response: Arc<Mutex<StubTransferPathInfoResponse>>,
+    pub(super) daemon_instance_after_next_transfer_path_info: Arc<Mutex<Option<String>>>,
     port_forward: StubPortForwardState,
     background_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
@@ -175,6 +177,7 @@ pub(super) fn stub_daemon_state(
         transfer_path_info_response: Arc::new(Mutex::new(
             stub_daemon_transfer::default_transfer_path_info_response(),
         )),
+        daemon_instance_after_next_transfer_path_info: Arc::new(Mutex::new(None)),
         port_forward: StubPortForwardState::new(target),
         background_tasks: Arc::new(Mutex::new(Vec::new())),
     }

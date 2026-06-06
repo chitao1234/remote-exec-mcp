@@ -433,6 +433,43 @@ async fn transfer_files_auto_mode_does_not_treat_message_only_unknown_endpoint_a
 }
 
 #[tokio::test]
+async fn transfer_files_rejects_remote_destination_when_daemon_instance_changes_after_planning() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let source = fixture._tempdir.path().join("artifact.txt");
+    std::fs::write(&source, "hello stale plan\n").unwrap();
+    fixture
+        .set_transfer_path_info_response(remote_exec_proto::rpc::TransferPathInfoResponse {
+            exists: true,
+            is_directory: true,
+        })
+        .await;
+    fixture
+        .set_daemon_instance_after_next_transfer_path_info(
+            "daemon-instance-after-transfer-planning",
+        )
+        .await;
+    let error = fixture
+        .call_tool_error(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": XP_TEST_TARGET,
+                    "path": "/srv/inbox"
+                },
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    assert!(error.contains("daemon instance changed during transfer planning"));
+    assert!(fixture.last_transfer_import().await.is_none());
+}
+
+#[tokio::test]
 async fn transfer_files_uses_bearer_auth_for_remote_imports() {
     let fixture =
         support::spawners::spawn_broker_with_stub_daemon_http_auth(TEST_BEARER_SECRET).await;

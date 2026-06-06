@@ -2,8 +2,9 @@ use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint, Trans
 use remote_exec_proto::transfer::{TransferCompression, TransferOverwrite, TransferSymlinkMode};
 
 use super::endpoints::{
-    PlannedSource, TransferPlanningContext, ensure_absolute, ensure_distinct_endpoints,
-    ensure_multi_source_basenames_are_unique, negotiate_transfer_compression, resolve_destination,
+    PlannedEndpoint, PlannedSource, TransferPlanningContext, ensure_absolute,
+    ensure_distinct_endpoints, ensure_multi_source_basenames_are_unique,
+    negotiate_transfer_compression, resolve_destination,
 };
 
 pub(super) struct TransferPlanRequest {
@@ -19,7 +20,7 @@ pub(super) struct TransferPlanRequest {
 pub(super) struct TransferPlan {
     pub(super) sources: Vec<PlannedSource>,
     pub(super) requested_destination: TransferEndpoint,
-    pub(super) destination: TransferEndpoint,
+    pub(super) destination: PlannedEndpoint,
     pub(super) overwrite: TransferOverwrite,
     pub(super) destination_mode: TransferDestinationMode,
     pub(super) compression: TransferCompression,
@@ -119,6 +120,7 @@ pub(super) async fn plan_transfer(
         ensure_distinct_endpoints(&planning, source, &destination)?;
     }
     let sources = planning.planned_sources(&request.sources)?;
+    let destination = PlannedEndpoint::new(&planning, destination)?;
 
     Ok(TransferPlan {
         sources,
