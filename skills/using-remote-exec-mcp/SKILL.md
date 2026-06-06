@@ -69,17 +69,18 @@ The MCP tools and the `remote-exec` CLI call the same broker behavior but do
 not use the same input syntax.
 
 - When calling MCP tools directly, use the JSON object shapes shown under
-  **MCP Tools**. Do not pass CLI shorthand strings.
+  **MCP Tools**. NEVER pass CLI shorthand strings in MCP tool calls.
 - When using the `remote-exec` CLI, use the flag syntax shown under
   **`remote-exec` CLI**. The CLI accepts convenience shorthands and converts
   them into MCP-shaped requests.
 - `transfer_files` MCP endpoints are objects such as
-  `{"target": "xp", "path": "C:/WINDOWS/win.ini"}`. The CLI shorthand
-  `xp:C:/WINDOWS/win.ini` is only for `remote-exec transfer-files`.
+  `{"target": "xp", "path": "C:/WINDOWS/win.ini"}`. NEVER send
+  `xp:C:/WINDOWS/win.ini` or any other `target:path` CLI shorthand in MCP JSON;
+  that shorthand is only for `remote-exec transfer-files`.
 - `forward_ports` MCP specs are objects with `listen_endpoint`,
-  `connect_endpoint`, and `protocol`. The CLI shorthand
-  `tcp:127.0.0.1:15432=127.0.0.1:5432` is only for
-  `remote-exec forward-ports`.
+  `connect_endpoint`, and `protocol`. NEVER send
+  `tcp:127.0.0.1:15432=127.0.0.1:5432` or any other forward CLI shorthand in
+  MCP JSON; that shorthand is only for `remote-exec forward-ports`.
 
 ## MCP Tools
 
@@ -276,8 +277,8 @@ Required:
 
 Guidance:
 
-- MCP `source`, `sources[]`, and `destination` are endpoint objects. Do not
-  send CLI shorthand strings like `"local:/tmp/source.txt"` or
+- MCP `source`, `sources[]`, and `destination` are endpoint objects. NEVER send
+  CLI shorthand strings like `"local:/tmp/source.txt"` or
   `"builder-a:/tmp/dest.txt"` as MCP endpoint values.
 - CLI equivalent:
   `remote-exec transfer-files --source local:/tmp/source.txt --destination builder-a:/tmp/dest.txt`.
