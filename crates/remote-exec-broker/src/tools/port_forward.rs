@@ -5,7 +5,7 @@ use remote_exec_proto::public::{
 };
 
 use crate::mcp_server::ToolCallOutput;
-use crate::port_forward::{PortForwardFilter, close_record, open_forward};
+use crate::port_forward::{PortForwardFilter, open_forward};
 
 pub async fn forward_ports(
     state: &crate::BrokerState,
@@ -85,12 +85,24 @@ async fn open_forwards(
 
     let listen_side = state.forwarding_side(&listen_side_name).await?;
     let connect_side = state.forwarding_side(&connect_side_name).await?;
-    enforce_open_limits(state, &listen_side_name, &connect_side_name, forwards.len()).await?;
+    let mut reservations = state
+        .port_forwards
+        .reserve_open_batch(
+            &listen_side_name,
+            &connect_side_name,
+            forwards.len(),
+            state.port_forward_limits,
+        )
+        .await?;
     let mut opened = Vec::with_capacity(forwards.len());
 
     for spec in &forwards {
+        let reservation = reservations
+            .pop()
+            .expect("reservation count should match requested forwards");
         match open_forward(
             state.port_forwards.clone(),
+            reservation.clone(),
             state.port_forward_limits.public_summary(),
             listen_side.clone(),
             connect_side.clone(),
@@ -100,8 +112,18 @@ async fn open_forwards(
         {
             Ok(forward) => opened.push(forward),
             Err(err) => {
+                state
+                    .port_forwards
+                    .release_open_reservation(reservation)
+                    .await;
+                state
+                    .port_forwards
+                    .release_open_reservations(reservations)
+                    .await;
                 for forward in opened {
-                    let _ = close_record(forward.record).await;
+                    let _ = forward
+                        .close_unregistered(state.port_forwards.clone())
+                        .await;
                 }
                 return Err(err);
             }
@@ -109,11 +131,26 @@ async fn open_forwards(
     }
 
     let mut result_entries = Vec::with_capacity(opened.len());
-    for forward in opened {
+    let mut registered_ids = Vec::with_capacity(opened.len());
+    let mut opened = opened.into_iter();
+    while let Some(forward) = opened.next() {
         result_entries.push(forward.entry().clone());
-        forward
+        let forward_id = forward.entry().forward_id.clone();
+        if let Err(err) = forward
             .register_and_start(state.port_forwards.clone())
-            .await;
+            .await
+        {
+            for remaining in opened {
+                let _ = remaining
+                    .close_unregistered(state.port_forwards.clone())
+                    .await;
+            }
+            if !registered_ids.is_empty() {
+                let _ = state.port_forwards.close(&registered_ids).await;
+            }
+            return Err(err);
+        }
+        registered_ids.push(forward_id);
     }
 
     tracing::info!(
@@ -124,30 +161,6 @@ async fn open_forwards(
     );
 
     finish_forward_ports(ForwardPortsAction::Open, result_entries)
-}
-
-async fn enforce_open_limits(
-    state: &crate::BrokerState,
-    listen_side: &str,
-    connect_side: &str,
-    requested_forwards: usize,
-) -> anyhow::Result<()> {
-    let limits = state.port_forward_limits;
-    anyhow::ensure!(
-        state.port_forwards.open_count().await + requested_forwards
-            <= limits.max_open_forwards_total,
-        "port_forward_limit_exceeded: broker open forward limit reached"
-    );
-    anyhow::ensure!(
-        state
-            .port_forwards
-            .side_pair_count(listen_side, connect_side)
-            .await
-            + requested_forwards
-            <= limits.max_forwards_per_side_pair,
-        "port_forward_limit_exceeded: broker side-pair forward limit reached"
-    );
-    Ok(())
 }
 
 async fn list_forwards(
@@ -218,65 +231,63 @@ fn format_forward_ports_text(result: &ForwardPortsResult) -> String {
         return "No port forwards.".to_string();
     }
 
-    let verb = match &result.action {
-        ForwardPortsAction::Open => "Opened",
-        ForwardPortsAction::List => "Port forwards",
-        ForwardPortsAction::Close => "Closed",
-    };
-    let lines = result
-        .forwards
+    if result.action == ForwardPortsAction::Close {
+        return format_entry_section("Closed port forwards", &result.forwards);
+    }
+
+    let (ready, not_ready): (Vec<_>, Vec<_>) =
+        result.forwards.iter().partition(|entry| is_ready(entry));
+    let mut sections = Vec::new();
+    if !ready.is_empty() {
+        sections.push(format_entry_section("Ready port forwards", &ready));
+    }
+    if !not_ready.is_empty() {
+        sections.push(format_entry_section("Not ready", &not_ready));
+    }
+    sections.join("\n")
+}
+
+fn format_entry_section<T>(heading: &str, entries: &[T]) -> String
+where
+    T: std::borrow::Borrow<ForwardPortEntry>,
+{
+    let lines = entries
         .iter()
         .map(|entry| {
-            let phase_suffix = match entry.phase {
-                ForwardPortPhase::Ready | ForwardPortPhase::Closed | ForwardPortPhase::Failed => {
-                    String::new()
-                }
-                phase => format!(", phase={}", format_phase(phase)),
-            };
+            let entry = entry.borrow();
             format!(
-                "- {}: {} on `{}` -> {} on `{}` ({}, {}){}{}",
+                "- {}: {} on `{}` -> {} on `{}` ({}){}",
                 entry.forward_id,
                 entry.listen_endpoint,
                 entry.listen_side,
                 entry.connect_endpoint,
                 entry.connect_side,
                 format_protocol(entry.protocol),
-                format_status(&entry.status),
-                phase_suffix,
-                entry
-                    .last_error
-                    .as_ref()
-                    .map(|err| format!(", error={err}"))
-                    .unwrap_or_default()
+                failed_error_suffix(entry)
             )
         })
         .collect::<Vec<_>>();
-    format!("{verb}:\n{}", lines.join("\n"))
+    format!("{heading}:\n{}", lines.join("\n"))
+}
+
+fn is_ready(entry: &ForwardPortEntry) -> bool {
+    entry.status == ForwardPortStatus::Open && entry.phase == ForwardPortPhase::Ready
+}
+
+fn failed_error_suffix(entry: &ForwardPortEntry) -> String {
+    if entry.status != ForwardPortStatus::Failed {
+        return String::new();
+    }
+    entry
+        .last_error
+        .as_ref()
+        .map(|err| format!(", error={err}"))
+        .unwrap_or_default()
 }
 
 fn format_protocol(protocol: remote_exec_proto::public::ForwardPortProtocol) -> &'static str {
     match protocol {
         remote_exec_proto::public::ForwardPortProtocol::Tcp => "tcp",
         remote_exec_proto::public::ForwardPortProtocol::Udp => "udp",
-    }
-}
-
-fn format_phase(phase: ForwardPortPhase) -> &'static str {
-    match phase {
-        ForwardPortPhase::Opening => "opening",
-        ForwardPortPhase::Ready => "ready",
-        ForwardPortPhase::Reconnecting => "reconnecting",
-        ForwardPortPhase::Draining => "draining",
-        ForwardPortPhase::Closing => "closing",
-        ForwardPortPhase::Closed => "closed",
-        ForwardPortPhase::Failed => "failed",
-    }
-}
-
-fn format_status(status: &ForwardPortStatus) -> &'static str {
-    match status {
-        ForwardPortStatus::Open => "open",
-        ForwardPortStatus::Closed => "closed",
-        ForwardPortStatus::Failed => "failed",
     }
 }

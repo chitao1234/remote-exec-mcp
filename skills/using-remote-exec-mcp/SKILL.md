@@ -347,6 +347,9 @@ Guidance:
 - `connect_endpoint` must use a nonzero port.
 - Non-loopback listen binds such as `"0.0.0.0:8080"` are allowed.
 - Keep `forward_id` and close it explicitly when done.
+- Human-readable tool text groups forwards by ready/not-ready state and shows
+  the exposed endpoints; inspect structured content for detailed phase, health,
+  reconnect, and accounting fields.
 - Treat a forward as ready only when `phase = "ready"`. Legacy
   `status = "open"` can coexist with `phase = "reconnecting"`.
 - If a forward leaves `ready`, inspect `phase` and reopen it when needed.

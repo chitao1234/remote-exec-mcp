@@ -397,6 +397,9 @@ Default-hidden file tools:
 - requires nonzero `connect_endpoint` ports
 - reports `phase`, side health, generation, reconnect counters, drop counters,
   and effective limits
+- keeps human-readable tool text focused on ready/not-ready forwards and the
+  endpoints they expose; use structured content for detailed phase, health, and
+  accounting fields
 - treats `phase = "ready"` as readiness; legacy `status = "open"` can coexist
   with `phase = "reconnecting"`
 - can recover future listen-side traffic after broker-daemon transport loss when

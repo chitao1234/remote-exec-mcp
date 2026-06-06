@@ -22,7 +22,7 @@ use super::{
 use crate::port_forward::PORT_FORWARD_OPEN_ACK_TIMEOUT;
 use crate::port_forward::limits::effective_forward_limits;
 use crate::port_forward::side::SideHandle;
-use crate::port_forward::store::{PortForwardRecord, PortForwardStore};
+use crate::port_forward::store::{OpenForwardReservation, PortForwardRecord, PortForwardStore};
 use crate::port_forward::tunnel::{
     PortTunnel, decode_tunnel_meta, encode_tunnel_meta, tunnel_error,
 };
@@ -62,6 +62,7 @@ impl ForwardOpenKind {
 
 struct ForwardOpenContext {
     store: PortForwardStore,
+    reservation: OpenForwardReservation,
     listen_side: SideHandle,
     connect_side: SideHandle,
     forward_id: ForwardId,
@@ -86,6 +87,7 @@ struct ReadyListenTunnel {
 
 pub async fn open_forward(
     store: PortForwardStore,
+    reservation: OpenForwardReservation,
     limits: ForwardPortLimitSummary,
     listen_side: SideHandle,
     connect_side: SideHandle,
@@ -93,56 +95,41 @@ pub async fn open_forward(
 ) -> anyhow::Result<OpenedForward> {
     let listen_endpoint = normalize_endpoint(&spec.listen_endpoint)?;
     let connect_endpoint = ensure_nonzero_connect_endpoint(&spec.connect_endpoint)?;
-    open_protocol_forward(
+    let forward_id = reservation.forward_id().clone();
+    open_protocol_forward(ForwardOpenContext {
+        store,
+        reservation,
         listen_side,
         connect_side,
-        store,
+        forward_id,
         listen_endpoint,
         connect_endpoint,
-        limits,
-        ForwardOpenKind::for_protocol(spec.protocol),
-    )
+        requested_limits: limits,
+        kind: ForwardOpenKind::for_protocol(spec.protocol),
+    })
     .await
 }
 
-async fn open_protocol_forward(
-    listen_side: SideHandle,
-    connect_side: SideHandle,
-    store: PortForwardStore,
-    listen_endpoint: String,
-    connect_endpoint: String,
-    limits: ForwardPortLimitSummary,
-    kind: ForwardOpenKind,
-) -> anyhow::Result<OpenedForward> {
-    let forward_id = remote_exec_host::ids::new_forward_id();
+async fn open_protocol_forward(context: ForwardOpenContext) -> anyhow::Result<OpenedForward> {
     let initial_generation = INITIAL_FORWARD_GENERATION;
     let opened_listen = open_listen_session_for_forward(
-        &listen_side,
-        forward_id.as_str(),
-        kind,
+        &context.listen_side,
+        context.forward_id.as_str(),
+        context.kind,
         initial_generation,
-        limits.max_tunnel_queued_bytes as usize,
+        context.requested_limits.max_tunnel_queued_bytes as usize,
     )
     .await?;
     let opened_connect = open_connect_tunnel_for_forward(
-        &connect_side,
-        forward_id.as_str(),
-        kind,
+        &context.connect_side,
+        context.forward_id.as_str(),
+        context.kind,
         initial_generation,
-        limits.max_tunnel_queued_bytes as usize,
+        context.requested_limits.max_tunnel_queued_bytes as usize,
     )
     .await?;
     build_opened_forward(
-        ForwardOpenContext {
-            store,
-            listen_side,
-            connect_side,
-            forward_id,
-            listen_endpoint,
-            connect_endpoint,
-            requested_limits: limits,
-            kind,
-        },
+        context,
         OpenedTunnels {
             listen: opened_listen,
             connect: opened_connect,
@@ -200,6 +187,7 @@ async fn build_opened_forward(
 ) -> anyhow::Result<OpenedForward> {
     let ForwardOpenContext {
         store,
+        reservation,
         listen_side,
         connect_side,
         forward_id,
@@ -277,6 +265,7 @@ async fn build_opened_forward(
             listen_session,
             cancel,
         ),
+        reservation,
         runtime,
     })
 }
@@ -426,6 +415,11 @@ mod tests {
         let result = build_opened_forward(
             ForwardOpenContext {
                 store: PortForwardStore::default(),
+                reservation: OpenForwardReservation::new(
+                    ForwardId::new("fwd_test"),
+                    "local",
+                    "local",
+                ),
                 listen_side: SideHandle::broker_host().unwrap(),
                 connect_side: SideHandle::broker_host().unwrap(),
                 forward_id: ForwardId::new("fwd_test"),

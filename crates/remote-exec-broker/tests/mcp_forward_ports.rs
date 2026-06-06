@@ -42,6 +42,8 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
 
     let open = open_tcp_forward(&fixture, "local", "local", echo_addr).await;
     let forward_id = forward_id_from(&open);
+    assert!(open.text_output.contains("Ready port forwards:"));
+    assert!(!open.text_output.contains("phase="));
     let open_entry = &open.structured_content["forwards"][0];
     assert_eq!(open_entry["status"], "open");
     assert_eq!(open_entry["phase"], "ready");
@@ -69,6 +71,7 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
     assert_eq!(listed["phase"], "ready");
 
     let close = close_forward(&fixture, forward_id).await;
+    assert!(close.text_output.contains("Closed port forwards:"));
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
     assert_eq!(close.structured_content["forwards"][0]["phase"], "closed");
 }

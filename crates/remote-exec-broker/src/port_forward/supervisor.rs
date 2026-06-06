@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use super::epoch::ForwardEpoch;
 use super::limits::BrokerPortForwardLimits;
 use super::side::SideHandle;
-use super::store::{PortForwardRecord, PortForwardStore};
+use super::store::{OpenForwardReservation, PortForwardRecord, PortForwardStore, close_record};
 use super::tcp_bridge::run_tcp_forward;
 use super::udp_bridge::run_udp_forward;
 
@@ -253,19 +253,36 @@ impl ForwardRuntime {
 
 pub struct OpenedForward {
     pub record: PortForwardRecord,
+    reservation: OpenForwardReservation,
     runtime: ForwardRuntime,
 }
 
 impl OpenedForward {
     pub fn entry(&self) -> &ForwardPortEntry {
-        &self.record.entry
+        self.record.entry()
     }
 
-    pub async fn register_and_start(self, store: super::store::PortForwardStore) {
+    pub async fn register_and_start(
+        self,
+        store: super::store::PortForwardStore,
+    ) -> anyhow::Result<()> {
         let runtime = self.runtime;
         let task = spawn_forward(runtime, store.clone());
         self.record.set_task(task).await;
-        store.insert(self.record).await;
+        if let Err(err) = store.commit_open(self.reservation, self.record).await {
+            let message = err.to_string();
+            let _ = close_record(err.into_record()).await;
+            return Err(anyhow::anyhow!(message));
+        }
+        Ok(())
+    }
+
+    pub async fn close_unregistered(
+        self,
+        store: super::store::PortForwardStore,
+    ) -> ForwardPortEntry {
+        store.release_open_reservation(self.reservation).await;
+        close_record(self.record).await
     }
 }
 

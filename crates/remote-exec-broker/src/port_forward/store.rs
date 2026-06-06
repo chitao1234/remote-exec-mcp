@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt;
 use std::sync::Arc;
 
 use remote_exec_proto::port_forward::ForwardId;
@@ -11,10 +12,56 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use super::BrokerPortForwardLimits;
 use super::supervisor::{ListenSessionControl, close_listen_session, wait_for_forward_task_stop};
 
 const RECONNECT_LIMIT_EXCEEDED: &str =
     "port_forward_limit_exceeded: broker reconnecting forward limit reached";
+const OPEN_LIMIT_EXCEEDED: &str = "port_forward_limit_exceeded: broker open forward limit reached";
+const SIDE_PAIR_LIMIT_EXCEEDED: &str =
+    "port_forward_limit_exceeded: broker side-pair forward limit reached";
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ForwardSidePair {
+    listen_side: String,
+    connect_side: String,
+}
+
+impl ForwardSidePair {
+    fn new(listen_side: &str, connect_side: &str) -> Self {
+        Self {
+            listen_side: listen_side.to_string(),
+            connect_side: connect_side.to_string(),
+        }
+    }
+
+    fn matches_entry(&self, entry: &ForwardPortEntry) -> bool {
+        entry.listen_side == self.listen_side && entry.connect_side == self.connect_side
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct OpenForwardReservation {
+    forward_id: ForwardId,
+    side_pair: ForwardSidePair,
+}
+
+impl OpenForwardReservation {
+    pub(super) fn new(forward_id: ForwardId, listen_side: &str, connect_side: &str) -> Self {
+        Self {
+            forward_id,
+            side_pair: ForwardSidePair::new(listen_side, connect_side),
+        }
+    }
+
+    pub fn forward_id(&self) -> &ForwardId {
+        &self.forward_id
+    }
+}
+
+struct PendingForwardOpen {
+    side_pair: ForwardSidePair,
+}
 
 #[derive(Clone, Default)]
 pub struct PortForwardStore {
@@ -23,6 +70,94 @@ pub struct PortForwardStore {
 }
 
 impl PortForwardStore {
+    pub async fn reserve_open_batch(
+        &self,
+        listen_side: &str,
+        connect_side: &str,
+        requested_forwards: usize,
+        limits: BrokerPortForwardLimits,
+    ) -> anyhow::Result<Vec<OpenForwardReservation>> {
+        let mut state = self.state.write().await;
+        let side_pair = ForwardSidePair::new(listen_side, connect_side);
+        anyhow::ensure!(
+            state.open_count() + requested_forwards <= limits.max_open_forwards_total,
+            OPEN_LIMIT_EXCEEDED
+        );
+        anyhow::ensure!(
+            state.side_pair_count(&side_pair) + requested_forwards
+                <= limits.max_forwards_per_side_pair,
+            SIDE_PAIR_LIMIT_EXCEEDED
+        );
+
+        let mut reservations = Vec::with_capacity(requested_forwards);
+        for _ in 0..requested_forwards {
+            let forward_id = state.unused_forward_id();
+            let reservation = OpenForwardReservation::new(forward_id, listen_side, connect_side);
+            state.pending_opens.insert(
+                reservation.forward_id.clone(),
+                PendingForwardOpen {
+                    side_pair: reservation.side_pair.clone(),
+                },
+            );
+            reservations.push(reservation);
+        }
+        Ok(reservations)
+    }
+
+    pub async fn commit_open(
+        &self,
+        reservation: OpenForwardReservation,
+        record: PortForwardRecord,
+    ) -> Result<(), PortForwardCommitError> {
+        let validation_error = if record.entry().forward_id != reservation.forward_id {
+            Some(anyhow::anyhow!(
+                "port forward open reservation does not match opened forward"
+            ))
+        } else if !reservation.side_pair.matches_entry(record.entry()) {
+            Some(anyhow::anyhow!(
+                "port forward open reservation side pair does not match opened forward"
+            ))
+        } else {
+            None
+        };
+        let mut state = self.state.write().await;
+        if let Some(error) = validation_error {
+            state.pending_opens.remove(&reservation.forward_id);
+            return Err(PortForwardCommitError::new(record, error));
+        }
+        if state
+            .pending_opens
+            .remove(&reservation.forward_id)
+            .is_none()
+        {
+            return Err(PortForwardCommitError::new(
+                record,
+                anyhow::anyhow!(
+                    "port forward open reservation `{}` is not pending",
+                    reservation.forward_id
+                ),
+            ));
+        }
+        state.insert_record(record);
+        Ok(())
+    }
+
+    pub async fn release_open_reservation(&self, reservation: OpenForwardReservation) {
+        let mut state = self.state.write().await;
+        state.pending_opens.remove(&reservation.forward_id);
+    }
+
+    pub async fn release_open_reservations(
+        &self,
+        reservations: impl IntoIterator<Item = OpenForwardReservation>,
+    ) {
+        let mut state = self.state.write().await;
+        for reservation in reservations {
+            state.pending_opens.remove(&reservation.forward_id);
+        }
+    }
+
+    #[cfg(test)]
     pub async fn insert(&self, record: PortForwardRecord) {
         let mut state = self.state.write().await;
         state.insert_record(record);
@@ -35,27 +170,11 @@ impl PortForwardStore {
             .await
             .entries
             .values()
-            .filter(|record| filter.matches(&record.entry))
-            .map(|record| record.entry.clone())
+            .filter(|record| filter.matches(record.entry()))
+            .map(|record| record.entry().clone())
             .collect::<Vec<_>>();
         entries.sort_by(|left, right| left.forward_id.cmp(&right.forward_id));
         entries
-    }
-
-    pub async fn open_count(&self) -> usize {
-        self.state.read().await.entries.len()
-    }
-
-    pub async fn side_pair_count(&self, listen_side: &str, connect_side: &str) -> usize {
-        self.state
-            .read()
-            .await
-            .entries
-            .values()
-            .filter(|record| {
-                record.entry.listen_side == listen_side && record.entry.connect_side == connect_side
-            })
-            .count()
     }
 
     pub async fn close(&self, forward_ids: &[ForwardId]) -> anyhow::Result<Vec<ForwardPortEntry>> {
@@ -71,15 +190,15 @@ impl PortForwardStore {
                 forward_id,
                 mut record,
             } = candidate;
-            if let Err(err) = close_handle(&record.close_handle).await {
+            if let Err(err) = close_lifecycle(&record.lifecycle).await {
                 let error = format!("closing port forward `{}`: {err:#}", forward_id);
-                mark_entry_failed(&mut record.entry, error.clone());
+                mark_entry_failed(record.entry_mut(), error.clone());
                 let mut restore_candidates = vec![PortForwardCloseCandidate { forward_id, record }];
                 restore_candidates.extend(candidates);
                 self.restore_close_candidates(restore_candidates).await;
                 return Err(anyhow::anyhow!(error));
             }
-            closed.push(closed_entry(record.entry));
+            closed.push(closed_entry(record.into_entry()));
         }
         Ok(closed)
     }
@@ -115,7 +234,7 @@ impl PortForwardStore {
                 .entries
                 .remove(forward_id.as_str())
                 .ok_or_else(|| anyhow::anyhow!("unknown forward_id `{forward_id}`"))?;
-            if is_reconnecting_entry(&record.entry) {
+            if is_reconnecting_entry(record.entry()) {
                 state.reconnecting_count = state.reconnecting_count.saturating_sub(1);
             }
             candidates.push(PortForwardCloseCandidate { forward_id, record });
@@ -136,9 +255,9 @@ impl PortForwardStore {
     pub async fn mark_failed(&self, forward_id: &str, error: String) {
         let mut state = self.state.write().await;
         if let Some(record) = state.entries.get_mut(forward_id) {
-            let before = is_reconnecting_entry(&record.entry);
-            mark_entry_failed(&mut record.entry, error);
-            let after = is_reconnecting_entry(&record.entry);
+            let before = is_reconnecting_entry(record.entry());
+            mark_entry_failed(record.entry_mut(), error);
+            let after = is_reconnecting_entry(record.entry());
             adjust_reconnecting_count(&mut state.reconnecting_count, before, after);
         }
     }
@@ -146,9 +265,9 @@ impl PortForwardStore {
     pub async fn update_entry(&self, forward_id: &str, update: impl FnOnce(&mut ForwardPortEntry)) {
         let mut state = self.state.write().await;
         if let Some(record) = state.entries.get_mut(forward_id) {
-            let before = is_reconnecting_entry(&record.entry);
-            update(&mut record.entry);
-            let after = is_reconnecting_entry(&record.entry);
+            let before = is_reconnecting_entry(record.entry());
+            update(record.entry_mut());
+            let after = is_reconnecting_entry(record.entry());
             adjust_reconnecting_count(&mut state.reconnecting_count, before, after);
         }
     }
@@ -163,14 +282,15 @@ impl PortForwardStore {
         let mut state = self.state.write().await;
         ensure_reconnect_capacity(&mut state, forward_id, max_reconnecting_forwards)?;
         if let Some(record) = state.entries.get_mut(forward_id) {
-            if record.entry.status != ForwardPortStatus::Open {
+            if record.entry().status != ForwardPortStatus::Open {
                 return Ok(());
             }
-            let before = is_reconnecting_entry(&record.entry);
-            prepare_reconnect_entry(&mut record.entry);
-            mark_side_reconnecting(side_state_mut(&mut record.entry, role), error);
-            record.entry.phase = derive_phase(&record.entry);
-            let after = is_reconnecting_entry(&record.entry);
+            let before = is_reconnecting_entry(record.entry());
+            let entry = record.entry_mut();
+            prepare_reconnect_entry(entry);
+            mark_side_reconnecting(side_state_mut(entry, role), error);
+            entry.phase = derive_phase(entry);
+            let after = is_reconnecting_entry(record.entry());
             adjust_reconnecting_count(&mut state.reconnecting_count, before, after);
         }
         Ok(())
@@ -185,15 +305,16 @@ impl PortForwardStore {
         let mut state = self.state.write().await;
         ensure_reconnect_capacity(&mut state, forward_id, max_reconnecting_forwards)?;
         if let Some(record) = state.entries.get_mut(forward_id) {
-            if record.entry.status != ForwardPortStatus::Open {
+            if record.entry().status != ForwardPortStatus::Open {
                 return Ok(());
             }
-            let before = is_reconnecting_entry(&record.entry);
-            prepare_reconnect_entry(&mut record.entry);
-            mark_side_ready(&mut record.entry.listen_state);
-            mark_side_reconnecting(&mut record.entry.connect_state, error);
-            record.entry.phase = derive_phase(&record.entry);
-            let after = is_reconnecting_entry(&record.entry);
+            let before = is_reconnecting_entry(record.entry());
+            let entry = record.entry_mut();
+            prepare_reconnect_entry(entry);
+            mark_side_ready(&mut entry.listen_state);
+            mark_side_reconnecting(&mut entry.connect_state, error);
+            entry.phase = derive_phase(entry);
+            let after = is_reconnecting_entry(record.entry());
             adjust_reconnecting_count(&mut state.reconnecting_count, before, after);
         }
         Ok(())
@@ -236,15 +357,43 @@ impl PortForwardStore {
 #[derive(Default)]
 struct PortForwardStoreState {
     entries: HashMap<ForwardId, PortForwardRecord>,
+    pending_opens: HashMap<ForwardId, PendingForwardOpen>,
     reconnecting_count: usize,
 }
 
 impl PortForwardStoreState {
+    fn unused_forward_id(&self) -> ForwardId {
+        loop {
+            let forward_id = remote_exec_host::ids::new_forward_id();
+            if !self.entries.contains_key(forward_id.as_str())
+                && !self.pending_opens.contains_key(forward_id.as_str())
+            {
+                return forward_id;
+            }
+        }
+    }
+
+    fn open_count(&self) -> usize {
+        self.entries.len() + self.pending_opens.len()
+    }
+
+    fn side_pair_count(&self, side_pair: &ForwardSidePair) -> usize {
+        self.entries
+            .values()
+            .filter(|record| side_pair.matches_entry(record.entry()))
+            .count()
+            + self
+                .pending_opens
+                .values()
+                .filter(|pending| &pending.side_pair == side_pair)
+                .count()
+    }
+
     fn insert_record(&mut self, record: PortForwardRecord) {
-        let forward_id = record.entry.forward_id.clone();
-        let is_reconnecting = is_reconnecting_entry(&record.entry);
+        let forward_id = record.entry().forward_id.clone();
+        let is_reconnecting = is_reconnecting_entry(record.entry());
         if let Some(old) = self.entries.insert(forward_id, record) {
-            if is_reconnecting_entry(&old.entry) {
+            if is_reconnecting_entry(old.entry()) {
                 self.reconnecting_count = self.reconnecting_count.saturating_sub(1);
             }
         }
@@ -262,14 +411,14 @@ fn ensure_reconnect_capacity(
     let Some(record) = state.entries.get(forward_id) else {
         return Ok(());
     };
-    if record.entry.status != ForwardPortStatus::Open {
+    if record.entry().status != ForwardPortStatus::Open {
         return Ok(());
     }
 
-    let already_reconnecting = is_reconnecting_entry(&record.entry);
+    let already_reconnecting = is_reconnecting_entry(record.entry());
     if !already_reconnecting && state.reconnecting_count >= max_reconnecting_forwards {
         if let Some(record) = state.entries.get_mut(forward_id) {
-            mark_entry_failed(&mut record.entry, RECONNECT_LIMIT_EXCEEDED.to_string());
+            mark_entry_failed(record.entry_mut(), RECONNECT_LIMIT_EXCEEDED.to_string());
         }
         return Err(anyhow::anyhow!(RECONNECT_LIMIT_EXCEEDED));
     }
@@ -335,9 +484,13 @@ impl PortForwardFilter {
     }
 }
 
+struct ForwardPublicState {
+    entry: ForwardPortEntry,
+}
+
 pub struct PortForwardRecord {
-    pub(super) entry: ForwardPortEntry,
-    close_handle: Arc<PortForwardCloseHandle>,
+    public: ForwardPublicState,
+    lifecycle: Arc<PortForwardLifecycle>,
 }
 
 impl PortForwardRecord {
@@ -347,13 +500,66 @@ impl PortForwardRecord {
         cancel: CancellationToken,
     ) -> Self {
         Self {
-            entry,
-            close_handle: Arc::new(PortForwardCloseHandle::new(listen_session, cancel)),
+            public: ForwardPublicState { entry },
+            lifecycle: Arc::new(PortForwardLifecycle::new(listen_session, cancel)),
         }
     }
 
+    pub(super) fn entry(&self) -> &ForwardPortEntry {
+        &self.public.entry
+    }
+
+    fn entry_mut(&mut self) -> &mut ForwardPortEntry {
+        &mut self.public.entry
+    }
+
+    fn into_entry(self) -> ForwardPortEntry {
+        self.public.entry
+    }
+
     pub(super) async fn set_task(&self, task: JoinHandle<()>) {
-        self.close_handle.set_task(task).await;
+        self.lifecycle.set_task(task).await;
+    }
+
+    #[cfg(test)]
+    async fn take_task_for_test(&self) -> Option<JoinHandle<()>> {
+        self.lifecycle.take_task().await
+    }
+}
+
+pub struct PortForwardCommitError {
+    record: PortForwardRecord,
+    error: anyhow::Error,
+}
+
+impl PortForwardCommitError {
+    fn new(record: PortForwardRecord, error: anyhow::Error) -> Self {
+        Self { record, error }
+    }
+
+    pub(super) fn into_record(self) -> PortForwardRecord {
+        self.record
+    }
+}
+
+impl fmt::Debug for PortForwardCommitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PortForwardCommitError")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Display for PortForwardCommitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.error, formatter)
+    }
+}
+
+impl std::error::Error for PortForwardCommitError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.error.source()
     }
 }
 
@@ -362,13 +568,13 @@ struct PortForwardCloseCandidate {
     record: PortForwardRecord,
 }
 
-struct PortForwardCloseHandle {
+struct PortForwardLifecycle {
     listen_session: Arc<ListenSessionControl>,
     cancel: CancellationToken,
     task: Mutex<Option<JoinHandle<()>>>,
 }
 
-impl PortForwardCloseHandle {
+impl PortForwardLifecycle {
     fn new(listen_session: Arc<ListenSessionControl>, cancel: CancellationToken) -> Self {
         Self {
             listen_session,
@@ -387,11 +593,9 @@ impl PortForwardCloseHandle {
 }
 
 pub async fn close_record(record: PortForwardRecord) -> ForwardPortEntry {
-    let PortForwardRecord {
-        entry,
-        close_handle: handle,
-    } = record;
-    let result = close_handle(&handle).await;
+    let PortForwardRecord { public, lifecycle } = record;
+    let entry = public.entry;
+    let result = close_lifecycle(&lifecycle).await;
     if let Err(err) = result {
         tracing::warn!(
             forward_id = %entry.forward_id,
@@ -402,12 +606,12 @@ pub async fn close_record(record: PortForwardRecord) -> ForwardPortEntry {
     closed_entry(entry)
 }
 
-async fn close_handle(handle: &PortForwardCloseHandle) -> anyhow::Result<()> {
-    handle.cancel.cancel();
-    if let Some(task) = handle.take_task().await {
+async fn close_lifecycle(lifecycle: &PortForwardLifecycle) -> anyhow::Result<()> {
+    lifecycle.cancel.cancel();
+    if let Some(task) = lifecycle.take_task().await {
         wait_for_forward_task_stop(task).await?;
     }
-    close_listen_session(handle.listen_session.clone()).await
+    close_listen_session(lifecycle.listen_session.clone()).await
 }
 
 fn closed_entry(mut entry: ForwardPortEntry) -> ForwardPortEntry {
@@ -629,13 +833,114 @@ mod tests {
         let task = tokio::spawn(async {});
         record.set_task(task).await;
 
-        let first = record.close_handle.take_task().await;
+        let first = record.take_task_for_test().await;
         assert!(first.is_some());
         if let Some(task) = first {
             task.await.unwrap();
         }
 
-        assert!(record.close_handle.take_task().await.is_none());
+        assert!(record.take_task_for_test().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn pending_open_reservations_count_toward_total_limit() {
+        let store = PortForwardStore::default();
+        let limits = test_limits(1, 16);
+
+        let reservations = store
+            .reserve_open_batch("local", DEFAULT_TEST_TARGET, 1, limits)
+            .await
+            .unwrap();
+        let error = store
+            .reserve_open_batch("local", DEFAULT_TEST_TARGET, 1, limits)
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(
+            store.list(&filter_all()).await.len(),
+            0,
+            "pending opens are internal reservations and should not be listed"
+        );
+        assert!(error.contains(OPEN_LIMIT_EXCEEDED));
+        store.release_open_reservations(reservations).await;
+    }
+
+    #[tokio::test]
+    async fn pending_open_reservations_count_toward_side_pair_limit() {
+        let store = PortForwardStore::default();
+        let limits = test_limits(16, 1);
+
+        let reservations = store
+            .reserve_open_batch("local", DEFAULT_TEST_TARGET, 1, limits)
+            .await
+            .unwrap();
+        let same_pair_error = store
+            .reserve_open_batch("local", DEFAULT_TEST_TARGET, 1, limits)
+            .await
+            .unwrap_err()
+            .to_string();
+        let other_pair = store
+            .reserve_open_batch(DEFAULT_TEST_TARGET, "local", 1, limits)
+            .await
+            .unwrap();
+
+        assert!(same_pair_error.contains(SIDE_PAIR_LIMIT_EXCEEDED));
+        store.release_open_reservations(reservations).await;
+        store.release_open_reservations(other_pair).await;
+    }
+
+    #[tokio::test]
+    async fn releasing_pending_open_reservations_frees_capacity() {
+        let store = PortForwardStore::default();
+        let limits = test_limits(1, 1);
+        let reservations = store
+            .reserve_open_batch("local", DEFAULT_TEST_TARGET, 1, limits)
+            .await
+            .unwrap();
+
+        store.release_open_reservations(reservations).await;
+
+        assert!(
+            store
+                .reserve_open_batch("local", DEFAULT_TEST_TARGET, 1, limits)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn committed_open_reservation_is_listable_and_counts_until_closed() {
+        let store = PortForwardStore::default();
+        let limits = test_limits(1, 1);
+        let mut reservations = store
+            .reserve_open_batch("local", DEFAULT_TEST_TARGET, 1, limits)
+            .await
+            .unwrap();
+        let reservation = reservations.pop().unwrap();
+        let forward_id = reservation.forward_id().clone();
+        let mut record = test_record(forward_id.as_str());
+        record.entry_mut().listen_side = "local".to_string();
+        record.entry_mut().connect_side = DEFAULT_TEST_TARGET.to_string();
+
+        store.commit_open(reservation, record).await.unwrap();
+
+        let listed = store.list(&filter_one(forward_id.as_str())).await;
+        assert_eq!(listed.len(), 1);
+        let error = store
+            .reserve_open_batch("local", DEFAULT_TEST_TARGET, 1, limits)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(OPEN_LIMIT_EXCEEDED));
+
+        store.close(&[forward_id]).await.unwrap();
+        assert!(
+            store
+                .reserve_open_batch("local", DEFAULT_TEST_TARGET, 1, limits)
+                .await
+                .is_ok()
+        );
     }
 
     #[tokio::test]
@@ -678,6 +983,25 @@ mod tests {
             listen_side: None,
             connect_side: None,
             forward_ids: vec![ForwardId::new(forward_id)],
+        }
+    }
+
+    fn filter_all() -> PortForwardFilter {
+        PortForwardFilter {
+            listen_side: None,
+            connect_side: None,
+            forward_ids: Vec::new(),
+        }
+    }
+
+    fn test_limits(
+        max_open_forwards_total: usize,
+        max_forwards_per_side_pair: usize,
+    ) -> BrokerPortForwardLimits {
+        BrokerPortForwardLimits {
+            max_open_forwards_total,
+            max_forwards_per_side_pair,
+            ..BrokerPortForwardLimits::default()
         }
     }
 
