@@ -2,13 +2,13 @@
 #include <cstddef>
 #include <limits>
 
-#include "port_forward/port_tunnel.h"
 #include "rpc/server_contract.h"
 #include "rpc/server_request_utils.h"
 #include "rpc/server_route_common.h"
 #include "rpc/server_route_exec.h"
 #include "rpc/server_route_executor.h"
 #include "rpc/server_route_image.h"
+#include "rpc/server_route_port_tunnel.h"
 #include "rpc/server_route_transfer.h"
 
 namespace {
@@ -120,14 +120,14 @@ RpcRouteExecution streaming_export_execution(HttpResponse response, const Stream
     return execution;
 }
 
-RpcRouteExecution upgrade_execution(const PreparedPortTunnelUpgrade& upgrade) {
+RpcRouteExecution upgrade_execution(const PortTunnelUpgradeRoute& upgrade) {
     RpcRouteExecution execution;
     execution.kind = RPC_ROUTE_EXECUTION_UPGRADE_HANDLER;
     execution.response.status = 101;
     execution.close_after_response = true;
     execution.upgrade_token = upgrade.upgrade_token;
     execution.upgrade_headers = upgrade.response_headers;
-    execution.run_upgrade = [upgrade](SOCKET client) { run_port_tunnel_upgrade(upgrade, client); };
+    execution.run_upgrade = [upgrade](SOCKET client) { run_port_tunnel_route_upgrade(upgrade, client); };
     return execution;
 }
 
@@ -178,8 +178,8 @@ RpcRouteExecution execute_rpc_route(const ServerRouteContext& routes,
         return streaming_export_execution(response, transfer);
     }
     if (mode == ROUTE_EXECUTION_UPGRADE) {
-        PreparedPortTunnelUpgrade upgrade;
-        HttpResponse response = prepare_port_tunnel_upgrade(port_tunnel, request, &upgrade);
+        PortTunnelUpgradeRoute upgrade;
+        HttpResponse response = prepare_port_tunnel_route_upgrade(port_tunnel, request, &upgrade);
         write_request_id_header(response, request);
         if (response.status != 101) {
             return buffered_execution(response);

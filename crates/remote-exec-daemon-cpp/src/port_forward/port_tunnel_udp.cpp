@@ -5,6 +5,10 @@
 #include <cerrno>
 #include <utility>
 
+#include "json.hpp"
+
+using Json = nlohmann::json;
+
 bool PortTunnelService::spawn_udp_bind_loop(const std::shared_ptr<PortTunnelSession>& session,
                                             uint32_t stream_id,
                                             const std::shared_ptr<TunnelUdpSocket>& socket_value,

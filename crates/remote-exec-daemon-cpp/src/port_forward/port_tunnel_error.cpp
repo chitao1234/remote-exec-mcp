@@ -6,6 +6,10 @@
 #include "port_tunnel_service.h"
 #include "port_tunnel_spawn.h"
 
+#include "json.hpp"
+
+using Json = nlohmann::json;
+
 namespace {
 
 void log_tunnel_send_failure(const char* frame_kind, const std::exception& ex) {

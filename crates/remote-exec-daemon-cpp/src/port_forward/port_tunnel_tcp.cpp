@@ -6,6 +6,10 @@
 #include <exception>
 #include <utility>
 
+#include "json.hpp"
+
+using Json = nlohmann::json;
+
 bool PortTunnelService::spawn_tcp_listener_loop(const std::shared_ptr<PortTunnelSession>& session,
                                                 const std::shared_ptr<RetainedTcpListener>& listener,
                                                 PortTunnelWorkerLease worker_lease) {
@@ -243,7 +247,7 @@ void PortTunnelConnection::tcp_write_loop(uint32_t stream_id, std::shared_ptr<Tu
             stream->writer_cond.signal();
         }
         try {
-            send_all_bytes(stream->socket.get(), reinterpret_cast<const char*>(data.data()), data.size());
+            send_all_socket(stream->socket.get(), std::string(reinterpret_cast<const char*>(data.data()), data.size()));
         } catch (const std::exception& ex) {
             log_tunnel_exception("write tcp stream", ex);
             if (!stream->is_closed()) {

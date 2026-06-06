@@ -1,10 +1,12 @@
-#include "http/server_transport.h"
 #include "platform/deadline.h"
 #include "port_forward/port_tunnel.h"
 #include "port_tunnel_connection.h"
 #include "port_tunnel_sender.h"
 #include "port_tunnel_service.h"
-#include "rpc/server_contract.h"
+
+#include "json.hpp"
+
+using Json = nlohmann::json;
 
 struct TunnelOpenMetadata {
     std::string role;
@@ -69,52 +71,15 @@ PortTunnelFrame make_tunnel_ready_frame(const PortForwardLimitConfig& limits,
     return ready;
 }
 
-HttpResponse prepare_port_tunnel_upgrade(const PortTunnelRouteContext& context,
-                                         const HttpRequest& request,
-                                         PreparedPortTunnelUpgrade* upgrade) {
-    HttpResponse response;
-    if (!context.gate.http_auth_bearer_token->empty() &&
-        !request_has_bearer_auth(request, *context.gate.http_auth_bearer_token)) {
-        write_bearer_auth_challenge(response);
-        return response;
+void run_port_tunnel_connection(SOCKET client,
+                                std::shared_ptr<PortTunnelService>* service,
+                                const PortForwardLimitConfig& limits) {
+    if (!*service) {
+        *service = create_port_tunnel_service(limits);
     }
-    if (request.method != "POST" || request.path != server_contract::route_path(server_contract::ROUTE_PORT_TUNNEL) ||
-        !connection_header_has_upgrade(request) ||
-        header_token_lower(request, "upgrade") != server_contract::PORT_TUNNEL_UPGRADE_TOKEN ||
-        request.header(server_contract::PORT_TUNNEL_VERSION_HEADER) != server_contract::PORT_TUNNEL_VERSION_VALUE) {
-        write_rpc_error(response, 400, "bad_request", "invalid port tunnel upgrade request");
-        return response;
-    }
-
-    upgrade->context = context;
-    upgrade->upgrade_token = server_contract::PORT_TUNNEL_UPGRADE_TOKEN;
-    upgrade->response_headers[request_id_header_name()] = request_id_for_request(request);
-
-    response.status = 101;
-    return response;
-}
-
-void run_port_tunnel_upgrade(const PreparedPortTunnelUpgrade& upgrade, SOCKET client) {
-    if (!*upgrade.context.service) {
-        *upgrade.context.service = create_port_tunnel_service(*upgrade.context.limits);
-    }
-    set_socket_timeout_ms(client, upgrade.context.limits->tunnel_io_timeout_ms);
-    std::shared_ptr<PortTunnelConnection> tunnel(new PortTunnelConnection(client, *upgrade.context.service));
+    set_socket_timeout_ms(client, limits.tunnel_io_timeout_ms);
+    std::shared_ptr<PortTunnelConnection> tunnel(new PortTunnelConnection(client, *service));
     tunnel->run();
-}
-
-int handle_port_tunnel_upgrade(const PortTunnelRouteContext& context, SOCKET client, const HttpRequest& request) {
-    PreparedPortTunnelUpgrade upgrade;
-    HttpResponse response = prepare_port_tunnel_upgrade(context, request, &upgrade);
-    write_request_id_header(response, request);
-    if (response.status != 101) {
-        send_http_response(client, response);
-        return response.status;
-    }
-
-    send_http_upgrade_response(client, upgrade.upgrade_token, upgrade.response_headers);
-    run_port_tunnel_upgrade(upgrade, client);
-    return 101;
 }
 
 PortTunnelConnection::PortTunnelConnection(SOCKET client, const std::shared_ptr<PortTunnelService>& service)

@@ -74,6 +74,7 @@ ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/rpc/server_route_common.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_exec.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_image.cpp \
+	$(SOURCE_PREFIX)src/rpc/server_route_port_tunnel.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_transfer.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_http_codec.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_stream_codec.cpp \

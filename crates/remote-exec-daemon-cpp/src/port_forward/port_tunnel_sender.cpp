@@ -2,6 +2,7 @@
 
 #include <limits>
 
+#include "port_forward/port_forward_socket_ops.h"
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
 #include "runtime/daemon_thread.h"
@@ -108,7 +109,8 @@ void PortTunnelSender::writer_loop() {
         }
 
         try {
-            send_all_bytes(client_, reinterpret_cast<const char*>(queued.bytes.data()), queued.bytes.size());
+            send_all_socket(client_,
+                            std::string(reinterpret_cast<const char*>(queued.bytes.data()), queued.bytes.size()));
         } catch (const std::exception& ex) {
             log_tunnel_exception("send port tunnel frame", ex);
             release_queued_frame_reservation(queued.charge_kind, queued.charge_value);
