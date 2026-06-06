@@ -41,6 +41,11 @@ std::string short_path_for_test(const fs::path& path) {
     }
     return test_fs::utf8_from_wide(std::wstring(&buffer[0], length));
 }
+
+bool distinct_short_path_for_test(const fs::path& path, std::string* short_path) {
+    *short_path = short_path_for_test(path);
+    return !short_path->empty() && !host_path_equal(*short_path, path.string());
+}
 #endif
 
 std::string host_platform_label() {
@@ -303,6 +308,51 @@ void run_shared_sandbox_cases() {
     }
 }
 
+#ifdef _WIN32
+void run_windows_short_alias_sandbox_cases() {
+    const fs::path root = make_test_root();
+    const fs::path allowed = root / "Eight Three Allowed Directory";
+    const fs::path public_root = allowed / "Eight Three Public Directory";
+    const fs::path denied_root = allowed / "Eight Three Denied Directory";
+    fs::create_directories(public_root);
+    fs::create_directories(denied_root);
+    fs::write_file_bytes(public_root / "ok.txt", "ok");
+    fs::write_file_bytes(denied_root / "key.txt", "secret");
+
+    std::string short_allowed;
+    if (!distinct_short_path_for_test(allowed, &short_allowed)) {
+        return;
+    }
+
+    FilesystemSandbox long_rule_sandbox;
+    long_rule_sandbox.read.allow.push_back(allowed.string());
+    long_rule_sandbox.read.deny.push_back(denied_root.string());
+    const CompiledFilesystemSandbox long_rule_compiled = compile_filesystem_sandbox(long_rule_sandbox);
+    authorize_path(&long_rule_compiled, SANDBOX_READ, short_allowed + "\\Eight Three Public Directory\\ok.txt");
+    authorize_path(&long_rule_compiled, SANDBOX_READ, short_allowed + "\\Eight Three Public Directory\\new.txt");
+    TEST_ASSERT(denied(
+        &long_rule_compiled, SANDBOX_READ, short_allowed + "\\Eight Three Denied Directory\\key.txt"));
+    TEST_ASSERT(denied(
+        &long_rule_compiled, SANDBOX_READ, short_allowed + "\\Eight Three Denied Directory\\new.txt"));
+
+    std::string short_denied;
+    const std::string denied_rule =
+        distinct_short_path_for_test(denied_root, &short_denied) ? short_denied
+                                                                : short_allowed + "\\Eight Three Denied Directory";
+    TEST_ASSERT(denied(&long_rule_compiled, SANDBOX_READ, denied_rule + "\\key.txt"));
+    TEST_ASSERT(denied(&long_rule_compiled, SANDBOX_READ, denied_rule + "\\new.txt"));
+
+    FilesystemSandbox short_rule_sandbox;
+    short_rule_sandbox.read.allow.push_back(short_allowed);
+    short_rule_sandbox.read.deny.push_back(denied_rule);
+    const CompiledFilesystemSandbox short_rule_compiled = compile_filesystem_sandbox(short_rule_sandbox);
+    authorize_path(&short_rule_compiled, SANDBOX_READ, (public_root / "ok.txt").string());
+    authorize_path(&short_rule_compiled, SANDBOX_READ, (public_root / "new.txt").string());
+    TEST_ASSERT(denied(&short_rule_compiled, SANDBOX_READ, (denied_root / "key.txt").string()));
+    TEST_ASSERT(denied(&short_rule_compiled, SANDBOX_READ, (denied_root / "new.txt").string()));
+}
+#endif
+
 } // namespace
 
 int main() {
@@ -322,7 +372,7 @@ int main() {
     authorize_path(&compiled, SANDBOX_WRITE, (allowed / "new.txt").string());
 #ifdef _WIN32
     const std::string short_allowed = short_path_for_test(allowed);
-    if (!short_allowed.empty() && short_allowed != allowed.string()) {
+    if (!short_allowed.empty() && !host_path_equal(short_allowed, allowed.string())) {
         authorize_path(&compiled, SANDBOX_WRITE, short_allowed + "\\new-short-name.txt");
     }
 #endif
@@ -373,6 +423,8 @@ int main() {
     const CompiledFilesystemSandbox unicode_windows_compiled = compile_filesystem_sandbox(unicode_windows_sandbox);
     authorize_path(&unicode_windows_compiled, SANDBOX_READ, "c:/résumé/out.txt");
     TEST_ASSERT(denied(&unicode_windows_compiled, SANDBOX_READ, "C:\\résumé\\ärger\\key.txt"));
+
+    run_windows_short_alias_sandbox_cases();
 #endif
 
     run_shared_path_policy_cases();
