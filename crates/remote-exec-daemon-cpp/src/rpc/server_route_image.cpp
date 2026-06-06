@@ -19,7 +19,7 @@ ImageFailure invalid_detail_failure(const std::string& detail) {
 
 } // namespace
 
-HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
+HttpResponse handle_image_read(const ImageRouteContext& context, const HttpRequest& request) {
     return handle_image_rpc_route("image/read", [&](HttpResponse& response) {
         const Json body = parse_json_body(request);
         const std::string detail = body.value("detail", std::string());
@@ -27,7 +27,7 @@ HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
             throw invalid_detail_failure(detail);
         }
 
-        const std::string path = resolve_authorized_input_path(state, body, "path", SANDBOX_READ);
+        const std::string path = resolve_authorized_input_path(context.paths, body, "path", SANDBOX_READ);
         const ImageReadResult image = read_image_original(path);
         write_json(response,
                    Json{

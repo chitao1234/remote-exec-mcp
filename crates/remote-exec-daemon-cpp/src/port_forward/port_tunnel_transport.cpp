@@ -69,9 +69,9 @@ PortTunnelFrame make_tunnel_ready_frame(const PortForwardLimitConfig& limits,
     return ready;
 }
 
-int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest& request) {
-    if (!state.config.http_auth_bearer_token.empty() &&
-        !request_has_bearer_auth(request, state.config.http_auth_bearer_token)) {
+int handle_port_tunnel_upgrade(const PortTunnelRouteContext& context, SOCKET client, const HttpRequest& request) {
+    if (!context.gate.http_auth_bearer_token->empty() &&
+        !request_has_bearer_auth(request, *context.gate.http_auth_bearer_token)) {
         HttpResponse response;
         write_bearer_auth_challenge(response);
         write_request_id_header(response, request);
@@ -93,11 +93,11 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
     std::map<std::string, std::string> response_headers;
     response_headers[request_id_header_name()] = request_id;
     send_http_upgrade_response(client, server_contract::PORT_TUNNEL_UPGRADE_TOKEN, response_headers);
-    if (!state.services.port_tunnel) {
-        state.services.port_tunnel = create_port_tunnel_service(state.config.port_forward_limits);
+    if (!*context.service) {
+        *context.service = create_port_tunnel_service(*context.limits);
     }
-    set_socket_timeout_ms(client, state.config.port_forward_limits.tunnel_io_timeout_ms);
-    std::shared_ptr<PortTunnelConnection> tunnel(new PortTunnelConnection(client, state.services.port_tunnel));
+    set_socket_timeout_ms(client, context.limits->tunnel_io_timeout_ms);
+    std::shared_ptr<PortTunnelConnection> tunnel(new PortTunnelConnection(client, *context.service));
     tunnel->run();
     return 101;
 }

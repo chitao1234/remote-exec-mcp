@@ -3,8 +3,8 @@
 #include <stdexcept>
 #include <string>
 
-struct AppState;
 struct HttpRequest;
+struct ExecRequestContext;
 
 class ExecRequestFailure : public std::runtime_error {
 public:
@@ -41,5 +41,5 @@ struct ExecWriteRequestSpec {
     ExecPtySizeSpec pty_size;
 };
 
-ExecStartRequestSpec prepare_exec_start_request(const AppState& state, const HttpRequest& request);
+ExecStartRequestSpec prepare_exec_start_request(const ExecRequestContext& context, const HttpRequest& request);
 ExecWriteRequestSpec prepare_exec_write_request(const HttpRequest& request);

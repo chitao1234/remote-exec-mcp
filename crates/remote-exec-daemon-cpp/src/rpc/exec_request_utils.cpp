@@ -3,7 +3,7 @@
 #include "http/http_helpers.h"
 #include "platform/platform.h"
 #include "rpc/server_request_utils.h"
-#include "runtime/server.h"
+#include "runtime/app_context.h"
 
 namespace {
 
@@ -53,7 +53,7 @@ ExecRequestFailure::ExecRequestFailure(int status_value,
     : std::runtime_error(message_value), status(status_value), code(code_value), message(message_value) {
 }
 
-ExecStartRequestSpec prepare_exec_start_request(const AppState& state, const HttpRequest& request) {
+ExecStartRequestSpec prepare_exec_start_request(const ExecRequestContext& context, const HttpRequest& request) {
     try {
         const Json body = parse_json_body(request);
         ExecStartRequestSpec parsed;
@@ -63,12 +63,12 @@ ExecStartRequestSpec prepare_exec_start_request(const AppState& state, const Htt
         parsed.max_output_tokens = requested_max_output_tokens(body);
         parsed.cmd = body.at("cmd").get<std::string>();
         parsed.tty_requested = body.value("tty", false);
-        if (parsed.tty_requested && !state.metadata.capabilities.supports_pty) {
+        if (parsed.tty_requested && !context.capabilities->supports_pty) {
             throw ExecRequestFailure(400, "tty_unsupported", "tty is not supported on this host");
         }
 
-        parsed.login_requested = body.value("login", state.config.allow_login_shell);
-        if (parsed.login_requested && !state.config.allow_login_shell) {
+        parsed.login_requested = body.value("login", context.allow_login_shell);
+        if (parsed.login_requested && !context.allow_login_shell) {
             throw ExecRequestFailure(400, "login_shell_disabled", "login shells are disabled by daemon config");
         }
 
@@ -76,8 +76,8 @@ ExecStartRequestSpec prepare_exec_start_request(const AppState& state, const Htt
         if (!shell_override.empty() && !platform::shell_supported(shell_override)) {
             throw ExecRequestFailure(400, "unsupported_shell", "requested shell is not supported on this target");
         }
-        parsed.shell = platform::selected_shell(shell_override, state.metadata.default_shell);
-        parsed.workdir = resolve_authorized_workdir(state, body, SANDBOX_EXEC_CWD);
+        parsed.shell = platform::selected_shell(shell_override, *context.default_shell);
+        parsed.workdir = resolve_authorized_workdir(context.paths, body, SANDBOX_EXEC_CWD);
         return parsed;
     } catch (const ExecRequestFailure&) {
         throw;

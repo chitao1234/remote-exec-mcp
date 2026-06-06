@@ -5,6 +5,7 @@
 
 #include "core/logging.h"
 #include "core/text_utils.h"
+#include "http/http_connection.h"
 #include "http/http_helpers.h"
 #include "http/http_request.h"
 #include "http/server_transport.h"
@@ -13,7 +14,6 @@
 #include "rpc/server_route_common.h"
 #include "rpc/server_route_transfer.h"
 #include "rpc/server_routes.h"
-#include "runtime/server.h"
 
 namespace {
 
@@ -87,13 +87,13 @@ void log_request_result(const HttpRequest& request, int status, std::uint64_t st
     log_message(level, "server", message.str());
 }
 
-int handle_streaming_transfer_export_request(const AppState& state,
+int handle_streaming_transfer_export_request(const TransferRouteContext& context,
                                              SOCKET client,
                                              const HttpRequest& request,
                                              HttpRequestBodyStream* body,
                                              bool* close_after_response) {
     StreamingTransferExport transfer;
-    HttpResponse response = prepare_streaming_transfer_export(state, request, body, &transfer);
+    HttpResponse response = prepare_streaming_transfer_export(context, request, body, &transfer);
     write_request_id_header(response, request);
     if (response.status != 200) {
         if (!try_send_response(client, response)) {
@@ -112,7 +112,7 @@ int handle_streaming_transfer_export_request(const AppState& state,
     return response.status;
 }
 
-int handle_client_request(AppState& state,
+int handle_client_request(const HttpConnectionContext& context,
                           SOCKET client,
                           const HttpRequestHead& request_head,
                           const HttpReadControl& read_control,
@@ -131,17 +131,17 @@ int handle_client_request(AppState& state,
     }
     const std::size_t max_body_bytes = mode == ROUTE_EXECUTION_STREAMING_IMPORT
                                            ? std::numeric_limits<std::size_t>::max()
-                                           : state.config.max_request_body_bytes;
+                                           : context.max_request_body_bytes;
     HttpRequestBodyStream body(client, request_head.initial_body, framing, max_body_bytes, &body_read_control);
 
     if (mode == ROUTE_EXECUTION_STREAMING_EXPORT) {
-        const int status =
-            handle_streaming_transfer_export_request(state, client, request, &body, close_after_response);
+        const int status = handle_streaming_transfer_export_request(
+            context.routes.transfer, client, request, &body, close_after_response);
         log_request_result(request, status, started_at_ms);
         return status;
     }
     if (mode == ROUTE_EXECUTION_UPGRADE) {
-        const int status = handle_port_tunnel_upgrade(state, client, request);
+        const int status = handle_port_tunnel_upgrade(context.port_tunnel, client, request);
         log_request_result(request, status, started_at_ms);
         *close_after_response = true;
         return status;
@@ -149,7 +149,7 @@ int handle_client_request(AppState& state,
 
     HttpResponse response;
     if (mode == ROUTE_EXECUTION_STREAMING_IMPORT) {
-        response = handle_streaming_transfer_import(state, request, &body);
+        response = handle_streaming_transfer_import(context.routes.transfer, request, &body);
         if (!body.fully_consumed()) {
             (void)body.discard_remaining_bounded(HTTP_STREAMING_TRANSFER_DRAIN_TIMEOUT_MS,
                                                  std::numeric_limits<std::size_t>::max());
@@ -157,7 +157,7 @@ int handle_client_request(AppState& state,
         }
     } else {
         request.body = read_request_body_to_string(&body);
-        response = route_request(state, request);
+        response = route_request(context.routes, request);
     }
     write_request_id_header(response, request);
     log_request_result(request, response.status, started_at_ms);
@@ -169,24 +169,24 @@ int handle_client_request(AppState& state,
 
 } // namespace
 
-void handle_client(AppState& state, UniqueSocket client) {
+void handle_client(const HttpConnectionContext& context, UniqueSocket client) {
     HttpReadControl read_control;
-    read_control.idle_timeout_ms = state.config.http_connection_idle_timeout_ms;
+    read_control.idle_timeout_ms = context.http_connection_idle_timeout_ms;
     read_control.poll_timeout_ms = HTTP_SHUTDOWN_READ_POLL_MS;
-    read_control.stop_requested = [&state]() { return state.shutdown.requested.load(); };
+    read_control.stop_requested = [&context]() { return context.shutdown_requested->load(); };
 
     for (;;) {
         try {
-            set_socket_timeout_ms(client.get(), state.config.http_connection_idle_timeout_ms);
+            set_socket_timeout_ms(client.get(), context.http_connection_idle_timeout_ms);
             HttpRequestHead request_head;
             if (!try_read_http_request_head_controlled(
-                    client.get(), state.config.max_request_header_bytes, read_control, &request_head)) {
+                    client.get(), context.max_request_header_bytes, read_control, &request_head)) {
                 return;
             }
-            set_socket_timeout_ms(client.get(), state.config.http_connection_idle_timeout_ms);
+            set_socket_timeout_ms(client.get(), context.http_connection_idle_timeout_ms);
 
             bool close_after_response = false;
-            handle_client_request(state, client.get(), request_head, read_control, &close_after_response);
+            handle_client_request(context, client.get(), request_head, read_control, &close_after_response);
             if (close_after_response) {
                 return;
             }

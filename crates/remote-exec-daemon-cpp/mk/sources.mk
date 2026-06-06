@@ -40,7 +40,10 @@ POSIX_PROCESS_SESSION_SRCS = \
 
 DAEMON_THREAD_SRCS = $(SOURCE_PREFIX)src/runtime/daemon_thread.cpp
 
+APP_CONTEXT_SRCS = $(SOURCE_PREFIX)src/runtime/app_context.cpp
+
 RUNTIME_SRCS = \
+	$(APP_CONTEXT_SRCS) \
 	$(SOURCE_PREFIX)src/runtime/server.cpp \
 	$(SOURCE_PREFIX)src/runtime/server_runtime.cpp \
 	$(SOURCE_PREFIX)src/runtime/connection_manager.cpp \
@@ -332,6 +335,7 @@ WINDOWS_SERVER_RUNTIME_TEST_SUPPORT_SRCS = \
 SERVER_ROUTES_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
 	$(SOURCE_PREFIX)tests/test_server_routes_shared.cpp \
+	$(APP_CONTEXT_SRCS) \
 	$(CAPABILITIES_SRCS) \
 	$(ROUTE_SRCS) \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \

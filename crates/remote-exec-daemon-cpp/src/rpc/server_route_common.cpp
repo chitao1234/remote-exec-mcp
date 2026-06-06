@@ -152,45 +152,45 @@ HttpResponse make_rpc_error_response(int status, const std::string& code, const 
     return response;
 }
 
-HttpResponse handle_health(const AppState& state) {
+HttpResponse handle_health(const HealthRouteContext& context) {
     HttpResponse response;
     write_json(response,
                Json{
                    {"status", "ok"},
                    {"daemon_version", REMOTE_EXEC_CPP_VERSION},
-                   {"daemon_instance_id", state.metadata.daemon_instance_id},
+                   {"daemon_instance_id", *context.daemon_instance_id},
                });
     return response;
 }
 
-HttpResponse handle_target_info(const AppState& state) {
+HttpResponse handle_target_info(const TargetInfoRouteContext& context) {
     HttpResponse response;
     Json body{
-        {"target", state.config.target},
+        {"target", *context.target},
         {"daemon_version", REMOTE_EXEC_CPP_VERSION},
-        {"daemon_instance_id", state.metadata.daemon_instance_id},
-        {"hostname", state.metadata.hostname},
+        {"daemon_instance_id", context.metadata->daemon_instance_id},
+        {"hostname", context.metadata->hostname},
         {"platform", platform::platform_name()},
         {"arch", platform::arch_name()},
     };
-    write_daemon_capabilities(&body, state.metadata.capabilities);
+    write_daemon_capabilities(&body, context.metadata->capabilities);
     write_json(response, body);
     return response;
 }
 
-HttpResponse handle_patch_apply(AppState& state, const HttpRequest& request) {
+HttpResponse handle_patch_apply(const PatchRouteContext& context, const HttpRequest& request) {
     return handle_patch_rpc_route([&](HttpResponse& response) {
         const Json body = parse_json_body(request);
-        const std::string workdir = resolve_workdir(state, body);
+        const std::string workdir = resolve_workdir(context.paths, body);
         const std::string patch_text = body.at("patch").get<std::string>();
-        const PatchApplyResult result = apply_patch(workdir, patch_text, make_patch_path_authorizer(state));
+        const PatchApplyResult result = apply_patch(workdir, patch_text, make_patch_path_authorizer(context.paths));
         LogMessageBuilder summary("patch/apply");
         summary.field("patch_len", patch_text.size());
         log_message(LOG_INFO, "server", summary.str());
         write_json(response,
                    Json{
                        {"output", result.output},
-                       {"daemon_instance_id", state.metadata.daemon_instance_id},
+                       {"daemon_instance_id", *context.daemon_instance_id},
                        {"updated_paths", result.updated_paths},
                    });
     });

@@ -4,11 +4,12 @@
 
 #include "core/config.h"
 #include "http/http_helpers.h"
-#include "runtime/server.h"
+#include "platform/socket.h"
+#include "runtime/app_context.h"
 
 class PortTunnelService;
 
-int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest& request);
+int handle_port_tunnel_upgrade(const PortTunnelRouteContext& context, SOCKET client, const HttpRequest& request);
 std::shared_ptr<PortTunnelService>
 create_port_tunnel_service(const PortForwardLimitConfig& limits = PortForwardLimitConfig());
 

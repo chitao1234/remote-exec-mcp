@@ -1,6 +1,6 @@
 #pragma once
 
 #include "http/http_helpers.h"
-#include "runtime/server.h"
+#include "runtime/app_context.h"
 
-HttpResponse handle_image_read(AppState& state, const HttpRequest& request);
+HttpResponse handle_image_read(const ImageRouteContext& context, const HttpRequest& request);

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "http/http_helpers.h"
-#include "runtime/server.h"
+#include "runtime/app_context.h"
 
 enum RouteExecutionMode {
     ROUTE_EXECUTION_BUFFERED,
@@ -11,4 +11,4 @@ enum RouteExecutionMode {
 };
 
 RouteExecutionMode route_execution_mode(const HttpRequest& request);
-HttpResponse route_request(AppState& state, const HttpRequest& request);
+HttpResponse route_request(const ServerRouteContext& context, const HttpRequest& request);

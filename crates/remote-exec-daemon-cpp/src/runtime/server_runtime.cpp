@@ -10,6 +10,7 @@
 #include "../port_forward/port_tunnel_service.h"
 #include "capabilities/daemon_capabilities.h"
 #include "core/logging.h"
+#include "http/http_connection.h"
 #include "http/server_transport.h"
 #include "platform/platform.h"
 #include "policy/path_policy.h"
@@ -192,7 +193,7 @@ void ServerRuntime::accept_loop() {
 
             if (!connections_.try_start(std::move(client), [this](SOCKET socket) {
                     UniqueSocket client(socket);
-                    handle_client(this->state(), std::move(client));
+                    handle_client(make_http_connection_context(this->state()), std::move(client));
                 })) {
                 log_message(LOG_WARN, "server", "dropping client connection during shutdown");
             }

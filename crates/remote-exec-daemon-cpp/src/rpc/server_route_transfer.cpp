@@ -81,22 +81,22 @@ void write_transfer_import_success(HttpResponse& response,
 
 } // namespace
 
-HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request) {
+HttpResponse handle_transfer_export(const TransferRouteContext& context, const HttpRequest& request) {
     return handle_transfer_rpc_route("transfer/export", [&](HttpResponse& response) {
         require_transfer_stream_version(request);
         const Json body = parse_json_body(request);
-        const TransferExportRequestSpec export_request = prepare_transfer_export_request(state, body);
+        const TransferExportRequestSpec export_request = prepare_transfer_export_request(context, body);
         const ExportedPayload payload = export_path(
             export_request.path, export_request.symlink_mode, export_request.exclude, export_request.authorizer);
         write_transfer_export_success(response, export_request, payload);
     });
 }
 
-HttpResponse handle_transfer_path_info(AppState& state, const HttpRequest& request) {
+HttpResponse handle_transfer_path_info(const TransferRouteContext& context, const HttpRequest& request) {
     return handle_transfer_rpc_route("transfer/path-info", [&](HttpResponse& response) {
         const Json body = parse_json_body(request);
         const std::string path =
-            resolve_authorized_transfer_path(state, body.at("path").get<std::string>(), SANDBOX_WRITE);
+            resolve_authorized_transfer_path(context.paths, body.at("path").get<std::string>(), SANDBOX_WRITE);
         const PathInfo info = path_info(path);
         write_json(response,
                    Json{
@@ -106,28 +106,29 @@ HttpResponse handle_transfer_path_info(AppState& state, const HttpRequest& reque
     });
 }
 
-HttpResponse handle_transfer_import(AppState& state, const HttpRequest& request) {
+HttpResponse handle_transfer_import(const TransferRouteContext& context, const HttpRequest& request) {
     return handle_transfer_rpc_route("transfer/import", [&](HttpResponse& response) {
         require_transfer_stream_version(request);
         require_transfer_stream_content_type(request);
-        const TransferImportRequestSpec import_request = prepare_transfer_import_request(state, request);
+        const TransferImportRequestSpec import_request = prepare_transfer_import_request(context, request);
         write_transfer_import_success(response, import_request, run_transfer_import(import_request, request.body));
     });
 }
 
-HttpResponse
-handle_streaming_transfer_import(const AppState& state, const HttpRequest& request, HttpRequestBodyStream* body) {
+HttpResponse handle_streaming_transfer_import(const TransferRouteContext& context,
+                                              const HttpRequest& request,
+                                              HttpRequestBodyStream* body) {
     HttpResponse response;
     response.status = 200;
 
-    if (reject_before_route(state, request, &response)) {
+    if (reject_before_route(context.gate, request, &response)) {
         return response;
     }
 
     return handle_transfer_rpc_route("transfer/import", [&](HttpResponse& route_response) {
         require_transfer_stream_version(request);
         require_transfer_stream_content_type(request);
-        const TransferImportRequestSpec import_request = prepare_transfer_import_request(state, request);
+        const TransferImportRequestSpec import_request = prepare_transfer_import_request(context, request);
         HttpBodyTransferStreamReader body_reader(body);
         TransferStreamArchiveReader archive_reader(&body_reader);
         write_transfer_import_success(
@@ -135,13 +136,13 @@ handle_streaming_transfer_import(const AppState& state, const HttpRequest& reque
     });
 }
 
-HttpResponse prepare_streaming_transfer_export(const AppState& state,
+HttpResponse prepare_streaming_transfer_export(const TransferRouteContext& context,
                                                const HttpRequest& request_head,
                                                HttpRequestBodyStream* body,
                                                StreamingTransferExport* transfer) {
     HttpResponse response;
     response.status = 200;
-    if (reject_before_route(state, request_head, &response)) {
+    if (reject_before_route(context.gate, request_head, &response)) {
         return response;
     }
 
@@ -150,7 +151,7 @@ HttpResponse prepare_streaming_transfer_export(const AppState& state,
         require_transfer_stream_version(request);
         request.body = read_request_body_to_string(body);
         const Json body_json = parse_json_body(request);
-        transfer->request = prepare_transfer_export_request(state, body_json);
+        transfer->request = prepare_transfer_export_request(context, body_json);
         transfer->response_payload = ExportedPayload{transfer->request.source_type, std::string()};
         route_response.headers["Transfer-Encoding"] = "chunked";
         write_transfer_export_headers(route_response, transfer->response_payload);
