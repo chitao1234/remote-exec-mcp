@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
+use anyhow::Context;
 use remote_exec_proto::rpc::TargetInfoResponse;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     BrokerState, config,
@@ -23,9 +26,22 @@ pub async fn run(config: config::ValidatedBrokerConfig) -> anyhow::Result<()> {
         "starting broker"
     );
     let state = build_state(config).await?;
-    spawn_periodic_target_refresh(&state);
+    let target_refresh = PeriodicTargetRefreshTask::spawn(&state);
     tracing::info!(configured_targets = state.targets.len(), "broker ready");
-    crate::mcp_server::serve(state, &mcp).await
+    let serve_result = crate::mcp_server::serve(state, &mcp).await;
+    let refresh_result = target_refresh.shutdown().await;
+
+    if let Err(err) = &refresh_result {
+        if serve_result.is_err() {
+            tracing::warn!(
+                error = %err,
+                "periodic target refresh task shutdown failed after broker serve error"
+            );
+        }
+    }
+
+    serve_result?;
+    refresh_result
 }
 
 pub async fn build_state(config: config::ValidatedBrokerConfig) -> anyhow::Result<BrokerState> {
@@ -212,37 +228,72 @@ fn mcp_transport_name(config: &config::McpServerConfig) -> &'static str {
     }
 }
 
-fn spawn_periodic_target_refresh(state: &BrokerState) {
-    let state = state.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(state.health_refresh_interval);
-        loop {
-            interval.tick().await;
-            for (name, handle) in &state.targets {
-                if handle.as_remote().is_none() {
-                    continue;
-                }
+struct PeriodicTargetRefreshTask {
+    cancel: CancellationToken,
+    handle: JoinHandle<()>,
+}
 
-                match handle.refresh_health_and_cache(name).await {
-                    Ok(true) => {
-                        state.sessions.remove_target(name).await;
-                        tracing::info!(
-                            target = %name,
-                            "invalidated broker sessions after daemon instance change"
-                        );
-                    }
-                    Ok(false) => {}
-                    Err(err) => {
-                        tracing::debug!(
-                            target = %name,
-                            error = %err,
-                            "periodic target refresh did not update cached daemon metadata"
-                        );
-                    }
+impl PeriodicTargetRefreshTask {
+    fn spawn(state: &BrokerState) -> Self {
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(periodic_target_refresh_loop(state.clone(), cancel.clone()));
+        Self { cancel, handle }
+    }
+
+    async fn shutdown(self) -> anyhow::Result<()> {
+        self.cancel.cancel();
+        self.handle
+            .await
+            .context("waiting for periodic target refresh task to stop")?;
+        Ok(())
+    }
+}
+
+async fn periodic_target_refresh_loop(state: BrokerState, cancel: CancellationToken) {
+    let mut interval = tokio::time::interval(state.health_refresh_interval);
+    loop {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => break,
+            _ = interval.tick() => {}
+        }
+
+        for (name, handle) in &state.targets {
+            if cancel.is_cancelled() {
+                return;
+            }
+            if handle.as_remote().is_none() {
+                continue;
+            }
+
+            let refresh = handle.refresh_health_and_cache(name);
+            let result = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return,
+                result = refresh => result,
+            };
+
+            match result {
+                Ok(true) => {
+                    state.sessions.remove_target(name).await;
+                    tracing::info!(
+                        target = %name,
+                        "invalidated broker sessions after daemon instance change"
+                    );
+                }
+                Ok(false) => {}
+                Err(err) => {
+                    tracing::debug!(
+                        target = %name,
+                        error = %err,
+                        "periodic target refresh did not update cached daemon metadata"
+                    );
                 }
             }
         }
-    });
+    }
+
+    tracing::debug!("periodic target refresh task stopped");
 }
 
 #[cfg(test)]
@@ -252,11 +303,14 @@ mod tests {
 
     use tokio::io::AsyncReadExt;
 
-    use crate::config::{BrokerConfig, LocalTargetConfig, TargetConfig, TargetTimeoutConfig};
+    use crate::config::{
+        BrokerConfig, BrokerHealthRefreshConfig, LocalTargetConfig, TargetConfig,
+        TargetTimeoutConfig,
+    };
     #[cfg(not(feature = "broker-tls"))]
     use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
-    use super::build_state;
+    use super::{PeriodicTargetRefreshTask, build_state};
 
     #[tokio::test]
     async fn build_state_rejects_unusable_local_default_shell() {
@@ -304,7 +358,7 @@ mod tests {
         );
     }
 
-    async fn spawn_hung_target_info_server(delay: Duration) -> std::net::SocketAddr {
+    async fn spawn_hung_http_server(delay: Duration) -> std::net::SocketAddr {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
@@ -346,7 +400,7 @@ mod tests {
     async fn remote_startup_probes_are_parallel_and_bounded() {
         let mut targets = BTreeMap::new();
         for index in 0..4 {
-            let addr = spawn_hung_target_info_server(Duration::from_secs(5)).await;
+            let addr = spawn_hung_http_server(Duration::from_secs(5)).await;
             targets.insert(format!("slow-{index}"), remote_http_target(addr, 400));
         }
 
@@ -379,6 +433,74 @@ mod tests {
         for handle in state.targets.values() {
             assert_eq!(handle.cached_daemon_info().await, None);
         }
+    }
+
+    #[tokio::test]
+    async fn periodic_target_refresh_task_stops_when_cancelled() {
+        let state = build_state(
+            BrokerConfig {
+                mcp: Default::default(),
+                host_sandbox: None,
+                enable_transfer_compression: true,
+                transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
+                disable_structured_content: false,
+                tools: Default::default(),
+                port_forward_limits: Default::default(),
+                health_refresh: BrokerHealthRefreshConfig { interval_ms: 50 },
+                targets: BTreeMap::new(),
+                local: None,
+            }
+            .into_validated()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let refresh = PeriodicTargetRefreshTask::spawn(&state);
+        tokio::time::timeout(Duration::from_secs(1), refresh.shutdown())
+            .await
+            .expect("refresh task should stop promptly")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn periodic_target_refresh_shutdown_cancels_in_flight_health_probe() {
+        let addr = spawn_hung_http_server(Duration::from_secs(30)).await;
+        let mut targets = BTreeMap::new();
+        targets.insert("refresh-target".to_string(), remote_http_target(addr, 200));
+
+        let state = build_state(
+            BrokerConfig {
+                mcp: Default::default(),
+                host_sandbox: None,
+                enable_transfer_compression: true,
+                transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
+                disable_structured_content: false,
+                tools: Default::default(),
+                port_forward_limits: Default::default(),
+                health_refresh: BrokerHealthRefreshConfig { interval_ms: 1 },
+                targets,
+                local: None,
+            }
+            .into_validated()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let refresh = PeriodicTargetRefreshTask::spawn(&state);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let started = std::time::Instant::now();
+        tokio::time::timeout(Duration::from_secs(1), refresh.shutdown())
+            .await
+            .expect("refresh shutdown should not wait for daemon request timeout")
+            .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "refresh shutdown took too long: {:?}",
+            started.elapsed()
+        );
     }
 
     #[cfg(not(feature = "broker-tls"))]
