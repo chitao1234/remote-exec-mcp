@@ -29,22 +29,6 @@ pub(super) async fn write_prepared_export_to_file(
     .map_err(super::super::internal_transfer_error)?
 }
 
-pub(super) async fn write_prepared_export_to_writer<W>(
-    prepared: PreparedExport,
-    writer: W,
-    compression: remote_exec_proto::transfer::TransferCompression,
-    symlink_mode: TransferSymlinkMode,
-) -> Result<Vec<TransferWarning>, TransferError>
-where
-    W: Write + Send + 'static,
-{
-    tokio::task::spawn_blocking(move || -> Result<Vec<TransferWarning>, TransferError> {
-        write_prepared_export_to_writer_sync(prepared, writer, compression, symlink_mode)
-    })
-    .await
-    .map_err(super::super::internal_transfer_error)?
-}
-
 pub(super) fn write_prepared_export_to_file_sync(
     prepared: PreparedExport,
     archive_path: PathBuf,

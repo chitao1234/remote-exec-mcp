@@ -14,7 +14,7 @@ mod summary;
 
 pub use export::{
     bundle_archives_to_file, export_path_to_archive, export_path_to_byte_stream,
-    export_path_to_file, export_path_to_stream,
+    export_path_to_file,
 };
 pub use import::{import_archive_from_async_reader, import_archive_from_file};
 
@@ -26,12 +26,6 @@ pub struct ExportedArchive {
     pub compression: TransferCompression,
     pub temp_path: tempfile::TempPath,
     pub warnings: Vec<TransferWarning>,
-}
-
-pub struct ExportedArchiveStream {
-    pub source_type: TransferSourceType,
-    pub compression: TransferCompression,
-    pub reader: tokio::io::DuplexStream,
 }
 
 pub enum ExportArchiveStreamItem {

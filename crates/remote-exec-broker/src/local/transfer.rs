@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use futures_util::StreamExt;
 use remote_exec_host::sandbox::CompiledFilesystemSandbox;
+use remote_exec_host::transfer::archive::{ExportArchiveStreamItem, ExportedArchiveByteStream};
 use remote_exec_proto::path::PathPolicy;
 use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferPathInfoResponse,
@@ -19,11 +21,6 @@ pub struct BundledArchiveSource {
 
 pub struct ExportedArchive {
     pub source_type: TransferSourceType,
-}
-
-pub struct ExportedArchiveStream {
-    pub source_type: TransferSourceType,
-    pub reader: tokio::io::DuplexStream,
 }
 
 pub async fn export_path_to_archive(
@@ -47,12 +44,12 @@ pub async fn export_path_to_archive(
     })
 }
 
-pub async fn export_path_to_stream(
+pub async fn export_path_to_byte_stream(
     path: &str,
     request: &remote_exec_proto::rpc::TransferExportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
-) -> anyhow::Result<ExportedArchiveStream> {
-    let exported = remote_exec_host::transfer::archive::export_path_to_stream(
+) -> anyhow::Result<ExportedArchiveByteStream> {
+    remote_exec_host::transfer::archive::export_path_to_byte_stream(
         path,
         request.compression.clone(),
         request.symlink_mode.clone(),
@@ -60,11 +57,62 @@ pub async fn export_path_to_stream(
         sandbox,
         None,
     )
-    .await?;
-    Ok(ExportedArchiveStream {
-        source_type: exported.source_type,
-        reader: exported.reader,
-    })
+    .await
+    .map_err(Into::into)
+}
+
+pub fn export_byte_stream_reader(
+    receiver: tokio::sync::mpsc::Receiver<ExportArchiveStreamItem>,
+) -> impl tokio::io::AsyncRead + Send + Unpin + 'static {
+    enum ExportReadState {
+        Items(tokio::sync::mpsc::Receiver<ExportArchiveStreamItem>),
+        Done,
+    }
+
+    enum ExportReadItem {
+        Data(bytes::Bytes),
+        Complete,
+        Error(remote_exec_host::TransferError),
+        MissingTerminal,
+    }
+
+    let stream = futures_util::stream::unfold(ExportReadState::Items(receiver), |state| async {
+        match state {
+            ExportReadState::Items(mut receiver) => {
+                let item = receiver
+                    .recv()
+                    .await
+                    .map(|item| match item {
+                        ExportArchiveStreamItem::Data(bytes) => ExportReadItem::Data(bytes),
+                        ExportArchiveStreamItem::Complete { .. } => ExportReadItem::Complete,
+                        ExportArchiveStreamItem::Error(err) => ExportReadItem::Error(err),
+                    })
+                    .unwrap_or(ExportReadItem::MissingTerminal);
+                let next = if matches!(
+                    item,
+                    ExportReadItem::Complete
+                        | ExportReadItem::Error(_)
+                        | ExportReadItem::MissingTerminal
+                ) {
+                    ExportReadState::Done
+                } else {
+                    ExportReadState::Items(receiver)
+                };
+                let result = match item {
+                    ExportReadItem::Data(bytes) => Ok(bytes),
+                    ExportReadItem::Complete => return None,
+                    ExportReadItem::Error(err) => Err(std::io::Error::other(err)),
+                    ExportReadItem::MissingTerminal => Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "transfer export stream ended before terminal state",
+                    )),
+                };
+                Some((result, next))
+            }
+            ExportReadState::Done => None,
+        }
+    });
+    tokio_util::io::StreamReader::new(stream.boxed())
 }
 
 pub async fn import_archive_from_file(

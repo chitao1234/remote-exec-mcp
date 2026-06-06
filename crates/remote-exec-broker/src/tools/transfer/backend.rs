@@ -230,13 +230,14 @@ impl TransferBackend for BrokerHostTransferBackend<'_> {
         request: &'a TransferExportRequest,
     ) -> BoxFuture<'a, anyhow::Result<TransferArchiveStream>> {
         Box::pin(async move {
-            let exported =
-                crate::local::transfer::export_path_to_stream(&request.path, request, self.sandbox)
-                    .await?;
-            Ok(TransferArchiveStream::new(
-                exported.source_type,
-                exported.reader,
-            ))
+            let exported = crate::local::transfer::export_path_to_byte_stream(
+                &request.path,
+                request,
+                self.sandbox,
+            )
+            .await?;
+            let reader = crate::local::transfer::export_byte_stream_reader(exported.receiver);
+            Ok(TransferArchiveStream::new(exported.source_type, reader))
         })
     }
 

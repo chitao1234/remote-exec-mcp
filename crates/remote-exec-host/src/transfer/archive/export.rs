@@ -21,8 +21,7 @@ use crate::sandbox::CompiledFilesystemSandbox;
 use super::exclude_matcher::ExcludeMatcher;
 use super::{
     BundledArchiveSource, ExportArchiveStreamItem, ExportPathResult, ExportedArchive,
-    ExportedArchiveByteStream, ExportedArchiveStream, archive_error_to_transfer_error,
-    internal_transfer_error,
+    ExportedArchiveByteStream, archive_error_to_transfer_error, internal_transfer_error,
 };
 
 const STREAM_BUFFER_SIZE: usize = 64 * 1024;
@@ -86,41 +85,6 @@ pub async fn export_path_to_file(
     Ok(ExportPathResult {
         source_type,
         warnings,
-    })
-}
-
-pub async fn export_path_to_stream(
-    path: &str,
-    compression: TransferCompression,
-    symlink_mode: TransferSymlinkMode,
-    exclude: &[String],
-    sandbox: Option<&CompiledFilesystemSandbox>,
-    windows_posix_root: Option<&Path>,
-) -> Result<ExportedArchiveStream, TransferError> {
-    let prepared =
-        prepare::prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root)
-            .await?;
-    let source_type = prepared.source_type.clone();
-    let (reader, writer) = tokio::io::duplex(STREAM_BUFFER_SIZE);
-    let task_compression = compression.clone();
-    tokio::spawn(async move {
-        let writer = tokio_util::io::SyncIoBridge::new(writer);
-        if let Err(err) = single::write_prepared_export_to_writer(
-            prepared,
-            writer,
-            task_compression,
-            symlink_mode,
-        )
-        .await
-        {
-            tracing::debug!(error = %err, "streamed transfer export stopped");
-        }
-    });
-
-    Ok(ExportedArchiveStream {
-        source_type,
-        compression,
-        reader,
     })
 }
 

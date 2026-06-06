@@ -58,22 +58,6 @@ pub fn path_info_for_path(
     }
 }
 
-pub async fn export_path_local(
-    state: Arc<AppState>,
-    req: TransferExportRequest,
-) -> Result<archive::ExportedArchiveStream, TransferError> {
-    ensure_transfer_compression_supported(state.as_ref(), &req.compression)?;
-    archive::export_path_to_stream(
-        &req.path,
-        req.compression,
-        req.symlink_mode,
-        &req.exclude,
-        state.sandbox.as_ref(),
-        state.config.windows_posix_root.as_deref(),
-    )
-    .await
-}
-
 pub async fn export_path_byte_stream_local(
     state: Arc<AppState>,
     req: TransferExportRequest,
