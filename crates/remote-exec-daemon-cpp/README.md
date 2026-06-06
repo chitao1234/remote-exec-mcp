@@ -541,7 +541,7 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - excluded matches are silent, excluded directories are pruned recursively, and single-file sources ignore `exclude` in v1
 - daemon HTTP transfer imports and exports stream archive bodies instead of staging the full tar payload in memory
 - `transfer_max_archive_bytes` and `transfer_max_entry_bytes` bound streamed transfer imports; `max_request_body_bytes` still applies to buffered HTTP request bodies
-- transfer imports support `fail`, `merge`, and `replace` overwrite modes; `merge` overlays compatible existing destinations without deleting unrelated directory entries
+- transfer imports support `fail`, `merge`, and `replace` overwrite modes; `merge` overlays compatible existing destinations without deleting unrelated directory entries; `replace` refreshes a single file or directory destination, while multi-source bundle imports replace only incoming top-level entries and preserve unrelated existing destination entries
 - transfer imports are not transactional; failed imports can leave partial destination changes
 - POSIX transfer exports skip unsupported special entries in directory trees and report warnings
 - POSIX transfer symlink modes support preserving, following, or skipping symlinks

@@ -2,6 +2,7 @@
 #include <cctype>
 #include <cstdio>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -118,6 +119,15 @@ std::string materialize_archive_path(const std::string& destination_root, const 
         path = join_path(path, parts[i]);
     }
     return path;
+}
+
+std::string top_level_archive_component(const std::string& relative_archive_path) {
+    if (relative_archive_path == ".") {
+        return "";
+    }
+
+    const std::vector<std::string> parts = split_archive_path(relative_archive_path);
+    return parts.empty() ? "" : parts[0];
 }
 
 void ensure_no_existing_symlink_in_path(const std::string& destination_root, const std::string& relative_archive_path) {
@@ -436,6 +446,7 @@ ImportSummary import_tree_archive(TransferArchiveReader& reader,
     summary.replaced = prepare_destination_path(absolute_path, source_type, overwrite, create_parent, authorizer);
     make_directory_if_missing(absolute_path);
 
+    std::set<std::string> replaced_units;
     std::string pending_long_name;
     std::vector<char> block(TAR_BLOCK_SIZE);
     while (reader.read_exact_or_eof(block.data(), block.size())) {
@@ -467,6 +478,13 @@ ImportSummary import_tree_archive(TransferArchiveReader& reader,
         }
 
         const std::string output_path = materialize_archive_path(absolute_path, relative_path);
+        if (source_type == TransferSourceType::Multiple && overwrite == TransferOverwrite::Replace) {
+            const std::string unit = top_level_archive_component(relative_path);
+            if (!unit.empty() && replaced_units.insert(unit).second) {
+                replace_existing_path(join_path(absolute_path, unit), authorizer);
+            }
+        }
+
         if (header.typeflag == '5') {
             if (relative_path != ".") {
                 authorize_materialized_relative_path(absolute_path, relative_path, authorizer);

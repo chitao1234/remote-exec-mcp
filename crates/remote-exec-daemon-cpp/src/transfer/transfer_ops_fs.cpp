@@ -203,6 +203,14 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
     return entries;
 }
 
+void replace_existing_path(const std::string& path, const TransferPathAuthorizer& authorizer) {
+    if (!path_exists(path)) {
+        return;
+    }
+    authorize_existing_path_recursive(path, authorizer, 0);
+    remove_existing_path(path);
+}
+
 bool prepare_destination_path(const std::string& absolute_path,
                               TransferSourceType source_type,
                               TransferOverwrite overwrite,
@@ -236,8 +244,14 @@ bool prepare_destination_path(const std::string& absolute_path,
     }
 
     if (existed && overwrite == TransferOverwrite::Replace) {
-        authorize_existing_path_recursive(absolute_path, authorizer, 0);
-        remove_existing_path(absolute_path);
+        if (source_type == TransferSourceType::Multiple) {
+            ensure_not_existing_symlink(absolute_path);
+            if (!is_directory(absolute_path)) {
+                throw TransferFailure(TransferRpcCode::DestinationUnsupported, "destination path is not a directory");
+            }
+            return true;
+        }
+        replace_existing_path(absolute_path, authorizer);
     }
 
     return existed && overwrite == TransferOverwrite::Replace;

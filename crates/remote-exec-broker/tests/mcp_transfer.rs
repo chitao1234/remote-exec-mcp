@@ -581,6 +581,68 @@ async fn transfer_files_bundles_multiple_local_sources_into_destination_director
     assert!(result.structured_content["source"].is_null());
 }
 
+#[tokio::test]
+async fn transfer_files_multi_source_replace_preserves_unrelated_destination_entries() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let file_source = fixture._tempdir.path().join("alpha.txt");
+    let directory_source = fixture._tempdir.path().join("tree");
+    let destination = fixture._tempdir.path().join("bundle");
+    std::fs::write(&file_source, "alpha\n").unwrap();
+    std::fs::create_dir_all(&directory_source).unwrap();
+    std::fs::write(directory_source.join("nested.txt"), "nested\n").unwrap();
+    std::fs::create_dir_all(destination.join("alpha.txt")).unwrap();
+    std::fs::write(destination.join("alpha.txt/old.txt"), "old alpha\n").unwrap();
+    std::fs::create_dir_all(destination.join("tree/stale")).unwrap();
+    std::fs::write(destination.join("tree/stale/old.txt"), "old tree\n").unwrap();
+    std::fs::create_dir_all(destination.join("unrelated")).unwrap();
+    std::fs::write(destination.join("unrelated/keep.txt"), "keep\n").unwrap();
+    std::fs::write(destination.join("untouched.txt"), "untouched\n").unwrap();
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "sources": [
+                    {
+                        "target": "local",
+                        "path": file_source.display().to_string()
+                    },
+                    {
+                        "target": "local",
+                        "path": directory_source.display().to_string()
+                    }
+                ],
+                "destination": {
+                    "target": "local",
+                    "path": destination.display().to_string()
+                },
+                "overwrite": "replace",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    assert_eq!(
+        std::fs::read_to_string(destination.join("alpha.txt")).unwrap(),
+        "alpha\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(destination.join("tree/nested.txt")).unwrap(),
+        "nested\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(destination.join("unrelated/keep.txt")).unwrap(),
+        "keep\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(destination.join("untouched.txt")).unwrap(),
+        "untouched\n"
+    );
+    assert!(!destination.join("tree/stale/old.txt").exists());
+    assert_eq!(result.structured_content["source_type"], "multiple");
+    assert_eq!(result.structured_content["replaced"], true);
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn transfer_files_copies_local_file_using_msys_style_windows_paths() {

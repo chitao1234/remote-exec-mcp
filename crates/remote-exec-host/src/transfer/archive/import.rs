@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -20,7 +21,14 @@ const MAX_REPLACE_AUTHORIZATION_DEPTH: usize = 256;
 struct PreparedImport {
     destination: PathBuf,
     replaced: bool,
+    replace_units: ReplaceUnits,
     sandbox: Option<CompiledFilesystemSandbox>,
+}
+
+struct ReplaceUnits {
+    overwrite: TransferOverwrite,
+    source_type: TransferSourceType,
+    replaced: HashSet<PathBuf>,
 }
 
 pub async fn import_archive_from_file(
@@ -40,6 +48,7 @@ pub async fn import_archive_from_file(
             &prepared.destination,
             &request,
             prepared.replaced,
+            prepared.replace_units,
             prepared.sandbox.as_ref(),
             limits,
         )
@@ -71,6 +80,7 @@ where
             &prepared.destination,
             &request,
             prepared.replaced,
+            prepared.replace_units,
             prepared.sandbox.as_ref(),
             limits,
         )
@@ -92,6 +102,7 @@ async fn prepare_import_destination(
     Ok(PreparedImport {
         destination,
         replaced,
+        replace_units: ReplaceUnits::new(request),
         sandbox: sandbox.cloned(),
     })
 }
@@ -138,6 +149,10 @@ async fn prepare_destination(
                 Ok(false)
             }
             TransferOverwrite::Replace => {
+                if request.source_type == TransferSourceType::Multiple {
+                    ensure_merge_destination_is_compatible(destination, &metadata, request)?;
+                    return Ok(true);
+                }
                 authorize_existing_path_recursive(sandbox, destination, 0)?;
                 if metadata.is_dir() {
                     tokio::fs::remove_dir_all(destination)
@@ -195,12 +210,21 @@ fn extract_archive(
     destination_path: &Path,
     request: &TransferImportRequest,
     replaced: bool,
+    replace_units: ReplaceUnits,
     sandbox: Option<&CompiledFilesystemSandbox>,
     limits: TransferLimits,
 ) -> Result<TransferImportResponse, TransferError> {
     let reader = open_archive_reader(archive_path, &request.compression)
         .map_err(archive_error_to_transfer_error)?;
-    extract_archive_from_reader(reader, destination_path, request, replaced, sandbox, limits)
+    extract_archive_from_reader(
+        reader,
+        destination_path,
+        request,
+        replaced,
+        replace_units,
+        sandbox,
+        limits,
+    )
 }
 
 fn extract_archive_from_reader<R: Read>(
@@ -208,6 +232,7 @@ fn extract_archive_from_reader<R: Read>(
     destination_path: &Path,
     request: &TransferImportRequest,
     replaced: bool,
+    replace_units: ReplaceUnits,
     sandbox: Option<&CompiledFilesystemSandbox>,
     limits: TransferLimits,
 ) -> Result<TransferImportResponse, TransferError> {
@@ -229,6 +254,7 @@ fn extract_archive_from_reader<R: Read>(
             &mut archive,
             destination_path,
             &request.symlink_mode,
+            replace_units,
             &mut summary,
             sandbox,
             limits,
@@ -298,6 +324,7 @@ fn extract_tree_archive<R: Read>(
     archive: &mut tar::Archive<R>,
     destination_path: &Path,
     symlink_mode: &TransferSymlinkMode,
+    mut replace_units: ReplaceUnits,
     summary: &mut TransferImportResponse,
     sandbox: Option<&CompiledFilesystemSandbox>,
     limits: TransferLimits,
@@ -309,6 +336,7 @@ fn extract_tree_archive<R: Read>(
             &mut entry,
             destination_path,
             symlink_mode,
+            &mut replace_units,
             summary,
             sandbox,
             limits,
@@ -321,6 +349,7 @@ fn extract_tree_archive_entry<R: Read>(
     entry: &mut tar::Entry<R>,
     destination_path: &Path,
     symlink_mode: &TransferSymlinkMode,
+    replace_units: &mut ReplaceUnits,
     summary: &mut TransferImportResponse,
     sandbox: Option<&CompiledFilesystemSandbox>,
     limits: TransferLimits,
@@ -338,6 +367,7 @@ fn extract_tree_archive_entry<R: Read>(
     let out = destination_path.join(&rel);
     let entry_type = entry.header().entry_type();
     ensure_supported_archive_entry_type(entry_type, &raw_rel)?;
+    replace_units.prepare_entry(destination_path, &rel, sandbox)?;
     authorize_materialized_path(sandbox, destination_path, &out)?;
     ensure_no_existing_symlink_in_path(destination_path, &out)?;
 
@@ -582,6 +612,59 @@ fn read_tar_block_or_eof<R: Read>(
         }
     }
     Ok(true)
+}
+
+impl ReplaceUnits {
+    fn new(request: &TransferImportRequest) -> Self {
+        Self {
+            overwrite: request.overwrite.clone(),
+            source_type: request.source_type.clone(),
+            replaced: HashSet::new(),
+        }
+    }
+
+    fn prepare_entry(
+        &mut self,
+        destination_root: &Path,
+        relative_path: &Path,
+        sandbox: Option<&CompiledFilesystemSandbox>,
+    ) -> Result<(), TransferError> {
+        if self.overwrite != TransferOverwrite::Replace
+            || self.source_type != TransferSourceType::Multiple
+        {
+            return Ok(());
+        }
+
+        let Some(top_level) = relative_path.components().next() else {
+            return Ok(());
+        };
+        let unit = PathBuf::from(top_level.as_os_str());
+        if !self.replaced.insert(unit.clone()) {
+            return Ok(());
+        }
+
+        let path = destination_root.join(unit);
+        replace_existing_path(sandbox, &path)
+    }
+}
+
+fn replace_existing_path(
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    path: &Path,
+) -> Result<(), TransferError> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(internal_transfer_error(err)),
+    };
+
+    authorize_existing_path_recursive(sandbox, path, 0)?;
+    if metadata.is_dir() {
+        std::fs::remove_dir_all(path).map_err(internal_transfer_error)?;
+    } else {
+        std::fs::remove_file(path).map_err(internal_transfer_error)?;
+    }
+    Ok(())
 }
 
 fn authorize_existing_path_recursive(

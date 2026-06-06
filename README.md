@@ -374,6 +374,9 @@ Default-hidden file tools:
 - requires endpoint-native absolute paths
 - defaults to `overwrite = "merge"`, `destination_mode = "auto"`, and
   `symlink_mode = "preserve"`
+- `overwrite = "replace"` replaces a single file or directory destination; for
+  multi-source transfers into a directory, it replaces only the incoming
+  top-level destination entries and preserves unrelated existing entries
 - supports `destination_mode = "exact"` and `"into_directory"`
 - supports `symlink_mode = "preserve"`, `"follow"`, and `"skip"`
 - supports `exclude` glob patterns relative to each source root

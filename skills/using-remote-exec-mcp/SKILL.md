@@ -290,7 +290,9 @@ Guidance:
   destination by basename.
 - Use `destination_mode: "exact"` to force exact final-path behavior.
 - `overwrite: "merge"` overlays without deleting unrelated directory entries.
-- `overwrite: "replace"` removes the destination first.
+- `overwrite: "replace"` replaces a single file or directory destination. For
+  multi-source directory transfers, it replaces only incoming top-level
+  destination entries and preserves unrelated existing entries.
 - Transfers are not transactional; a failure can leave partial destination
   changes.
 - `exclude` is matched relative to each source root with `/` as the logical

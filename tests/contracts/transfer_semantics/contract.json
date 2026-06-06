@@ -104,6 +104,83 @@
       }
     },
     {
+      "name": "multiple_replace_preserves_unrelated_destination_entries",
+      "source_type": "multiple",
+      "overwrite": "replace",
+      "create_parent": true,
+      "symlink_mode": "preserve",
+      "destination_path": "{root}/dest",
+      "setup": {
+        "dirs": [
+          "{root}/dest/alpha.txt",
+          "{root}/dest/tree/stale",
+          "{root}/dest/unrelated"
+        ],
+        "files": [
+          {
+            "path": "{root}/dest/alpha.txt/old.txt",
+            "contents": "old alpha"
+          },
+          {
+            "path": "{root}/dest/tree/stale/old.txt",
+            "contents": "old tree"
+          },
+          {
+            "path": "{root}/dest/unrelated/keep.txt",
+            "contents": "keep"
+          },
+          {
+            "path": "{root}/dest/untouched.txt",
+            "contents": "untouched"
+          }
+        ]
+      },
+      "archive_entries": [
+        {
+          "type": "file",
+          "path": "alpha.txt",
+          "contents": "alpha"
+        },
+        {
+          "type": "directory",
+          "path": "tree"
+        },
+        {
+          "type": "file",
+          "path": "tree/nested.txt",
+          "contents": "nested"
+        }
+      ],
+      "expected": {
+        "replaced": true,
+        "files_copied": 2,
+        "directories_copied_at_least": 2,
+        "warning_codes": [],
+        "file_contents": [
+          {
+            "path": "{root}/dest/alpha.txt",
+            "contents": "alpha"
+          },
+          {
+            "path": "{root}/dest/tree/nested.txt",
+            "contents": "nested"
+          },
+          {
+            "path": "{root}/dest/unrelated/keep.txt",
+            "contents": "keep"
+          },
+          {
+            "path": "{root}/dest/untouched.txt",
+            "contents": "untouched"
+          }
+        ],
+        "missing_paths": [
+          "{root}/dest/alpha.txt/old.txt",
+          "{root}/dest/tree/stale/old.txt"
+        ]
+      }
+    },
+    {
       "name": "directory_traversal_is_rejected",
       "source_type": "directory",
       "overwrite": "replace",
