@@ -16,8 +16,7 @@ enum RpcRouteBodyHandling {
 };
 
 struct RpcRouteBodyPolicy {
-    RpcRouteBodyPolicy()
-        : handling(RPC_ROUTE_BODY_BUFFERED), max_body_bytes(0U), min_idle_timeout_ms(0UL) {}
+    RpcRouteBodyPolicy() : handling(RPC_ROUTE_BODY_BUFFERED), max_body_bytes(0U), min_idle_timeout_ms(0UL) {}
 
     RpcRouteBodyHandling handling;
     std::size_t max_body_bytes;
