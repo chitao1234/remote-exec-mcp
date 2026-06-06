@@ -71,12 +71,94 @@ impl CachedTargetHealth {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct TargetRuntimeSnapshot {
+    daemon_info: Option<CachedDaemonInfo>,
+    health: Option<CachedTargetHealth>,
+}
+
+impl TargetRuntimeSnapshot {
+    fn verified(info: &TargetInfoResponse) -> Self {
+        Self {
+            daemon_info: Some(TargetHandle::cache_from_target_info(info)),
+            health: Some(CachedTargetHealth::from_target_info(info)),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct TargetRuntimeState {
+    snapshot: TargetRuntimeSnapshot,
+}
+
+impl TargetRuntimeState {
+    fn new(daemon_info: Option<CachedDaemonInfo>, health: Option<CachedTargetHealth>) -> Self {
+        Self {
+            snapshot: TargetRuntimeSnapshot {
+                daemon_info,
+                health,
+            },
+        }
+    }
+
+    fn snapshot(&self) -> TargetRuntimeSnapshot {
+        self.snapshot.clone()
+    }
+
+    fn daemon_info(&self) -> Option<CachedDaemonInfo> {
+        self.snapshot.daemon_info.clone()
+    }
+
+    fn set_unhealthy(&mut self, error: &DaemonClientError) {
+        self.snapshot.health = Some(CachedTargetHealth::unhealthy(error));
+    }
+
+    fn set_verified_target_info(&mut self, info: &TargetInfoResponse) {
+        self.snapshot = TargetRuntimeSnapshot::verified(info);
+    }
+
+    fn update_healthy(&mut self, health: &HealthCheckResponse) -> Option<String> {
+        let previous_daemon_instance_id = self
+            .snapshot
+            .daemon_info
+            .as_ref()
+            .map(|info| info.daemon_instance_id.clone());
+        let instance_changed = self
+            .snapshot
+            .daemon_info
+            .as_ref()
+            .map(|info| info.daemon_instance_id != health.daemon_instance_id)
+            .unwrap_or(false);
+
+        self.snapshot.health = Some(CachedTargetHealth::healthy(health));
+        if instance_changed {
+            self.snapshot.daemon_info = None;
+        }
+
+        instance_changed
+            .then_some(previous_daemon_instance_id)
+            .flatten()
+    }
+}
+
+impl CachedTargetHealth {
+    fn from_target_info(info: &TargetInfoResponse) -> Self {
+        Self {
+            healthy: true,
+            daemon_version: Some(info.identity.daemon_version.clone()),
+            daemon_instance_id: Some(info.daemon_instance_id.clone()),
+            last_checked_at: SystemTime::now(),
+            last_error: None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct TargetHandle {
     pub(super) backend: TargetBackend,
     expected_daemon_name: Option<String>,
-    cached_daemon_info: Arc<Mutex<Option<CachedDaemonInfo>>>,
-    cached_health: Arc<Mutex<Option<CachedTargetHealth>>>,
+    runtime: Arc<Mutex<TargetRuntimeState>>,
+    probe_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Clone, Copy)]
@@ -95,8 +177,11 @@ impl TargetHandle {
         Self {
             backend,
             expected_daemon_name,
-            cached_daemon_info: Arc::new(Mutex::new(cached_daemon_info)),
-            cached_health: Arc::new(Mutex::new(cached_health)),
+            runtime: Arc::new(Mutex::new(TargetRuntimeState::new(
+                cached_daemon_info,
+                cached_health,
+            ))),
+            probe_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -109,13 +194,7 @@ impl TargetHandle {
             backend,
             expected_daemon_name,
             Some(Self::cache_from_target_info(info)),
-            Some(CachedTargetHealth {
-                healthy: true,
-                daemon_version: Some(info.identity.daemon_version.clone()),
-                daemon_instance_id: Some(info.daemon_instance_id.clone()),
-                last_checked_at: SystemTime::now(),
-                last_error: None,
-            }),
+            Some(CachedTargetHealth::from_target_info(info)),
         )
     }
 
@@ -136,8 +215,12 @@ impl TargetHandle {
         }
     }
 
+    async fn runtime_snapshot(&self) -> TargetRuntimeSnapshot {
+        self.runtime.lock().await.snapshot()
+    }
+
     pub(crate) async fn cached_daemon_info(&self) -> Option<CachedDaemonInfo> {
-        self.cached_daemon_info.lock().await.clone()
+        self.runtime_snapshot().await.daemon_info
     }
 
     pub(crate) async fn verified_cached_daemon_info(
@@ -224,21 +307,29 @@ impl TargetHandle {
     }
 
     pub(crate) async fn invalidate_cached_daemon_info(&self) {
-        *self.cached_daemon_info.lock().await = None;
+        self.runtime.lock().await.snapshot.daemon_info = None;
         tracing::info!("cleared cached daemon identity and metadata");
     }
 
     pub(crate) async fn ensure_daemon_info_cached(&self, name: &str) -> anyhow::Result<()> {
-        if self.cached_daemon_info.lock().await.is_some() {
+        if self.runtime.lock().await.daemon_info().is_some() {
+            return Ok(());
+        }
+
+        let _probe_guard = self.probe_lock.lock().await;
+        if self.runtime.lock().await.daemon_info().is_some() {
             return Ok(());
         }
 
         let info = match self.target_info().await {
             Ok(info) => info,
             Err(DaemonClientError::Transport(err)) => {
-                *self.cached_health.lock().await = Some(CachedTargetHealth::unhealthy(
-                    &DaemonClientError::Transport(anyhow::anyhow!(err.to_string())),
-                ));
+                self.runtime
+                    .lock()
+                    .await
+                    .set_unhealthy(&DaemonClientError::Transport(anyhow::anyhow!(
+                        err.to_string()
+                    )));
                 tracing::warn!(target = %name, ?err, "target identity verification failed");
                 return Err(DaemonClientError::Transport(err).into());
             }
@@ -246,14 +337,7 @@ impl TargetHandle {
         };
         ensure_expected_daemon_name(name, self.expected_daemon_name.as_deref(), &info.target)?;
 
-        *self.cached_daemon_info.lock().await = Some(Self::cache_from_target_info(&info));
-        *self.cached_health.lock().await = Some(CachedTargetHealth {
-            healthy: true,
-            daemon_version: Some(info.identity.daemon_version.clone()),
-            daemon_instance_id: Some(info.daemon_instance_id.clone()),
-            last_checked_at: SystemTime::now(),
-            last_error: None,
-        });
+        self.runtime.lock().await.set_verified_target_info(&info);
         tracing::info!(
             target = %name,
             daemon_name = %info.target,
@@ -271,39 +355,26 @@ impl TargetHandle {
         &self,
         name: &str,
     ) -> anyhow::Result<Option<String>> {
+        let _probe_guard = self.probe_lock.lock().await;
         match self.health().await {
             Ok(health) => {
-                *self.cached_health.lock().await = Some(CachedTargetHealth::healthy(&health));
+                let previous_daemon_instance_id = self.runtime.lock().await.update_healthy(&health);
+                let needs_target_info = self.runtime.lock().await.daemon_info().is_none();
 
-                let existing = self.cached_daemon_info().await;
-                let previous_daemon_instance_id = existing
-                    .as_ref()
-                    .map(|info| info.daemon_instance_id.clone());
-                let instance_changed = existing
-                    .as_ref()
-                    .map(|info| info.daemon_instance_id != health.daemon_instance_id)
-                    .unwrap_or(false);
-
-                if existing.is_none() || instance_changed {
-                    if instance_changed {
-                        self.invalidate_cached_daemon_info().await;
-                    }
+                if needs_target_info {
                     let info = self.target_info().await?;
                     ensure_expected_daemon_name(
                         name,
                         self.expected_daemon_name.as_deref(),
                         &info.target,
                     )?;
-                    *self.cached_daemon_info.lock().await =
-                        Some(Self::cache_from_target_info(&info));
+                    self.runtime.lock().await.set_verified_target_info(&info);
                 }
 
-                Ok(instance_changed
-                    .then_some(previous_daemon_instance_id)
-                    .flatten())
+                Ok(previous_daemon_instance_id)
             }
             Err(err) => {
-                *self.cached_health.lock().await = Some(CachedTargetHealth::unhealthy(&err));
+                self.runtime.lock().await.set_unhealthy(&err);
                 if let DaemonClientError::Rpc { .. } | DaemonClientError::Decode(_) = &err {
                     tracing::debug!(target = %name, error = %err, "target health refresh failed");
                 } else {
@@ -364,5 +435,103 @@ impl RemoteTargetHandle<'_> {
         self.client
             .transfer_import_from_archive_stream(req, stream)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use remote_exec_proto::rpc::{
+        DaemonIdentity, FileToolProtocolVersion, HealthCheckResponse, HealthStatus,
+        PortForwardProtocolVersion, TargetCapabilities, TargetInfoResponse,
+        TransferStreamProtocolVersion,
+    };
+
+    use super::TargetRuntimeState;
+
+    #[test]
+    fn healthy_refresh_for_new_instance_clears_stale_daemon_info_in_same_snapshot() {
+        let old_info = target_info("daemon-old", "1.0.0");
+        let mut state = TargetRuntimeState::new(
+            Some(super::TargetHandle::cache_from_target_info(&old_info)),
+            Some(super::CachedTargetHealth::from_target_info(&old_info)),
+        );
+
+        let previous = state.update_healthy(&health("daemon-new", "1.0.1"));
+        let snapshot = state.snapshot();
+
+        assert_eq!(previous.as_deref(), Some("daemon-old"));
+        assert_eq!(
+            snapshot
+                .health
+                .as_ref()
+                .and_then(|health| health.daemon_instance_id.as_deref()),
+            Some("daemon-new")
+        );
+        assert_eq!(snapshot.daemon_info, None);
+    }
+
+    #[test]
+    fn verified_target_info_replaces_health_and_metadata_as_one_snapshot() {
+        let old_info = target_info("daemon-old", "1.0.0");
+        let mut state = TargetRuntimeState::new(
+            Some(super::TargetHandle::cache_from_target_info(&old_info)),
+            Some(super::CachedTargetHealth::from_target_info(&old_info)),
+        );
+
+        let new_info = target_info("daemon-new", "1.0.1");
+        state.set_verified_target_info(&new_info);
+        let snapshot = state.snapshot();
+
+        assert_eq!(
+            snapshot
+                .daemon_info
+                .as_ref()
+                .map(|info| info.daemon_instance_id.as_str()),
+            Some("daemon-new")
+        );
+        assert_eq!(
+            snapshot
+                .health
+                .as_ref()
+                .and_then(|health| health.daemon_instance_id.as_deref()),
+            Some("daemon-new")
+        );
+        assert_eq!(
+            snapshot
+                .health
+                .as_ref()
+                .and_then(|health| health.daemon_version.as_deref()),
+            Some("1.0.1")
+        );
+    }
+
+    fn health(daemon_instance_id: &str, daemon_version: &str) -> HealthCheckResponse {
+        HealthCheckResponse {
+            status: HealthStatus::Ok,
+            daemon_version: daemon_version.to_string(),
+            daemon_instance_id: daemon_instance_id.to_string(),
+        }
+    }
+
+    fn target_info(daemon_instance_id: &str, daemon_version: &str) -> TargetInfoResponse {
+        TargetInfoResponse {
+            target: "target-a".to_string(),
+            daemon_instance_id: daemon_instance_id.to_string(),
+            identity: DaemonIdentity {
+                daemon_version: daemon_version.to_string(),
+                hostname: "host-a".to_string(),
+                platform: "linux".to_string(),
+                arch: "x86_64".to_string(),
+            },
+            capabilities: TargetCapabilities {
+                supports_pty: true,
+                supports_port_forward: true,
+                port_forward_protocol_version: Some(PortForwardProtocolVersion::v4()),
+                transfer_stream_protocol_version: Some(TransferStreamProtocolVersion::v2()),
+                file_tool_protocol_version: Some(FileToolProtocolVersion::v1()),
+            },
+            supports_image_read: true,
+            supports_transfer_compression: true,
+        }
     }
 }
