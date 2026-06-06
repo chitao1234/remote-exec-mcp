@@ -10,15 +10,13 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
 use bytes::Bytes;
-use futures_util::{Stream, StreamExt, TryStream, TryStreamExt};
+use futures_util::{Stream, StreamExt, TryStreamExt};
 use remote_exec_host::HostRpcError;
 use remote_exec_host::transfer::archive::ExportArchiveStreamItem;
 use remote_exec_proto::rpc::{
-    RpcErrorBody, TRANSFER_STREAM_FRAME_HEADER_LEN, TRANSFER_STREAM_PREFACE, TransferExportRequest,
-    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse,
-    TransferStreamFrameType, decode_transfer_stream_frame_header,
-    encode_transfer_stream_complete_frame, encode_transfer_stream_data_frame,
-    encode_transfer_stream_frame, parse_transfer_stream_complete_payload,
+    RpcErrorBody, TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse, TransferStreamDecodeError, TransferStreamExportItem,
+    decode_transfer_stream_body, encode_transfer_export_item_stream,
 };
 
 use crate::AppState;
@@ -100,210 +98,55 @@ pub async fn import_archive(
 }
 
 fn framed_import_data_stream(body: Body) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
-    let decoder = TransferStreamImportDecoder::new(http_body_util::BodyExt::into_data_stream(body));
-    futures_util::stream::try_unfold(decoder, |mut decoder| async move {
-        match decoder.next_data_frame().await? {
-            Some(bytes) => Ok(Some((bytes, decoder))),
-            None => Ok(None),
-        }
-    })
+    decode_transfer_stream_body(http_body_util::BodyExt::into_data_stream(body))
+        .map_err(decode_error_to_io_error)
 }
 
-struct TransferStreamImportDecoder<S> {
-    stream: S,
-    buffer: Vec<u8>,
-    offset: usize,
-    preface_read: bool,
-}
-
-impl<S> TransferStreamImportDecoder<S> {
-    fn new(stream: S) -> Self {
-        Self {
-            stream,
-            buffer: Vec::new(),
-            offset: 0,
-            preface_read: false,
-        }
-    }
-}
-
-impl<S, E> TransferStreamImportDecoder<S>
+fn decode_error_to_io_error<E>(err: TransferStreamDecodeError<E>) -> std::io::Error
 where
-    S: TryStream<Ok = Bytes, Error = E> + Unpin,
     E: std::error::Error + Send + Sync + 'static,
 {
-    async fn next_data_frame(&mut self) -> Result<Option<Bytes>, std::io::Error> {
-        self.read_preface().await?;
-
-        loop {
-            let header_bytes = self
-                .read_exact(
-                    TRANSFER_STREAM_FRAME_HEADER_LEN,
-                    "transfer stream frame header",
-                )
-                .await?;
-            let header_array: [u8; TRANSFER_STREAM_FRAME_HEADER_LEN] = header_bytes
-                .try_into()
-                .expect("read_exact returned requested length");
-            let header = decode_transfer_stream_frame_header(header_array)
-                .map_err(invalid_transfer_stream)?;
-            let payload = self
-                .read_exact(header.payload_len as usize, "transfer stream frame payload")
-                .await?;
-
-            match header.frame_type {
-                TransferStreamFrameType::Data if payload.is_empty() => continue,
-                TransferStreamFrameType::Data => return Ok(Some(Bytes::from(payload))),
-                TransferStreamFrameType::Complete => {
-                    parse_complete_payload(&payload)?;
-                    return Ok(None);
-                }
-                TransferStreamFrameType::Error => return Err(parse_error_payload(&payload)),
-            }
+    match err {
+        TransferStreamDecodeError::Transport(err) => std::io::Error::other(err),
+        TransferStreamDecodeError::Invalid(message) => {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, message)
         }
-    }
-
-    async fn read_preface(&mut self) -> Result<(), std::io::Error> {
-        if self.preface_read {
-            return Ok(());
-        }
-        let preface = self
-            .read_exact(TRANSFER_STREAM_PREFACE.len(), "transfer stream preface")
-            .await?;
-        if preface.as_slice() != TRANSFER_STREAM_PREFACE {
-            return Err(invalid_transfer_stream("invalid transfer stream preface"));
-        }
-        self.preface_read = true;
-        Ok(())
-    }
-
-    async fn read_exact(
-        &mut self,
-        len: usize,
-        label: &'static str,
-    ) -> Result<Vec<u8>, std::io::Error> {
-        while self.available() < len {
-            match self.stream.try_next().await {
-                Ok(Some(chunk)) if !chunk.is_empty() => self.buffer.extend_from_slice(&chunk),
-                Ok(Some(_)) => {}
-                Ok(None) => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::UnexpectedEof,
-                        format!("transfer stream ended before {label}"),
-                    ));
-                }
-                Err(err) => return Err(std::io::Error::other(err)),
-            }
-        }
-
-        let start = self.offset;
-        let end = start + len;
-        let output = self.buffer[start..end].to_vec();
-        self.offset = end;
-        self.compact_buffer();
-        Ok(output)
-    }
-
-    fn available(&self) -> usize {
-        self.buffer.len().saturating_sub(self.offset)
-    }
-
-    fn compact_buffer(&mut self) {
-        if self.offset == 0 {
-            return;
-        }
-        if self.offset == self.buffer.len() {
-            self.buffer.clear();
-            self.offset = 0;
-            return;
-        }
-        if self.offset >= 64 * 1024 {
-            self.buffer.drain(..self.offset);
-            self.offset = 0;
-        }
-    }
-}
-
-fn parse_complete_payload(payload: &[u8]) -> Result<(), std::io::Error> {
-    parse_transfer_stream_complete_payload(payload)
-        .map(|_| ())
-        .map_err(|err| {
-            invalid_transfer_stream(format!("malformed transfer stream complete frame: {err}"))
-        })
-}
-
-fn parse_error_payload(payload: &[u8]) -> std::io::Error {
-    match serde_json::from_slice::<RpcErrorBody>(payload) {
-        Ok(error) => std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!(
-                "transfer stream error {}: {}",
-                error.wire_code(),
-                error.message
-            ),
+        TransferStreamDecodeError::MalformedComplete(err) => std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("malformed transfer stream complete frame: {err}"),
         ),
-        Err(err) => {
-            invalid_transfer_stream(format!("malformed transfer stream error frame: {err}"))
+        TransferStreamDecodeError::MalformedError(err) => std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("malformed transfer stream error frame: {err}"),
+        ),
+        TransferStreamDecodeError::ErrorFrame { code, message } => {
+            std::io::Error::other(format!("transfer stream error {code}: {message}"))
         }
     }
-}
-
-fn invalid_transfer_stream(error: impl std::fmt::Display) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
 }
 
 fn framed_export_stream(
     receiver: tokio::sync::mpsc::Receiver<ExportArchiveStreamItem>,
 ) -> impl Stream<Item = Result<Bytes, std::convert::Infallible>> {
-    enum State {
-        Preface(tokio::sync::mpsc::Receiver<ExportArchiveStreamItem>),
-        Items(tokio::sync::mpsc::Receiver<ExportArchiveStreamItem>),
-        Done,
-    }
+    let stream = futures_util::stream::unfold(receiver, |mut receiver| async {
+        receiver
+            .recv()
+            .await
+            .map(|item| (transfer_export_item(item), receiver))
+    });
+    encode_transfer_export_item_stream(stream, transfer_error_body)
+}
 
-    futures_util::stream::unfold(State::Preface(receiver), |state| async move {
-        match state {
-            State::Preface(receiver) => Some((
-                Ok(Bytes::copy_from_slice(TRANSFER_STREAM_PREFACE)),
-                State::Items(receiver),
-            )),
-            State::Items(mut receiver) => match receiver.recv().await {
-                Some(ExportArchiveStreamItem::Data(bytes)) => {
-                    Some((Ok(data_frame(bytes)), State::Items(receiver)))
-                }
-                Some(ExportArchiveStreamItem::Complete { archive_bytes }) => {
-                    Some((Ok(complete_frame(archive_bytes)), State::Done))
-                }
-                Some(ExportArchiveStreamItem::Error(err)) => {
-                    Some((Ok(error_frame(transfer_error_body(err))), State::Done))
-                }
-                None => Some((
-                    Ok(error_frame(RpcErrorBody::new(
-                        remote_exec_proto::rpc::RpcErrorCode::Internal,
-                        "transfer export stream ended before terminal state",
-                    ))),
-                    State::Done,
-                )),
-            },
-            State::Done => None,
+fn transfer_export_item(
+    item: ExportArchiveStreamItem,
+) -> TransferStreamExportItem<remote_exec_host::TransferError> {
+    match item {
+        ExportArchiveStreamItem::Data(bytes) => TransferStreamExportItem::Data(bytes),
+        ExportArchiveStreamItem::Complete { archive_bytes } => {
+            TransferStreamExportItem::Complete { archive_bytes }
         }
-    })
-}
-
-fn data_frame(bytes: Bytes) -> Bytes {
-    Bytes::from(encode_transfer_stream_data_frame(&bytes))
-}
-
-fn complete_frame(archive_bytes: u64) -> Bytes {
-    Bytes::from(encode_transfer_stream_complete_frame(archive_bytes))
-}
-
-fn error_frame(error: RpcErrorBody) -> Bytes {
-    let payload = serde_json::to_vec(&error).expect("transfer error payload serializes");
-    Bytes::from(encode_transfer_stream_frame(
-        TransferStreamFrameType::Error,
-        &payload,
-    ))
+        ExportArchiveStreamItem::Error(err) => TransferStreamExportItem::Error(err),
+    }
 }
 
 fn transfer_error_body(err: remote_exec_host::TransferError) -> RpcErrorBody {

@@ -1715,6 +1715,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "bytes",
+ "futures-util",
  "schemars",
  "serde",
  "serde_json",

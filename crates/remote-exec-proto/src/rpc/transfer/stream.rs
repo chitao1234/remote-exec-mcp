@@ -1,3 +1,5 @@
+use bytes::Bytes;
+use futures_util::{Stream, StreamExt, TryStream, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -66,6 +68,43 @@ pub struct TransferStreamComplete {
     pub archive_bytes: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferStreamTerminalFrame {
+    Complete(TransferStreamComplete),
+    Error(super::super::RpcErrorBody),
+}
+
+#[derive(Debug, Error)]
+pub enum TransferStreamDecodeError<E>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    #[error("transfer stream transport error: {0}")]
+    Transport(E),
+    #[error("{0}")]
+    Invalid(String),
+    #[error("malformed transfer stream complete frame: {0}")]
+    MalformedComplete(serde_json::Error),
+    #[error("malformed transfer stream error frame: {0}")]
+    MalformedError(serde_json::Error),
+    #[error("transfer stream error {code}: {message}")]
+    ErrorFrame { code: String, message: String },
+}
+
+impl<E> TransferStreamDecodeError<E>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    pub fn error_frame_body(&self) -> Option<super::super::RpcErrorBody> {
+        match self {
+            Self::ErrorFrame { code, message } => {
+                Some(super::super::RpcErrorBody::from_raw_code(code, message))
+            }
+            _ => None,
+        }
+    }
+}
+
 pub fn encode_transfer_stream_frame_header(header: TransferStreamFrameHeader) -> [u8; 12] {
     let mut output = [0_u8; TRANSFER_STREAM_FRAME_HEADER_LEN];
     output[0] = header.frame_type.as_byte();
@@ -99,10 +138,406 @@ pub fn encode_transfer_stream_complete_frame(archive_bytes: u64) -> Vec<u8> {
     encode_transfer_stream_frame(TransferStreamFrameType::Complete, &payload)
 }
 
+pub fn encode_transfer_stream_error_frame(error: &super::super::RpcErrorBody) -> Vec<u8> {
+    let payload = serde_json::to_vec(error).expect("transfer error payload serializes");
+    encode_transfer_stream_frame(TransferStreamFrameType::Error, &payload)
+}
+
 pub fn parse_transfer_stream_complete_payload(
     payload: &[u8],
 ) -> Result<TransferStreamComplete, serde_json::Error> {
     serde_json::from_slice(payload)
+}
+
+pub fn parse_transfer_stream_error_payload(
+    payload: &[u8],
+) -> Result<super::super::RpcErrorBody, serde_json::Error> {
+    serde_json::from_slice(payload)
+}
+
+pub fn transfer_stream_data_frame(payload: impl AsRef<[u8]>) -> Bytes {
+    Bytes::from(encode_transfer_stream_data_frame(payload.as_ref()))
+}
+
+pub fn transfer_stream_complete_frame(archive_bytes: u64) -> Bytes {
+    Bytes::from(encode_transfer_stream_complete_frame(archive_bytes))
+}
+
+pub fn transfer_stream_error_frame(error: &super::super::RpcErrorBody) -> Bytes {
+    Bytes::from(encode_transfer_stream_error_frame(error))
+}
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+pub fn encode_transfer_stream_body<S, E>(stream: S) -> impl Stream<Item = Result<Bytes, BoxError>>
+where
+    S: TryStream<Ok = Bytes, Error = E> + Send + 'static,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    enum State {
+        Preface {
+            stream: futures_util::stream::BoxStream<'static, Result<Bytes, BoxError>>,
+            archive_bytes: u64,
+        },
+        Data {
+            stream: futures_util::stream::BoxStream<'static, Result<Bytes, BoxError>>,
+            archive_bytes: u64,
+        },
+        Done,
+    }
+
+    let stream = stream.map_err(|err| -> BoxError { Box::new(err) }).boxed();
+    futures_util::stream::try_unfold(
+        State::Preface {
+            stream,
+            archive_bytes: 0,
+        },
+        |state| async move {
+            match state {
+                State::Preface {
+                    stream,
+                    archive_bytes,
+                } => Ok::<Option<(Bytes, State)>, BoxError>(Some((
+                    Bytes::copy_from_slice(TRANSFER_STREAM_PREFACE),
+                    State::Data {
+                        stream,
+                        archive_bytes,
+                    },
+                ))),
+                State::Data {
+                    mut stream,
+                    archive_bytes,
+                } => loop {
+                    match stream.try_next().await? {
+                        Some(bytes) if bytes.is_empty() => {}
+                        Some(bytes) => {
+                            let next_archive_bytes =
+                                archive_bytes.saturating_add(bytes.len() as u64);
+                            return Ok::<Option<(Bytes, State)>, BoxError>(Some((
+                                transfer_stream_data_frame(bytes),
+                                State::Data {
+                                    stream,
+                                    archive_bytes: next_archive_bytes,
+                                },
+                            )));
+                        }
+                        None => {
+                            return Ok::<Option<(Bytes, State)>, BoxError>(Some((
+                                transfer_stream_complete_frame(archive_bytes),
+                                State::Done,
+                            )));
+                        }
+                    }
+                },
+                State::Done => Ok::<Option<(Bytes, State)>, BoxError>(None),
+            }
+        },
+    )
+}
+
+pub fn encode_transfer_export_item_stream<S, E, F>(
+    stream: S,
+    map_error: F,
+) -> impl Stream<Item = Result<Bytes, std::convert::Infallible>>
+where
+    S: Stream<Item = TransferStreamExportItem<E>> + Send + 'static,
+    E: Send + 'static,
+    F: Fn(E) -> super::super::RpcErrorBody + Clone + Send + 'static,
+{
+    enum State<E> {
+        Preface(futures_util::stream::BoxStream<'static, TransferStreamExportItem<E>>),
+        Items(futures_util::stream::BoxStream<'static, TransferStreamExportItem<E>>),
+        Done,
+    }
+
+    let stream = stream.boxed();
+
+    futures_util::stream::unfold(State::Preface(stream), move |state| {
+        let map_error = map_error.clone();
+        async move {
+            match state {
+                State::Preface(stream) => Some((
+                    Ok(Bytes::copy_from_slice(TRANSFER_STREAM_PREFACE)),
+                    State::Items(stream),
+                )),
+                State::Items(mut stream) => match stream.next().await {
+                    Some(TransferStreamExportItem::Data(bytes)) => {
+                        Some((Ok(transfer_stream_data_frame(bytes)), State::Items(stream)))
+                    }
+                    Some(TransferStreamExportItem::Complete { archive_bytes }) => Some((
+                        Ok(transfer_stream_complete_frame(archive_bytes)),
+                        State::Done,
+                    )),
+                    Some(TransferStreamExportItem::Error(err)) => Some((
+                        Ok(transfer_stream_error_frame(&map_error(err))),
+                        State::Done,
+                    )),
+                    None => Some((
+                        Ok(transfer_stream_error_frame(
+                            &super::super::RpcErrorBody::new(
+                                super::super::RpcErrorCode::Internal,
+                                "transfer export stream ended before terminal state",
+                            ),
+                        )),
+                        State::Done,
+                    )),
+                },
+                State::Done => None,
+            }
+        }
+    })
+}
+
+pub enum TransferStreamExportItem<E> {
+    Data(Bytes),
+    Complete { archive_bytes: u64 },
+    Error(E),
+}
+
+pub fn decode_transfer_stream_body<S, E>(
+    stream: S,
+) -> impl Stream<Item = Result<Bytes, TransferStreamDecodeError<E>>>
+where
+    S: TryStream<Ok = Bytes, Error = E> + Unpin,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let decoder = TransferStreamDecoder::new(stream);
+    futures_util::stream::try_unfold(decoder, |mut decoder| async move {
+        match decoder.next_data_frame().await? {
+            Some(bytes) => Ok(Some((bytes, decoder))),
+            None => Ok(None),
+        }
+    })
+}
+
+pub struct TransferStreamDecoder<S> {
+    stream: S,
+    buffer: Vec<u8>,
+    offset: usize,
+    preface_read: bool,
+    terminal: bool,
+}
+
+impl<S> TransferStreamDecoder<S> {
+    pub fn new(stream: S) -> Self {
+        Self {
+            stream,
+            buffer: Vec::new(),
+            offset: 0,
+            preface_read: false,
+            terminal: false,
+        }
+    }
+}
+
+impl<S, E> TransferStreamDecoder<S>
+where
+    S: TryStream<Ok = Bytes, Error = E> + Unpin,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    pub async fn next_data_frame(&mut self) -> Result<Option<Bytes>, TransferStreamDecodeError<E>> {
+        if self.terminal {
+            return Ok(None);
+        }
+        self.read_preface().await?;
+
+        loop {
+            let header_bytes = self
+                .read_exact(
+                    TRANSFER_STREAM_FRAME_HEADER_LEN,
+                    "transfer stream frame header",
+                )
+                .await?;
+            let header_array: [u8; TRANSFER_STREAM_FRAME_HEADER_LEN] = header_bytes
+                .try_into()
+                .expect("read_exact returned requested length");
+            let header = decode_transfer_stream_frame_header(header_array)
+                .map_err(|err| TransferStreamDecodeError::Invalid(err.to_string()))?;
+            let payload = self
+                .read_exact(header.payload_len as usize, "transfer stream frame payload")
+                .await?;
+
+            match header.frame_type {
+                TransferStreamFrameType::Data if payload.is_empty() => continue,
+                TransferStreamFrameType::Data => return Ok(Some(Bytes::from(payload))),
+                TransferStreamFrameType::Complete => {
+                    self.parse_terminal_payload(TransferStreamFrameType::Complete, &payload)?;
+                    self.terminal = true;
+                    return Ok(None);
+                }
+                TransferStreamFrameType::Error => {
+                    self.terminal = true;
+                    return Err(error_frame_to_decode_error(&payload));
+                }
+            }
+        }
+    }
+
+    pub async fn next_frame(
+        &mut self,
+    ) -> Result<Option<TransferStreamFrame>, TransferStreamDecodeError<E>> {
+        if self.terminal {
+            return Ok(None);
+        }
+        self.read_preface().await?;
+
+        let header_bytes = self
+            .read_exact(
+                TRANSFER_STREAM_FRAME_HEADER_LEN,
+                "transfer stream frame header",
+            )
+            .await?;
+        let header_array: [u8; TRANSFER_STREAM_FRAME_HEADER_LEN] = header_bytes
+            .try_into()
+            .expect("read_exact returned requested length");
+        let header = decode_transfer_stream_frame_header(header_array)
+            .map_err(|err| TransferStreamDecodeError::Invalid(err.to_string()))?;
+        let payload = self
+            .read_exact(header.payload_len as usize, "transfer stream frame payload")
+            .await?;
+
+        match header.frame_type {
+            TransferStreamFrameType::Data => {
+                Ok(Some(TransferStreamFrame::Data(Bytes::from(payload))))
+            }
+            TransferStreamFrameType::Complete => {
+                let complete = parse_transfer_stream_complete_payload(&payload)
+                    .map_err(TransferStreamDecodeError::MalformedComplete)?;
+                self.terminal = true;
+                Ok(Some(TransferStreamFrame::Complete(complete)))
+            }
+            TransferStreamFrameType::Error => {
+                let error = parse_transfer_stream_error_payload(&payload)
+                    .map_err(TransferStreamDecodeError::MalformedError)?;
+                self.terminal = true;
+                Ok(Some(TransferStreamFrame::Error(error)))
+            }
+        }
+    }
+
+    async fn read_preface(&mut self) -> Result<(), TransferStreamDecodeError<E>> {
+        if self.preface_read {
+            return Ok(());
+        }
+        let preface = self
+            .read_exact(TRANSFER_STREAM_PREFACE.len(), "transfer stream preface")
+            .await?;
+        if preface.as_slice() != TRANSFER_STREAM_PREFACE {
+            return Err(TransferStreamDecodeError::Invalid(
+                "invalid transfer stream preface".to_string(),
+            ));
+        }
+        self.preface_read = true;
+        Ok(())
+    }
+
+    async fn read_exact(
+        &mut self,
+        len: usize,
+        label: &'static str,
+    ) -> Result<Vec<u8>, TransferStreamDecodeError<E>> {
+        while self.available() < len {
+            match self.stream.try_next().await {
+                Ok(Some(chunk)) if !chunk.is_empty() => self.buffer.extend_from_slice(&chunk),
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    return Err(TransferStreamDecodeError::Invalid(format!(
+                        "transfer stream ended before {label}"
+                    )));
+                }
+                Err(err) => return Err(TransferStreamDecodeError::Transport(err)),
+            }
+        }
+
+        let start = self.offset;
+        let end = start + len;
+        let output = self.buffer[start..end].to_vec();
+        self.offset = end;
+        self.compact_buffer();
+        Ok(output)
+    }
+
+    fn available(&self) -> usize {
+        self.buffer.len().saturating_sub(self.offset)
+    }
+
+    fn compact_buffer(&mut self) {
+        if self.offset == 0 {
+            return;
+        }
+        if self.offset == self.buffer.len() {
+            self.buffer.clear();
+            self.offset = 0;
+            return;
+        }
+        if self.offset >= 64 * 1024 {
+            self.buffer.drain(..self.offset);
+            self.offset = 0;
+        }
+    }
+
+    fn parse_terminal_payload(
+        &self,
+        frame_type: TransferStreamFrameType,
+        payload: &[u8],
+    ) -> Result<TransferStreamTerminalFrame, TransferStreamDecodeError<E>> {
+        parse_transfer_stream_terminal_payload(frame_type, payload).map_err(|err| match err {
+            TransferStreamTerminalDecodeError::MalformedComplete(err) => {
+                TransferStreamDecodeError::MalformedComplete(err)
+            }
+            TransferStreamTerminalDecodeError::MalformedError(err) => {
+                TransferStreamDecodeError::MalformedError(err)
+            }
+            TransferStreamTerminalDecodeError::NonTerminalFrame => {
+                TransferStreamDecodeError::Invalid("terminal frame expected".to_string())
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferStreamFrame {
+    Data(Bytes),
+    Complete(TransferStreamComplete),
+    Error(super::super::RpcErrorBody),
+}
+
+#[derive(Debug, Error)]
+pub enum TransferStreamTerminalDecodeError {
+    #[error("malformed transfer stream complete frame: {0}")]
+    MalformedComplete(serde_json::Error),
+    #[error("malformed transfer stream error frame: {0}")]
+    MalformedError(serde_json::Error),
+    #[error("terminal frame expected")]
+    NonTerminalFrame,
+}
+
+pub fn parse_transfer_stream_terminal_payload(
+    frame_type: TransferStreamFrameType,
+    payload: &[u8],
+) -> Result<TransferStreamTerminalFrame, TransferStreamTerminalDecodeError> {
+    match frame_type {
+        TransferStreamFrameType::Complete => parse_transfer_stream_complete_payload(payload)
+            .map(TransferStreamTerminalFrame::Complete)
+            .map_err(TransferStreamTerminalDecodeError::MalformedComplete),
+        TransferStreamFrameType::Error => parse_transfer_stream_error_payload(payload)
+            .map(TransferStreamTerminalFrame::Error)
+            .map_err(TransferStreamTerminalDecodeError::MalformedError),
+        TransferStreamFrameType::Data => Err(TransferStreamTerminalDecodeError::NonTerminalFrame),
+    }
+}
+
+fn error_frame_to_decode_error<E>(payload: &[u8]) -> TransferStreamDecodeError<E>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    match parse_transfer_stream_error_payload(payload) {
+        Ok(error) => TransferStreamDecodeError::ErrorFrame {
+            code: error.wire_code().to_string(),
+            message: error.message,
+        },
+        Err(err) => TransferStreamDecodeError::MalformedError(err),
+    }
 }
 
 pub fn decode_transfer_stream_frame_header(
