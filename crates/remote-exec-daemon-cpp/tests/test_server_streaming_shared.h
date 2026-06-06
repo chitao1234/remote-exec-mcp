@@ -13,7 +13,7 @@
 #include "port_forward/port_forward_socket_ops.h"
 #include "port_forward/port_tunnel.h"
 #include "port_forward/port_tunnel_frame.h"
-#include "runtime/server.h"
+#include "runtime/app_context.h"
 #include "http/server_transport.h"
 #include "test_assert.h"
 #include "test_daemon_fixtures.h"
@@ -29,12 +29,12 @@ fs::path make_test_root();
 bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms);
 void wait_past_resume_timeout(unsigned long resume_timeout_ms);
 
-void initialize_state_with_port_forward_limits(AppState& state,
+void initialize_state_with_port_forward_limits(TestDaemonState& state,
                                                const fs::path& root,
                                                const PortForwardLimitConfig& limits);
-void initialize_state_with_worker_limit(AppState& state, const fs::path& root, unsigned long max_workers);
-void initialize_state(AppState& state, const fs::path& root);
-void enable_sandbox(AppState& state);
+void initialize_state_with_worker_limit(TestDaemonState& state, const fs::path& root, unsigned long max_workers);
+void initialize_state(TestDaemonState& state, const fs::path& root);
+void enable_sandbox(TestDaemonState& state);
 
 const char* tunnel_frame_type_name(PortTunnelFrameType type);
 PortTunnelFrame read_tunnel_frame(SOCKET socket);
@@ -60,8 +60,8 @@ Json tunnel_open_meta(const std::string& role,
                       uint64_t generation,
                       const std::string& resume_session_id = std::string());
 
-void open_tunnel(AppState& state, UniqueSocket* client_socket, std::thread* server_thread);
-PortTunnelFrame open_v4_tunnel(AppState& state,
+void open_tunnel(TestDaemonState& state, UniqueSocket* client_socket, std::thread* server_thread);
+PortTunnelFrame open_v4_tunnel(TestDaemonState& state,
                                UniqueSocket* client_socket,
                                std::thread* server_thread,
                                const std::string& role,
@@ -71,12 +71,12 @@ PortTunnelFrame open_v4_tunnel(AppState& state,
 void close_tunnel(UniqueSocket* client_socket, std::thread* server_thread);
 void wait_until_bindable(const std::string& endpoint);
 
-void assert_http_streaming_routes(AppState& state, const fs::path& root);
-void assert_tunnel_rejects_invalid_requests(AppState& state);
-void assert_tunnel_open_ready_and_limits(AppState& state);
-void assert_tunnel_tcp_listener_and_connect_paths(AppState& state);
-void assert_tunnel_udp_paths(AppState& state);
-void assert_listen_session_rejects_second_retained_open(AppState& state);
-void assert_tunnel_limit_and_pressure_paths(AppState& state);
-void assert_tunnel_resume_and_expiry_paths(AppState& state);
+void assert_http_streaming_routes(TestHttpConnectionHarness& harness, const fs::path& root);
+void assert_tunnel_rejects_invalid_requests(TestDaemonState& state);
+void assert_tunnel_open_ready_and_limits(TestDaemonState& state);
+void assert_tunnel_tcp_listener_and_connect_paths(TestDaemonState& state);
+void assert_tunnel_udp_paths(TestDaemonState& state);
+void assert_listen_session_rejects_second_retained_open(TestDaemonState& state);
+void assert_tunnel_limit_and_pressure_paths(TestDaemonState& state);
+void assert_tunnel_resume_and_expiry_paths(TestDaemonState& state);
 void assert_detached_session_releases_active_tcp_accept_budget(const fs::path& root);

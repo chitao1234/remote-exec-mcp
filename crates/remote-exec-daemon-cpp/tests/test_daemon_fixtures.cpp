@@ -16,6 +16,32 @@ std::string stable_test_shell() {
 
 } // namespace
 
+ServerRouteContext make_test_server_route_context(TestDaemonState& state) {
+    return make_server_route_context(state.config, state.metadata, state.sandbox, state.services);
+}
+
+HttpConnectionContext make_test_http_connection_context(TestDaemonState& state) {
+    return make_http_connection_context(state.config, state.metadata, state.sandbox, state.services, state.shutdown);
+}
+
+TestRouteHarness::TestRouteHarness(const test_fs::path& root) : state(), routes() {
+    initialize_test_daemon_state(state, root);
+    refresh_context();
+}
+
+void TestRouteHarness::refresh_context() {
+    routes = make_test_server_route_context(state);
+}
+
+TestHttpConnectionHarness::TestHttpConnectionHarness(const test_fs::path& root) : state(), connection() {
+    initialize_test_daemon_state(state, root);
+    refresh_context();
+}
+
+void TestHttpConnectionHarness::refresh_context() {
+    connection = make_test_http_connection_context(state);
+}
+
 test_fs::path make_daemon_test_root(const std::string& directory_name) {
     const test_fs::path root = test_fs::unique_test_root(directory_name);
     test_fs::remove_all(root);
@@ -39,7 +65,7 @@ DaemonConfig make_test_daemon_config(const test_fs::path& root) {
     return config;
 }
 
-void initialize_test_daemon_state_with_port_forward_limits(AppState& state,
+void initialize_test_daemon_state_with_port_forward_limits(TestDaemonState& state,
                                                            const test_fs::path& root,
                                                            const PortForwardLimitConfig& limits) {
     state.config = make_test_daemon_config(root);
@@ -51,7 +77,7 @@ void initialize_test_daemon_state_with_port_forward_limits(AppState& state,
     state.services.port_tunnel = create_port_tunnel_service(limits);
 }
 
-void initialize_test_daemon_state_with_worker_limit(AppState& state,
+void initialize_test_daemon_state_with_worker_limit(TestDaemonState& state,
                                                     const test_fs::path& root,
                                                     unsigned long max_workers) {
     PortForwardLimitConfig limits;
@@ -59,11 +85,11 @@ void initialize_test_daemon_state_with_worker_limit(AppState& state,
     initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 }
 
-void initialize_test_daemon_state(AppState& state, const test_fs::path& root) {
+void initialize_test_daemon_state(TestDaemonState& state, const test_fs::path& root) {
     initialize_test_daemon_state_with_worker_limit(state, root, DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS);
 }
 
-void enable_test_daemon_sandbox(AppState& state) {
+void enable_test_daemon_sandbox(TestDaemonState& state) {
     state.sandbox.enabled = state.config.sandbox_configured;
     if (state.sandbox.enabled) {
         state.sandbox.compiled = compile_filesystem_sandbox(state.config.sandbox);

@@ -286,12 +286,12 @@ static std::string encoded_destination_path_header(const fs::path& destination) 
     return base64_encode_bytes(destination.string());
 }
 
-static std::string run_single_request(AppState& state, const std::string& request) {
+static std::string run_single_request(TestHttpConnectionHarness& harness, const std::string& request) {
     ConnectedSocketPair sockets = make_connected_socket_pair();
     UniqueSocket server_socket(std::move(sockets.first));
     UniqueSocket client_socket(std::move(sockets.second));
     send_request_and_close_writer(client_socket.get(), request);
-    handle_client(state, std::move(server_socket));
+    handle_client(harness, std::move(server_socket));
     return read_all_from_socket(client_socket.get());
 }
 
@@ -316,14 +316,14 @@ json_post_request_with_extra_headers(const std::string& path, const Json& body, 
     return request.str();
 }
 
-static void assert_persistent_json_requests_reuse_socket(AppState& state) {
+static void assert_persistent_json_requests_reuse_socket(TestHttpConnectionHarness& harness) {
     ConnectedSocketPair sockets = make_connected_socket_pair();
     UniqueSocket server_socket(std::move(sockets.first));
     UniqueSocket client_socket(std::move(sockets.second));
     std::thread server_thread(
-        [&state](SOCKET socket) {
+        [&harness](SOCKET socket) {
             UniqueSocket owned_socket(socket);
-            handle_client(state, std::move(owned_socket));
+            handle_client(harness, std::move(owned_socket));
         },
         server_socket.release());
 
@@ -345,59 +345,58 @@ static void assert_persistent_json_requests_reuse_socket(AppState& state) {
     server_thread.join();
 }
 
-static void assert_http_auth_and_rejection_paths(AppState& state, const fs::path& root) {
-    const std::string missing_auth_response = run_single_request(state, json_post_request("/v1/health", Json::object()));
+static void assert_http_auth_and_rejection_paths(TestHttpConnectionHarness& harness, const fs::path& root) {
+    const std::string missing_auth_response =
+        run_single_request(harness, json_post_request("/v1/health", Json::object()));
     assert_json_response_code(missing_auth_response, "HTTP/1.1 401 Unauthorized\r\n", "unauthorized");
     TEST_ASSERT(missing_auth_response.find("WWW-Authenticate: Bearer\r\n") != std::string::npos);
 
     const std::string wrong_auth_response =
-        run_single_request(state,
+        run_single_request(harness,
                            json_post_request_with_extra_headers(
                                "/v1/health", Json::object(), "Authorization: Bearer wrong-secret\r\n"));
     assert_json_response_code(wrong_auth_response, "HTTP/1.1 401 Unauthorized\r\n", "unauthorized");
 
     const std::string ok_response =
-        run_single_request(state,
+        run_single_request(harness,
                            json_post_request_with_extra_headers(
                                "/v1/health", Json::object(), "Authorization: Bearer shared-secret\r\n"));
     TEST_ASSERT(ok_response.find("HTTP/1.1 200 OK\r\n") == 0);
     TEST_ASSERT(Json::parse(response_body(ok_response)).at("status").get<std::string>() == "ok");
 
-    AppState unauthenticated_state;
-    initialize_state(unauthenticated_state, root);
+    TestHttpConnectionHarness unauthenticated(root);
 
     const std::string get_response = run_single_request(
-        unauthenticated_state,
+        unauthenticated,
         "GET /v1/health HTTP/1.1\r\n"
         "Content-Length: 0\r\n"
         "\r\n");
     assert_json_response_code(get_response, "HTTP/1.1 405 Method Not Allowed\r\n", "method_not_allowed");
 
     const std::string not_found_response =
-        run_single_request(unauthenticated_state, json_post_request("/v1/not-found", Json::object()));
+        run_single_request(unauthenticated, json_post_request("/v1/not-found", Json::object()));
     assert_json_response_code(not_found_response, "HTTP/1.1 404 Not Found\r\n", "not_found");
 }
 
 static void assert_http_request_limits_through_connection_path(const fs::path& root) {
-    AppState header_limit_state;
-    initialize_state(header_limit_state, root);
-    header_limit_state.config.max_request_header_bytes = 48U;
+    TestHttpConnectionHarness header_limit(root);
+    header_limit.state.config.max_request_header_bytes = 48U;
+    header_limit.refresh_context();
 
     std::ostringstream oversized_header_request;
     oversized_header_request << "POST /v1/health HTTP/1.1\r\n"
                              << "X-Too-Large: " << std::string(80, 'x') << "\r\n"
                              << "\r\n";
-    const std::string header_limit_response =
-        run_single_request(header_limit_state, oversized_header_request.str());
+    const std::string header_limit_response = run_single_request(header_limit, oversized_header_request.str());
     assert_json_response_code(header_limit_response, "HTTP/1.1 400 Bad Request\r\n", "bad_request");
     TEST_ASSERT(response_body(header_limit_response).find("http request headers too large") != std::string::npos);
 
-    AppState content_length_limit_state;
-    initialize_state(content_length_limit_state, root);
-    content_length_limit_state.config.max_request_body_bytes = 4U;
+    TestHttpConnectionHarness content_length_limit(root);
+    content_length_limit.state.config.max_request_body_bytes = 4U;
+    content_length_limit.refresh_context();
 
     const std::string content_length_limit_response = run_single_request(
-        content_length_limit_state,
+        content_length_limit,
         "POST /v1/health HTTP/1.1\r\n"
         "Content-Length: 5\r\n"
         "\r\n"
@@ -405,12 +404,12 @@ static void assert_http_request_limits_through_connection_path(const fs::path& r
     assert_json_response_code(content_length_limit_response, "HTTP/1.1 400 Bad Request\r\n", "bad_request");
     TEST_ASSERT(response_body(content_length_limit_response).find("http request body too large") != std::string::npos);
 
-    AppState chunked_limit_state;
-    initialize_state(chunked_limit_state, root);
-    chunked_limit_state.config.max_request_body_bytes = 4U;
+    TestHttpConnectionHarness chunked_limit(root);
+    chunked_limit.state.config.max_request_body_bytes = 4U;
+    chunked_limit.refresh_context();
 
     const std::string chunked_limit_response = run_single_request(
-        chunked_limit_state,
+        chunked_limit,
         "POST /v1/health HTTP/1.1\r\n"
         "Transfer-Encoding: chunked\r\n"
         "\r\n"
@@ -423,14 +422,14 @@ static void assert_http_request_limits_through_connection_path(const fs::path& r
 }
 
 static void assert_streaming_import_ignores_generic_http_body_limit(const fs::path& root) {
-    AppState state;
-    initialize_state(state, root);
-    state.config.max_request_body_bytes = 32U;
-    state.config.transfer_limits.max_archive_bytes = 4096U;
-    state.config.transfer_limits.max_entry_bytes = 4096U;
+    TestHttpConnectionHarness harness(root);
+    harness.state.config.max_request_body_bytes = 32U;
+    harness.state.config.transfer_limits.max_archive_bytes = 4096U;
+    harness.state.config.transfer_limits.max_entry_bytes = 4096U;
+    harness.refresh_context();
 
     const std::string archive = tar_with_single_file("stream body exceeds generic http limit");
-    TEST_ASSERT(framed_transfer_body(archive).size() > state.config.max_request_body_bytes);
+    TEST_ASSERT(framed_transfer_body(archive).size() > harness.state.config.max_request_body_bytes);
 
     const fs::path imported_path = root / "small-http-limit-import.txt";
     std::ostringstream request;
@@ -447,16 +446,16 @@ static void assert_streaming_import_ignores_generic_http_body_limit(const fs::pa
             << "\r\n"
             << chunked_body(framed_transfer_body(archive));
 
-    const std::string response = run_single_request(state, request.str());
+    const std::string response = run_single_request(harness, request.str());
     TEST_ASSERT(response.find("HTTP/1.1 200 OK\r\n") == 0);
     TEST_ASSERT(read_text_file(imported_path) == "stream body exceeds generic http limit");
 }
 
 static void assert_streaming_import_failure_closes_connection_with_unread_body(const fs::path& root) {
-    AppState state;
-    initialize_state(state, root);
-    state.config.transfer_limits.max_archive_bytes = 16U;
-    state.config.transfer_limits.max_entry_bytes = 4096U;
+    TestHttpConnectionHarness harness(root);
+    harness.state.config.transfer_limits.max_archive_bytes = 16U;
+    harness.state.config.transfer_limits.max_entry_bytes = 4096U;
+    harness.refresh_context();
 
     const std::string archive = tar_with_single_file(std::string(128U, 'x'));
     const std::string framed = framed_transfer_body(archive);
@@ -479,9 +478,9 @@ static void assert_streaming_import_failure_closes_connection_with_unread_body(c
     UniqueSocket server_socket(std::move(sockets.first));
     UniqueSocket client_socket(std::move(sockets.second));
     std::thread server_thread(
-        [&state](SOCKET socket) {
+        [&harness](SOCKET socket) {
             UniqueSocket owned_socket(socket);
-            handle_client(state, std::move(owned_socket));
+            handle_client(harness, std::move(owned_socket));
         },
         server_socket.release());
 
@@ -500,13 +499,13 @@ static void assert_streaming_import_failure_closes_connection_with_unread_body(c
     server_thread.join();
 }
 
-void assert_http_streaming_routes(AppState& state, const fs::path& root) {
-    assert_persistent_json_requests_reuse_socket(state);
+void assert_http_streaming_routes(TestHttpConnectionHarness& harness, const fs::path& root) {
+    assert_persistent_json_requests_reuse_socket(harness);
 
-    AppState auth_state;
-    initialize_state(auth_state, root);
-    auth_state.config.http_auth_bearer_token = "shared-secret";
-    assert_http_auth_and_rejection_paths(auth_state, root);
+    TestHttpConnectionHarness auth(root);
+    auth.state.config.http_auth_bearer_token = "shared-secret";
+    auth.refresh_context();
+    assert_http_auth_and_rejection_paths(auth, root);
     assert_http_request_limits_through_connection_path(root);
     assert_streaming_import_ignores_generic_http_body_limit(root);
     assert_streaming_import_failure_closes_connection_with_unread_body(root);
@@ -527,7 +526,7 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
                    << "\r\n"
                    << chunked_body(framed_transfer_body(archive));
 
-    const std::string import_response = run_single_request(state, import_request.str());
+    const std::string import_response = run_single_request(harness, import_request.str());
     TEST_ASSERT(import_response.find("HTTP/1.1 200 OK\r\n") == 0);
     TEST_ASSERT(read_text_file(imported_path) == "streamed import");
 
@@ -541,7 +540,7 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
                    << "\r\n"
                    << export_body;
 
-    const std::string export_response = run_single_request(state, export_request.str());
+    const std::string export_response = run_single_request(harness, export_request.str());
     TEST_ASSERT(export_response.find("HTTP/1.1 200 OK\r\n") == 0);
     TEST_ASSERT(export_response.find("Transfer-Encoding: chunked\r\n") != std::string::npos);
     TEST_ASSERT(export_response.find("Connection: close\r\n") == std::string::npos);
@@ -559,12 +558,12 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
     fs::create_directories(outside);
     write_text_file(outside / "outside.txt", "outside");
 
-    AppState sandbox_state;
-    initialize_state(sandbox_state, root);
-    sandbox_state.config.sandbox_configured = true;
-    sandbox_state.config.sandbox.read.allow.push_back(read_allowed.string());
-    sandbox_state.config.sandbox.write.allow.push_back(write_allowed.string());
-    enable_sandbox(sandbox_state);
+    TestHttpConnectionHarness sandbox(root);
+    sandbox.state.config.sandbox_configured = true;
+    sandbox.state.config.sandbox.read.allow.push_back(read_allowed.string());
+    sandbox.state.config.sandbox.write.allow.push_back(write_allowed.string());
+    enable_sandbox(sandbox.state);
+    sandbox.refresh_context();
 
     const std::string denied_export_body = Json{{"path", (outside / "outside.txt").string()}}.dump();
     std::ostringstream denied_export_request;
@@ -573,7 +572,7 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
                           << "x-remote-exec-transfer-stream-version: 2\r\n"
                           << "\r\n"
                           << denied_export_body;
-    const std::string denied_export_response = run_single_request(sandbox_state, denied_export_request.str());
+    const std::string denied_export_response = run_single_request(sandbox, denied_export_request.str());
     TEST_ASSERT(denied_export_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
     TEST_ASSERT(Json::parse(response_body(denied_export_response)).at("code").get<std::string>() == "sandbox_denied");
 
@@ -583,12 +582,12 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
     write_text_file(recursive_read_root / "visible.txt", "visible");
     write_text_file(recursive_denied / "hidden.txt", "hidden");
 
-    AppState recursive_deny_state;
-    initialize_state(recursive_deny_state, root);
-    recursive_deny_state.config.sandbox_configured = true;
-    recursive_deny_state.config.sandbox.read.allow.push_back(read_allowed.string());
-    recursive_deny_state.config.sandbox.read.deny.push_back(recursive_denied.string());
-    enable_sandbox(recursive_deny_state);
+    TestHttpConnectionHarness recursive_deny(root);
+    recursive_deny.state.config.sandbox_configured = true;
+    recursive_deny.state.config.sandbox.read.allow.push_back(read_allowed.string());
+    recursive_deny.state.config.sandbox.read.deny.push_back(recursive_denied.string());
+    enable_sandbox(recursive_deny.state);
+    recursive_deny.refresh_context();
 
     const std::string recursive_deny_body = Json{{"path", recursive_read_root.string()}}.dump();
     std::ostringstream recursive_deny_request;
@@ -597,7 +596,7 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
                            << "x-remote-exec-transfer-stream-version: 2\r\n"
                            << "\r\n"
                            << recursive_deny_body;
-    const std::string recursive_deny_response = run_single_request(recursive_deny_state, recursive_deny_request.str());
+    const std::string recursive_deny_response = run_single_request(recursive_deny, recursive_deny_request.str());
     TEST_ASSERT(recursive_deny_response.find("HTTP/1.1 200 OK\r\n") == 0);
     TEST_ASSERT(recursive_deny_response.find("Transfer-Encoding: chunked\r\n") != std::string::npos);
     TEST_ASSERT(decode_framed_transfer_error(decode_chunked_response_body(recursive_deny_response))
@@ -618,7 +617,7 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
                           << "x-remote-exec-compression: none\r\n"
                           << "\r\n"
                           << chunked_body(framed_transfer_body(archive));
-    const std::string denied_import_response = run_single_request(sandbox_state, denied_import_request.str());
+    const std::string denied_import_response = run_single_request(sandbox, denied_import_request.str());
     TEST_ASSERT(denied_import_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
     TEST_ASSERT(Json::parse(response_body(denied_import_response)).at("code").get<std::string>() == "sandbox_denied");
     TEST_ASSERT(!fs::exists(outside / "imported.txt"));

@@ -3,7 +3,7 @@
 #include "http/http_helpers.h"
 #include "platform/platform.h"
 #include "rpc/server_request_utils.h"
-#include "runtime/app_context.h"
+#include "runtime/route_context.h"
 
 namespace {
 

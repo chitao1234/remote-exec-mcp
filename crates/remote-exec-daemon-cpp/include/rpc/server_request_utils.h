@@ -6,7 +6,7 @@
 #include "patch/patch_engine.h"
 #include "policy/filesystem_sandbox.h"
 #include "rpc/exec_request_utils.h"
-#include "runtime/app_context.h"
+#include "runtime/route_context.h"
 
 bool reject_before_route(const HttpGateContext& context, const HttpRequest& request, HttpResponse* response);
 std::string resolve_workdir(const PathResolutionContext& context, const Json& body);

@@ -168,12 +168,12 @@ HttpResponse handle_target_info(const TargetInfoRouteContext& context) {
     Json body{
         {"target", *context.target},
         {"daemon_version", REMOTE_EXEC_CPP_VERSION},
-        {"daemon_instance_id", context.metadata->daemon_instance_id},
-        {"hostname", context.metadata->hostname},
+        {"daemon_instance_id", *context.daemon_instance_id},
+        {"hostname", *context.hostname},
         {"platform", platform::platform_name()},
         {"arch", platform::arch_name()},
     };
-    write_daemon_capabilities(&body, context.metadata->capabilities);
+    write_daemon_capabilities(&body, *context.capabilities);
     write_json(response, body);
     return response;
 }

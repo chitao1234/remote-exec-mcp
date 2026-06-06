@@ -1,6 +1,6 @@
 #include "test_server_streaming_shared.h"
 
-static void assert_tunnel_close_releases_tcp_listener(AppState& state) {
+static void assert_tunnel_close_releases_tcp_listener(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
@@ -25,7 +25,7 @@ static void assert_tunnel_close_releases_tcp_listener(AppState& state) {
     TEST_ASSERT(rebound.valid());
 }
 
-static void assert_terminal_tunnel_error_releases_tcp_listener_immediately(AppState& state) {
+static void assert_terminal_tunnel_error_releases_tcp_listener_immediately(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
@@ -67,7 +67,7 @@ static void assert_terminal_tunnel_error_releases_tcp_listener_immediately(AppSt
     wait_until_bindable(endpoint);
 }
 
-static void assert_tunnel_close_releases_retained_listener_immediately(AppState& state) {
+static void assert_tunnel_close_releases_retained_listener_immediately(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_tunnel(state, &client_socket, &server_thread);
@@ -98,7 +98,7 @@ static void assert_tunnel_close_releases_retained_listener_immediately(AppState&
     TEST_ASSERT(rebound.valid());
 }
 
-static void assert_tunnel_tcp_connect_echoes_binary_data(AppState& state) {
+static void assert_tunnel_tcp_connect_echoes_binary_data(TestDaemonState& state) {
     UniqueSocket echo_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
     const std::string echo_endpoint = socket_local_endpoint(echo_listener.get());
     std::thread echo_thread([&]() {
@@ -128,7 +128,7 @@ static void assert_tunnel_tcp_connect_echoes_binary_data(AppState& state) {
     echo_thread.join();
 }
 
-void assert_tunnel_tcp_listener_and_connect_paths(AppState& state) {
+void assert_tunnel_tcp_listener_and_connect_paths(TestDaemonState& state) {
     assert_tunnel_close_releases_tcp_listener(state);
     assert_terminal_tunnel_error_releases_tcp_listener_immediately(state);
     assert_tunnel_close_releases_retained_listener_immediately(state);

@@ -33,23 +33,23 @@ void wait_past_resume_timeout(unsigned long resume_timeout_ms) {
     platform::sleep_ms(resume_timeout_ms + RESUME_TIMEOUT_EXPIRY_MARGIN_MS);
 }
 
-void initialize_state_with_port_forward_limits(AppState& state,
+void initialize_state_with_port_forward_limits(TestDaemonState& state,
                                                const fs::path& root,
                                                const PortForwardLimitConfig& limits) {
     initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 }
 
-void initialize_state_with_worker_limit(AppState& state, const fs::path& root, unsigned long max_workers) {
+void initialize_state_with_worker_limit(TestDaemonState& state, const fs::path& root, unsigned long max_workers) {
     PortForwardLimitConfig limits;
     limits.max_worker_threads = max_workers;
     initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 }
 
-void initialize_state(AppState& state, const fs::path& root) {
+void initialize_state(TestDaemonState& state, const fs::path& root) {
     initialize_test_daemon_state(state, root);
 }
 
-void enable_sandbox(AppState& state) {
+void enable_sandbox(TestDaemonState& state) {
     enable_test_daemon_sandbox(state);
 }
 
@@ -303,16 +303,16 @@ void assert_forward_drop(const PortTunnelFrame& frame, const std::string& kind, 
     TEST_ASSERT(meta.at("reason").get<std::string>() == reason);
 }
 
-static std::thread start_server_thread(AppState& state, UniqueSocket* server_socket) {
+static std::thread start_server_thread(TestDaemonState& state, UniqueSocket* server_socket) {
     return std::thread(
         [&state](SOCKET socket) {
             UniqueSocket owned_socket(socket);
-            handle_client(state, std::move(owned_socket));
+            handle_client(make_test_http_connection_context(state), std::move(owned_socket));
         },
         server_socket->release());
 }
 
-void open_tunnel(AppState& state, UniqueSocket* client_socket, std::thread* server_thread) {
+void open_tunnel(TestDaemonState& state, UniqueSocket* client_socket, std::thread* server_thread) {
     ConnectedSocketPair sockets = make_connected_socket_pair();
     UniqueSocket server_socket(std::move(sockets.first));
     client_socket->reset(sockets.second.release());
@@ -374,7 +374,7 @@ Json tunnel_open_meta(const std::string& role,
     return meta;
 }
 
-PortTunnelFrame open_v4_tunnel(AppState& state,
+PortTunnelFrame open_v4_tunnel(TestDaemonState& state,
                                UniqueSocket* client_socket,
                                std::thread* server_thread,
                                const std::string& role,

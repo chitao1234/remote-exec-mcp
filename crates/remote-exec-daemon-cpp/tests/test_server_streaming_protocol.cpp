@@ -1,6 +1,6 @@
 #include "test_server_streaming_shared.h"
 
-static void assert_tunnel_open_ready_and_close_round_trip(AppState& state) {
+static void assert_tunnel_open_ready_and_close_round_trip(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_tunnel(state, &client_socket, &server_thread);
@@ -30,7 +30,7 @@ static void assert_tunnel_open_ready_and_close_round_trip(AppState& state) {
 }
 
 static void assert_port_tunnel_worker_limit_is_reported(const fs::path& root) {
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_worker_limit(state, root, 1UL);
 
     UniqueSocket worker_holder;
@@ -76,7 +76,7 @@ static void assert_tunnel_ready_reports_configured_limits(const fs::path& root) 
     limits.max_tunnel_queued_bytes = 4096UL;
     limits.tunnel_io_timeout_ms = 6000UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
@@ -96,7 +96,7 @@ static void assert_tunnel_ready_reports_configured_limits(const fs::path& root) 
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_tunnel_rejects_data_plane_before_open(AppState& state) {
+static void assert_tunnel_rejects_data_plane_before_open(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_tunnel(state, &client_socket, &server_thread);
@@ -116,7 +116,7 @@ static void assert_tunnel_rejects_data_plane_before_open(AppState& state) {
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_tunnel_open_metadata_error(AppState& state, const std::string& meta) {
+static void assert_tunnel_open_metadata_error(TestDaemonState& state, const std::string& meta) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_tunnel(state, &client_socket, &server_thread);
@@ -132,7 +132,7 @@ static void assert_tunnel_open_metadata_error(AppState& state, const std::string
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_tunnel_rejects_frames_for_wrong_role_or_protocol(AppState& state) {
+static void assert_tunnel_rejects_frames_for_wrong_role_or_protocol(TestDaemonState& state) {
     assert_tunnel_open_metadata_error(state, "{not-json");
     assert_tunnel_open_metadata_error(state, Json{{"role", "listen"}, {"protocol", "tcp"}}.dump());
     assert_tunnel_open_metadata_error(state, Json{{"role", 7}, {"protocol", "tcp"}, {"generation", 1ULL}}.dump());
@@ -173,7 +173,7 @@ static void assert_tunnel_rejects_frames_for_wrong_role_or_protocol(AppState& st
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_legacy_session_frames_are_reserved_but_unsupported(AppState& state) {
+static void assert_legacy_session_frames_are_reserved_but_unsupported(TestDaemonState& state) {
     const PortTunnelFrameType legacy_frames[] = {PortTunnelFrameType::SessionOpen, PortTunnelFrameType::SessionResume};
     for (std::size_t i = 0U; i < sizeof(legacy_frames) / sizeof(legacy_frames[0]); ++i) {
         UniqueSocket client_socket;
@@ -192,7 +192,7 @@ static void assert_retained_session_limit_is_enforced(const fs::path& root) {
     PortForwardLimitConfig limits;
     limits.max_retained_sessions = 1UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket first_client;
@@ -215,7 +215,7 @@ static void assert_retained_listener_limit_is_enforced_and_released(const fs::pa
     limits.max_retained_sessions = 2UL;
     limits.max_retained_listeners = 1UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket first_client;
@@ -246,7 +246,7 @@ static void assert_retained_listener_limit_is_enforced_and_released(const fs::pa
     close_tunnel(&first_client, &first_thread);
 }
 
-void assert_listen_session_rejects_second_retained_open(AppState& state) {
+void assert_listen_session_rejects_second_retained_open(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
@@ -268,13 +268,13 @@ void assert_listen_session_rejects_second_retained_open(AppState& state) {
     close_tunnel(&client_socket, &server_thread);
 }
 
-void assert_tunnel_rejects_invalid_requests(AppState& state) {
+void assert_tunnel_rejects_invalid_requests(TestDaemonState& state) {
     assert_tunnel_rejects_data_plane_before_open(state);
     assert_tunnel_rejects_frames_for_wrong_role_or_protocol(state);
     assert_legacy_session_frames_are_reserved_but_unsupported(state);
 }
 
-void assert_tunnel_open_ready_and_limits(AppState& state) {
+void assert_tunnel_open_ready_and_limits(TestDaemonState& state) {
     const fs::path root(state.config.default_workdir);
 
     assert_tunnel_open_ready_and_close_round_trip(state);

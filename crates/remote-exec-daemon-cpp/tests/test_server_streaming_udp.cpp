@@ -6,7 +6,7 @@ static void assert_udp_bind_limit_is_enforced_and_released(const fs::path& root)
     PortForwardLimitConfig limits;
     limits.max_udp_binds = 1UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
@@ -28,7 +28,7 @@ static void assert_udp_bind_limit_is_enforced_and_released(const fs::path& root)
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_tunnel_udp_bind_emits_two_peer_datagrams(AppState& state) {
+static void assert_tunnel_udp_bind_emits_two_peer_datagrams(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
@@ -58,7 +58,7 @@ static void assert_tunnel_udp_bind_emits_two_peer_datagrams(AppState& state) {
     close_tunnel(&client_socket, &server_thread);
 }
 
-void assert_tunnel_udp_paths(AppState& state) {
+void assert_tunnel_udp_paths(TestDaemonState& state) {
     const fs::path root(state.config.default_workdir);
 
     assert_udp_bind_limit_is_enforced_and_released(root);

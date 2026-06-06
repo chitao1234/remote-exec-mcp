@@ -14,7 +14,7 @@ std::vector<std::string> transfer_exclude_or_empty(const Json& body) {
 }
 
 TransferPathAuthorizer make_transfer_write_authorizer(const PathResolutionContext& context) {
-    if (!context.sandbox->enabled) {
+    if (context.active_sandbox == nullptr) {
         return TransferPathAuthorizer();
     }
     return [context](const std::string& path) { authorize_sandbox_path(context, SANDBOX_WRITE, path); };
@@ -38,7 +38,7 @@ resolve_authorized_transfer_path(const PathResolutionContext& context, const std
 }
 
 TransferPathAuthorizer make_transfer_read_authorizer(const PathResolutionContext& context) {
-    if (!context.sandbox->enabled) {
+    if (context.active_sandbox == nullptr) {
         return TransferPathAuthorizer();
     }
     return [context](const std::string& path) { authorize_sandbox_path(context, SANDBOX_READ, path); };

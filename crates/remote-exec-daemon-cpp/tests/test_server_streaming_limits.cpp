@@ -3,7 +3,7 @@
 static const unsigned long TCP_PAYLOAD_DRAIN_MARGIN_MS = 100UL;
 
 static void assert_tcp_connect_worker_limit_errors_before_success(const fs::path& root) {
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_worker_limit(state, root, 1UL);
 
     UniqueSocket listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
@@ -35,7 +35,7 @@ static void assert_tcp_connect_worker_limit_errors_before_success(const fs::path
 }
 
 static void assert_tcp_connect_read_thread_failure_errors_before_success(const fs::path& root) {
-    AppState state;
+    TestDaemonState state;
     initialize_state(state, root);
 
     UniqueSocket listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
@@ -59,7 +59,7 @@ static void assert_tcp_connect_read_thread_failure_errors_before_success(const f
 }
 
 static void assert_tcp_accept_read_thread_failure_drops_before_accept(const fs::path& root) {
-    AppState state;
+    TestDaemonState state;
     initialize_state(state, root);
 
     UniqueSocket client_socket;
@@ -84,7 +84,7 @@ static void assert_tcp_accept_read_thread_failure_drops_before_accept(const fs::
 }
 
 static void assert_retained_tcp_accept_read_thread_failure_drops_before_accept(const fs::path& root) {
-    AppState state;
+    TestDaemonState state;
     initialize_state(state, root);
 
     UniqueSocket client_socket;
@@ -110,7 +110,7 @@ static void assert_retained_tcp_accept_read_thread_failure_drops_before_accept(c
 }
 
 static void assert_retained_tcp_accept_worker_pressure_is_local_drop(const fs::path& root) {
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_worker_limit(state, root, 1UL);
 
     UniqueSocket client_socket;
@@ -136,7 +136,7 @@ static void assert_retained_udp_bind_worker_failure_releases_udp_budget(const fs
     limits.max_worker_threads = 0UL;
     limits.max_udp_binds = 1UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
@@ -161,7 +161,7 @@ static void assert_retained_tcp_accept_pressure_is_local_drop(const fs::path& ro
     limits.max_worker_threads = 3UL;
     limits.max_active_tcp_streams = 1UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
@@ -216,7 +216,7 @@ static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::pa
     PortForwardLimitConfig limits;
     limits.max_active_tcp_streams = 1UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket echo_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
@@ -259,7 +259,7 @@ static void assert_active_tcp_accept_limit_is_enforced_and_released(const fs::pa
     PortForwardLimitConfig limits;
     limits.max_active_tcp_streams = 1UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
@@ -295,7 +295,7 @@ static void assert_tunnel_queued_byte_limit_is_enforced(const fs::path& root) {
     PortForwardLimitConfig limits;
     limits.max_tunnel_queued_bytes = 128UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket payload_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
@@ -321,7 +321,7 @@ static void assert_udp_queued_byte_pressure_reports_drop(const fs::path& root) {
     PortForwardLimitConfig limits;
     limits.max_tunnel_queued_bytes = 128UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
@@ -354,7 +354,7 @@ static void assert_partial_tunnel_frame_times_out(const fs::path& root) {
     PortForwardLimitConfig limits;
     limits.tunnel_io_timeout_ms = 50UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
@@ -375,7 +375,7 @@ static void assert_control_frame_queue_limit_closes_tunnel(const fs::path& root)
     PortForwardLimitConfig limits;
     limits.max_tunnel_queued_bytes = 1024UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
@@ -390,7 +390,7 @@ static void assert_control_frame_queue_limit_closes_tunnel(const fs::path& root)
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppState& state) {
+static void assert_tcp_data_write_pressure_does_not_block_control_frames(TestDaemonState& state) {
     UniqueSocket hold_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
     const std::string hold_endpoint = socket_local_endpoint(hold_listener.get());
     std::atomic<bool> receiver_ready(false);
@@ -446,7 +446,7 @@ static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppStat
     hold_listener.reset();
 }
 
-void assert_tunnel_limit_and_pressure_paths(AppState& state) {
+void assert_tunnel_limit_and_pressure_paths(TestDaemonState& state) {
     const fs::path root(state.config.default_workdir);
 
     assert_tcp_connect_worker_limit_errors_before_success(root);

@@ -123,18 +123,18 @@ int run_server(const DaemonConfig& config) {
 #endif
         runtime.start_accept_loop();
         const unsigned short bound_port = runtime.bound_port();
-        write_test_bound_addr_file(runtime.state().config, bound_port);
+        write_test_bound_addr_file(runtime.config(), bound_port);
 
         LogMessageBuilder message("listening");
         message.raw("on")
-            .raw(runtime.state().config.listen_host)
+            .raw(runtime.config().listen_host)
             .field("port", bound_port)
-            .quoted_field("target", runtime.state().config.target)
-            .bool_field("http_auth_enabled", !runtime.state().config.http_auth_bearer_token.empty())
+            .quoted_field("target", runtime.config().target)
+            .bool_field("http_auth_enabled", !runtime.config().http_auth_bearer_token.empty())
             .quoted_field("platform", platform::platform_name())
             .quoted_field("arch", platform::arch_name())
-            .quoted_field("default_shell", runtime.state().metadata.default_shell)
-            .quoted_field("daemon_instance_id", runtime.state().metadata.daemon_instance_id);
+            .quoted_field("default_shell", runtime.metadata().default_shell)
+            .quoted_field("daemon_instance_id", runtime.metadata().daemon_instance_id);
         log_message(LOG_INFO, "server", message.str());
 
 #ifndef _WIN32

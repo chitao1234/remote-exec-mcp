@@ -75,7 +75,7 @@ static void assert_session_transition_rules_are_strict() {
     service->shutdown();
 }
 
-static void assert_attached_session_rejects_second_resume(AppState& state) {
+static void assert_attached_session_rejects_second_resume(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
@@ -110,7 +110,7 @@ static void assert_attached_session_rejects_second_resume(AppState& state) {
 }
 
 static void assert_detached_session_expiry_does_not_consume_worker_budget(const fs::path& root) {
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_worker_limit(state, root, 2UL);
 
     UniqueSocket listen_client;
@@ -141,7 +141,7 @@ static void assert_detached_session_expiry_does_not_consume_worker_budget(const 
     close_tunnel(&resumed_client, &resumed_thread);
 }
 
-static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(AppState& state) {
+static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
@@ -177,7 +177,7 @@ static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(A
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_tunnel_udp_bind_session_can_resume_after_transport_drop(AppState& state) {
+static void assert_tunnel_udp_bind_session_can_resume_after_transport_drop(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
@@ -222,7 +222,7 @@ static void assert_tunnel_udp_bind_session_can_resume_after_transport_drop(AppSt
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_resumed_session_rejects_stale_generation_close(AppState& state) {
+static void assert_resumed_session_rejects_stale_generation_close(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
@@ -267,7 +267,7 @@ static void assert_resumed_session_rejects_stale_generation_close(AppState& stat
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_retained_tcp_listener_closes_while_accept_worker_waits(AppState& state) {
+static void assert_retained_tcp_listener_closes_while_accept_worker_waits(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
@@ -293,7 +293,7 @@ static void assert_retained_tcp_listener_closes_while_accept_worker_waits(AppSta
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_retained_udp_bind_closes_while_read_worker_waits(AppState& state) {
+static void assert_retained_udp_bind_closes_while_read_worker_waits(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
@@ -323,7 +323,7 @@ void assert_detached_session_releases_active_tcp_accept_budget(const fs::path& r
     PortForwardLimitConfig limits;
     limits.max_active_tcp_streams = 1UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
@@ -354,7 +354,7 @@ void assert_detached_session_releases_active_tcp_accept_budget(const fs::path& r
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_service_shutdown_releases_detached_retained_listener(AppState& state) {
+static void assert_service_shutdown_releases_detached_retained_listener(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
@@ -374,7 +374,7 @@ static void assert_service_shutdown_releases_detached_retained_listener(AppState
 }
 
 static void assert_service_shutdown_closes_retained_listener_with_active_stream(const fs::path& root) {
-    AppState state;
+    TestDaemonState state;
     initialize_state(state, root);
 
     UniqueSocket client_socket;
@@ -461,7 +461,7 @@ static void assert_sender_close_handles_queued_control_frames() {
     service->shutdown();
 }
 
-static void assert_expired_tunnel_session_is_released(AppState& state) {
+static void assert_expired_tunnel_session_is_released(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
@@ -500,7 +500,7 @@ static void assert_expired_tunnel_session_is_released(AppState& state) {
 }
 
 static void assert_detached_listener_expiry_survives_last_external_service_ref(const fs::path& root) {
-    AppState state;
+    TestDaemonState state;
     initialize_state(state, root);
 
     UniqueSocket client_socket;
@@ -537,7 +537,7 @@ static void wait_until_udp_bindable(const std::string& endpoint) {
 }
 
 static void assert_detached_udp_bind_expiry_survives_last_external_service_ref(const fs::path& root) {
-    AppState state;
+    TestDaemonState state;
     initialize_state(state, root);
 
     UniqueSocket client_socket;
@@ -558,7 +558,7 @@ static void assert_detached_udp_bind_expiry_survives_last_external_service_ref(c
     wait_until_udp_bindable(endpoint);
 }
 
-void assert_tunnel_resume_and_expiry_paths(AppState& state) {
+void assert_tunnel_resume_and_expiry_paths(TestDaemonState& state) {
     const fs::path root(state.config.default_workdir);
 
     assert_session_transition_rules_are_strict();

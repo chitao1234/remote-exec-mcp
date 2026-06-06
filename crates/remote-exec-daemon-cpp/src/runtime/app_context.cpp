@@ -1,48 +1,57 @@
-#include "runtime/server.h"
+#include "runtime/app_context.h"
 
-ServerRouteContext make_server_route_context(AppState& state) {
+ServerRouteContext make_server_route_context(const DaemonConfig& config,
+                                             const AppMetadata& metadata,
+                                             const AppSandboxState& sandbox,
+                                             AppServices& services) {
     ServerRouteContext context;
-    context.gate.http_auth_bearer_token = &state.config.http_auth_bearer_token;
-    context.health.daemon_instance_id = &state.metadata.daemon_instance_id;
-    context.target_info.target = &state.config.target;
-    context.target_info.metadata = &state.metadata;
-    context.exec.request.paths.default_workdir = &state.config.default_workdir;
-    context.exec.request.paths.sandbox = &state.sandbox;
-    context.exec.request.capabilities = &state.metadata.capabilities;
-    context.exec.request.default_shell = &state.metadata.default_shell;
-    context.exec.request.allow_login_shell = state.config.allow_login_shell;
-    context.exec.target = &state.config.target;
-    context.exec.sessions = &state.services.sessions;
-    context.exec.yield_time = &state.config.yield_time;
-    context.exec.max_open_sessions = state.config.max_open_sessions;
-    context.exec.daemon_instance_id = &state.metadata.daemon_instance_id;
-    context.patch.paths.default_workdir = &state.config.default_workdir;
-    context.patch.paths.sandbox = &state.sandbox;
-    context.patch.daemon_instance_id = &state.metadata.daemon_instance_id;
-    context.image.paths.default_workdir = &state.config.default_workdir;
-    context.image.paths.sandbox = &state.sandbox;
+    context.gate.http_auth_bearer_token = &config.http_auth_bearer_token;
+    context.health.daemon_instance_id = &metadata.daemon_instance_id;
+    context.target_info.target = &config.target;
+    context.target_info.daemon_instance_id = &metadata.daemon_instance_id;
+    context.target_info.hostname = &metadata.hostname;
+    context.target_info.capabilities = &metadata.capabilities;
+    context.exec.request.paths.default_workdir = &config.default_workdir;
+    context.exec.request.paths.active_sandbox = sandbox.active();
+    context.exec.request.capabilities = &metadata.capabilities;
+    context.exec.request.default_shell = &metadata.default_shell;
+    context.exec.request.allow_login_shell = config.allow_login_shell;
+    context.exec.target = &config.target;
+    context.exec.sessions = &services.sessions;
+    context.exec.yield_time = &config.yield_time;
+    context.exec.max_open_sessions = config.max_open_sessions;
+    context.exec.daemon_instance_id = &metadata.daemon_instance_id;
+    context.patch.paths.default_workdir = &config.default_workdir;
+    context.patch.paths.active_sandbox = sandbox.active();
+    context.patch.daemon_instance_id = &metadata.daemon_instance_id;
+    context.image.paths.default_workdir = &config.default_workdir;
+    context.image.paths.active_sandbox = sandbox.active();
     context.transfer.gate = context.gate;
-    context.transfer.paths.default_workdir = &state.config.default_workdir;
-    context.transfer.paths.sandbox = &state.sandbox;
-    context.transfer.limits = &state.config.transfer_limits;
+    context.transfer.paths.default_workdir = &config.default_workdir;
+    context.transfer.paths.active_sandbox = sandbox.active();
+    context.transfer.limits = &config.transfer_limits;
     return context;
 }
 
-PortTunnelRouteContext make_port_tunnel_route_context(AppState& state) {
+PortTunnelRouteContext make_port_tunnel_route_context(const DaemonConfig& config, AppServices& services) {
     PortTunnelRouteContext context;
-    context.gate.http_auth_bearer_token = &state.config.http_auth_bearer_token;
-    context.limits = &state.config.port_forward_limits;
-    context.service = &state.services.port_tunnel;
+    context.gate.http_auth_bearer_token = &config.http_auth_bearer_token;
+    context.limits = &config.port_forward_limits;
+    context.service = &services.port_tunnel;
     return context;
 }
 
-HttpConnectionContext make_http_connection_context(AppState& state) {
+HttpConnectionContext make_http_connection_context(const DaemonConfig& config,
+                                                   const AppMetadata& metadata,
+                                                   const AppSandboxState& sandbox,
+                                                   AppServices& services,
+                                                   const AppShutdownState& shutdown) {
     HttpConnectionContext context;
-    context.routes = make_server_route_context(state);
-    context.port_tunnel = make_port_tunnel_route_context(state);
-    context.max_request_header_bytes = state.config.max_request_header_bytes;
-    context.max_request_body_bytes = state.config.max_request_body_bytes;
-    context.http_connection_idle_timeout_ms = state.config.http_connection_idle_timeout_ms;
-    context.shutdown_requested = &state.shutdown.requested;
+    context.routes = make_server_route_context(config, metadata, sandbox, services);
+    context.port_tunnel = make_port_tunnel_route_context(config, services);
+    context.max_request_header_bytes = config.max_request_header_bytes;
+    context.max_request_body_bytes = config.max_request_body_bytes;
+    context.http_connection_idle_timeout_ms = config.http_connection_idle_timeout_ms;
+    context.shutdown_requested = &shutdown.requested;
     return context;
 }
