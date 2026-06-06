@@ -8,13 +8,7 @@ use rmcp::{
     transport::StreamableHttpClientTransport,
     transport::streamable_http_client::StreamableHttpClientTransportConfig,
 };
-use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
-
-use remote_exec_proto::public::{
-    ApplyPatchInput, EditInput, ExecCommandInput, ForwardPortsInput, ListTargetsInput, ReadInput,
-    TransferFilesInput, ViewImageInput, WriteInput, WriteStdinInput,
-};
 
 use crate::tools::registry::BrokerTool;
 
@@ -163,62 +157,16 @@ async fn connect_streamable_http(
 
 impl DirectBrokerClient {
     async fn call_tool(&self, name: &str, arguments: Map<String, Value>) -> ToolResponse {
-        ToolResponse::from_call_tool_result(call_direct_tool(&self.state, name, arguments).await)
-    }
-}
-
-async fn call_direct_tool(
-    state: &crate::BrokerState,
-    name: &str,
-    arguments: Map<String, Value>,
-) -> CallToolResult {
-    let Some(tool) = BrokerTool::from_name(name) else {
-        return crate::mcp_server::tool_error_result(format!("unknown tool `{name}`"));
-    };
-    if !tool.enabled_by_config(&state.tools) {
-        return crate::mcp_server::tool_error_result(format!("unknown tool `{name}`"));
-    }
-
-    macro_rules! invoke_tool {
-        ($input:ty, $handler:path) => {{
-            crate::mcp_server::finish_scoped_tool_call(
-                tool,
-                !state.disable_structured_content,
-                Box::pin(async move {
-                    let input = deserialize_tool_arguments::<$input>(name, arguments)?;
-                    $handler(state, input).await
-                }),
+        ToolResponse::from_call_tool_result(
+            BrokerTool::call_direct(
+                &self.state,
+                name,
+                arguments,
+                !self.state.disable_structured_content,
             )
-            .await
-        }};
+            .await,
+        )
     }
-
-    match tool {
-        BrokerTool::ListTargets => {
-            invoke_tool!(ListTargetsInput, crate::tools::targets::list_targets)
-        }
-        BrokerTool::ExecCommand => invoke_tool!(ExecCommandInput, crate::tools::exec::exec_command),
-        BrokerTool::WriteStdin => invoke_tool!(WriteStdinInput, crate::tools::exec::write_stdin),
-        BrokerTool::ApplyPatch => invoke_tool!(ApplyPatchInput, crate::tools::patch::apply_patch),
-        BrokerTool::ViewImage => invoke_tool!(ViewImageInput, crate::tools::image::view_image),
-        BrokerTool::TransferFiles => {
-            invoke_tool!(TransferFilesInput, crate::tools::transfer::transfer_files)
-        }
-        BrokerTool::ForwardPorts => {
-            invoke_tool!(ForwardPortsInput, crate::tools::port_forward::forward_ports)
-        }
-        BrokerTool::Read => invoke_tool!(ReadInput, crate::tools::file::read),
-        BrokerTool::Write => invoke_tool!(WriteInput, crate::tools::file::write),
-        BrokerTool::Edit => invoke_tool!(EditInput, crate::tools::file::edit),
-    }
-}
-
-fn deserialize_tool_arguments<T>(name: &str, arguments: Map<String, Value>) -> anyhow::Result<T>
-where
-    T: DeserializeOwned,
-{
-    serde_json::from_value(Value::Object(arguments))
-        .with_context(|| format!("deserializing arguments for `{name}`"))
 }
 
 fn normalize_content(content: &rmcp::model::Content) -> serde_json::Value {

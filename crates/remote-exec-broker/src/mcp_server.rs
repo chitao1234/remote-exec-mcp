@@ -1,10 +1,10 @@
 use anyhow::Context;
 use axum::Router;
 use rmcp::{
-    ErrorData as McpError, ServerHandler, ServiceExt,
-    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    ServerHandler, ServiceExt,
+    handler::server::{router::tool::ToolRoute, router::tool::ToolRouter, tool::ToolCallContext},
     model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
-    tool, tool_handler, tool_router,
+    tool_handler,
     transport::{StreamableHttpServerConfig, StreamableHttpService},
 };
 use std::future::Future;
@@ -100,7 +100,7 @@ pub struct BrokerServer {
 impl BrokerServer {
     pub fn new(state: crate::BrokerState) -> Self {
         let mut tool_router = Self::tool_router();
-        for tool in BrokerTool::HIDDEN {
+        for tool in BrokerTool::ALL {
             if !tool.enabled_by_config(&state.tools) {
                 tool_router.remove_route(tool.name());
             }
@@ -109,17 +109,34 @@ impl BrokerServer {
         Self { state, tool_router }
     }
 
+    fn tool_router() -> ToolRouter<Self> {
+        let mut tool_router = ToolRouter::new();
+        for tool in BrokerTool::ALL.iter().copied() {
+            tool_router.add_route(tool_route(tool));
+        }
+        tool_router
+    }
+
     fn include_structured_content(&self) -> bool {
         !self.state.disable_structured_content
     }
+}
 
-    async fn finish_scoped_tool_call(
-        &self,
-        tool: BrokerTool,
-        future: ToolCallFuture<'_>,
-    ) -> CallToolResult {
-        finish_scoped_tool_call(tool, self.include_structured_content(), future).await
-    }
+fn tool_route(tool: BrokerTool) -> ToolRoute<BrokerServer> {
+    ToolRoute::new_dyn(
+        tool.mcp_tool(),
+        move |context: ToolCallContext<'_, BrokerServer>| {
+            Box::pin(async move {
+                let arguments = context.arguments.unwrap_or_default();
+                tool.call_mcp(
+                    &context.service.state,
+                    arguments,
+                    context.service.include_structured_content(),
+                )
+                .await
+            })
+        },
+    )
 }
 
 pub(crate) async fn finish_scoped_tool_call(
@@ -175,175 +192,6 @@ pub(crate) async fn finish_scoped_tool_call(
     .await
 }
 
-#[tool_router]
-impl BrokerServer {
-    #[tool(
-        name = "list_targets",
-        description = "List configured target names.",
-        annotations(read_only_hint = true)
-    )]
-    async fn list_targets(
-        &self,
-        Parameters(input): Parameters<remote_exec_proto::public::ListTargetsInput>,
-    ) -> Result<CallToolResult, McpError> {
-        Ok(self
-            .finish_scoped_tool_call(
-                BrokerTool::ListTargets,
-                Box::pin(crate::tools::targets::list_targets(&self.state, input)),
-            )
-            .await)
-    }
-
-    #[tool(
-        name = "exec_command",
-        description = "Run a command on a configured target machine."
-    )]
-    async fn exec_command(
-        &self,
-        Parameters(input): Parameters<remote_exec_proto::public::ExecCommandInput>,
-    ) -> Result<CallToolResult, McpError> {
-        Ok(self
-            .finish_scoped_tool_call(
-                BrokerTool::ExecCommand,
-                Box::pin(crate::tools::exec::exec_command(&self.state, input)),
-            )
-            .await)
-    }
-
-    #[tool(
-        name = "write_stdin",
-        description = "Write to or poll an existing exec_command session."
-    )]
-    async fn write_stdin(
-        &self,
-        Parameters(input): Parameters<remote_exec_proto::public::WriteStdinInput>,
-    ) -> Result<CallToolResult, McpError> {
-        Ok(self
-            .finish_scoped_tool_call(
-                BrokerTool::WriteStdin,
-                Box::pin(crate::tools::exec::write_stdin(&self.state, input)),
-            )
-            .await)
-    }
-
-    #[tool(
-        name = "apply_patch",
-        description = "Apply a patch on a configured target machine."
-    )]
-    async fn apply_patch(
-        &self,
-        Parameters(input): Parameters<remote_exec_proto::public::ApplyPatchInput>,
-    ) -> Result<CallToolResult, McpError> {
-        Ok(self
-            .finish_scoped_tool_call(
-                BrokerTool::ApplyPatch,
-                Box::pin(crate::tools::patch::apply_patch(&self.state, input)),
-            )
-            .await)
-    }
-
-    #[tool(
-        name = "view_image",
-        description = "Read an image from a configured target machine.",
-        annotations(read_only_hint = true)
-    )]
-    async fn view_image(
-        &self,
-        Parameters(input): Parameters<remote_exec_proto::public::ViewImageInput>,
-    ) -> Result<CallToolResult, McpError> {
-        Ok(self
-            .finish_scoped_tool_call(
-                BrokerTool::ViewImage,
-                Box::pin(crate::tools::image::view_image(&self.state, input)),
-            )
-            .await)
-    }
-
-    #[tool(
-        name = "transfer_files",
-        description = "Transfer one file or one directory tree between broker-local and configured target filesystems."
-    )]
-    async fn transfer_files(
-        &self,
-        Parameters(input): Parameters<remote_exec_proto::public::TransferFilesInput>,
-    ) -> Result<CallToolResult, McpError> {
-        Ok(self
-            .finish_scoped_tool_call(
-                BrokerTool::TransferFiles,
-                Box::pin(crate::tools::transfer::transfer_files(&self.state, input)),
-            )
-            .await)
-    }
-
-    #[tool(
-        name = "forward_ports",
-        description = "Open, list, or close TCP/UDP port forwards between broker-local and configured target machines."
-    )]
-    async fn forward_ports(
-        &self,
-        Parameters(input): Parameters<remote_exec_proto::public::ForwardPortsInput>,
-    ) -> Result<CallToolResult, McpError> {
-        Ok(self
-            .finish_scoped_tool_call(
-                BrokerTool::ForwardPorts,
-                Box::pin(crate::tools::port_forward::forward_ports(
-                    &self.state,
-                    input,
-                )),
-            )
-            .await)
-    }
-
-    #[tool(
-        name = "read",
-        description = "Read a text file from a configured target machine.",
-        annotations(read_only_hint = true)
-    )]
-    async fn read(
-        &self,
-        Parameters(input): Parameters<remote_exec_proto::public::ReadInput>,
-    ) -> Result<CallToolResult, McpError> {
-        Ok(self
-            .finish_scoped_tool_call(
-                BrokerTool::Read,
-                Box::pin(crate::tools::file::read(&self.state, input)),
-            )
-            .await)
-    }
-
-    #[tool(
-        name = "write",
-        description = "Overwrite or create a text file on a configured target machine."
-    )]
-    async fn write(
-        &self,
-        Parameters(input): Parameters<remote_exec_proto::public::WriteInput>,
-    ) -> Result<CallToolResult, McpError> {
-        Ok(self
-            .finish_scoped_tool_call(
-                BrokerTool::Write,
-                Box::pin(crate::tools::file::write(&self.state, input)),
-            )
-            .await)
-    }
-
-    #[tool(
-        name = "edit",
-        description = "Replace text in a file on a configured target machine."
-    )]
-    async fn edit(
-        &self,
-        Parameters(input): Parameters<remote_exec_proto::public::EditInput>,
-    ) -> Result<CallToolResult, McpError> {
-        Ok(self
-            .finish_scoped_tool_call(
-                BrokerTool::Edit,
-                Box::pin(crate::tools::file::edit(&self.state, input)),
-            )
-            .await)
-    }
-}
-
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for BrokerServer {
     fn get_info(&self) -> ServerInfo {
@@ -369,6 +217,20 @@ mod tool_router_contract_tests {
         actual.sort_unstable();
         expected.sort_unstable();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn tool_router_metadata_matches_registry() {
+        let router = BrokerServer::tool_router();
+        for tool in BrokerTool::ALL {
+            let route = router.get(tool.name()).expect("registered tool is routed");
+            assert_eq!(route.description.as_deref(), Some(tool.description()));
+            let read_only_hint = route
+                .annotations
+                .as_ref()
+                .and_then(|annotations| annotations.read_only_hint);
+            assert_eq!(read_only_hint, tool.read_only_hint());
+        }
     }
 
     #[test]
