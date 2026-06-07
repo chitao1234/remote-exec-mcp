@@ -25,17 +25,11 @@ esac
 
 : "${CLANG_FORMAT:=clang-format}"
 
-repo_root=$(git rev-parse --show-toplevel)
-cd "$repo_root"
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+project_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 
-git ls-files -z \
-    'crates/remote-exec-daemon-cpp/include/**/*.cpp' \
-    'crates/remote-exec-daemon-cpp/include/**/*.h' \
-    'crates/remote-exec-daemon-cpp/include/**/*.hpp' \
-    'crates/remote-exec-daemon-cpp/src/**/*.cpp' \
-    'crates/remote-exec-daemon-cpp/src/**/*.h' \
-    'crates/remote-exec-daemon-cpp/src/**/*.hpp' \
-    'crates/remote-exec-daemon-cpp/tests/**/*.cpp' \
-    'crates/remote-exec-daemon-cpp/tests/**/*.h' \
-    'crates/remote-exec-daemon-cpp/tests/**/*.hpp' |
+find "$project_root/include" "$project_root/src" "$project_root/tests" \
+    -type f \
+    \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) \
+    -print0 |
     xargs -0 "$CLANG_FORMAT" $clang_format_args
