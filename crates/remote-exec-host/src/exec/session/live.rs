@@ -142,10 +142,6 @@ impl LiveSession {
         size: remote_exec_proto::rpc::ExecPtySize,
     ) -> anyhow::Result<()> {
         self.child.resize_pty(size)?;
-        #[cfg(windows)]
-        if let Some(state) = &mut self.terminal_output_state {
-            state.set_physical_width(size.cols);
-        }
         Ok(())
     }
 

@@ -4,13 +4,11 @@ use std::time::Instant;
 
 use super::{TerminalOutputFilter, TerminalOutputResult};
 
-const WINPTY_DEFAULT_COLS: usize = 120;
 const WINPTY_TRANSCRIPT_DEBOUNCE_MS: u64 = 150;
 const WINPTY_TRANSCRIPT_MAX_HOLD_MS: u64 = 500;
 
 pub(super) struct WinptyOutputState {
     renderer: TerminalOutputRenderer,
-    normalizer: WinptyTranscriptNormalizer,
 }
 
 impl Default for WinptyOutputState {
@@ -20,60 +18,32 @@ impl Default for WinptyOutputState {
                 WINPTY_TRANSCRIPT_DEBOUNCE_MS,
                 WINPTY_TRANSCRIPT_MAX_HOLD_MS,
             ),
-            normalizer: WinptyTranscriptNormalizer::default(),
         }
     }
 }
 
 impl TerminalOutputFilter for WinptyOutputState {
     fn filter_chunk(&mut self, chunk: &str) -> TerminalOutputResult {
-        let rendered = self.renderer.filter_chunk(chunk);
-        self.normalize_renderer_result(rendered)
+        self.renderer.filter_chunk(chunk)
     }
 
     fn flush_due(&mut self) -> String {
-        let rendered = self.renderer.flush_due_at(monotonic_ms());
-        self.normalize_renderer_output(&rendered)
+        self.renderer.flush_due_at(monotonic_ms())
     }
 
     fn drain_pending(&mut self) -> String {
-        let rendered = self.renderer.drain_pending();
-        let mut output = self.normalize_renderer_output(&rendered);
-        output.push_str(&self.normalizer.drain_pending());
-        output
-    }
-
-    fn set_physical_width(&mut self, cols: u16) {
-        self.normalizer.set_physical_width(cols as usize);
-    }
-}
-
-impl WinptyOutputState {
-    fn normalize_renderer_result(
-        &mut self,
-        rendered: TerminalOutputResult,
-    ) -> TerminalOutputResult {
-        TerminalOutputResult {
-            output: self.normalize_renderer_output(&rendered.output),
-            response: rendered.response,
-        }
-    }
-
-    fn normalize_renderer_output(&mut self, output: &str) -> String {
-        self.normalizer.filter_chunk(output)
+        self.renderer.drain_pending()
     }
 }
 
 #[cfg(test)]
 impl WinptyOutputState {
     fn filter_chunk_at(&mut self, chunk: &str, now_ms: u64) -> TerminalOutputResult {
-        let rendered = self.renderer.filter_chunk_at(chunk, now_ms);
-        self.normalize_renderer_result(rendered)
+        self.renderer.filter_chunk_at(chunk, now_ms)
     }
 
     fn flush_due_at(&mut self, now_ms: u64) -> String {
-        let rendered = self.renderer.flush_due_at(now_ms);
-        self.normalize_renderer_output(&rendered)
+        self.renderer.flush_due_at(now_ms)
     }
 }
 
@@ -738,199 +708,6 @@ impl TerminalOutputRenderer {
     }
 }
 
-#[derive(Debug)]
-struct WinptyTranscriptNormalizer {
-    physical_width: usize,
-    pending_physical_line: String,
-    pending_logical_fragment: String,
-}
-
-#[derive(Clone, Copy)]
-enum TrailingFragmentMode {
-    Buffer,
-    Emit,
-}
-
-impl Default for WinptyTranscriptNormalizer {
-    fn default() -> Self {
-        Self::new(WINPTY_DEFAULT_COLS)
-    }
-}
-
-impl WinptyTranscriptNormalizer {
-    fn new(physical_width: usize) -> Self {
-        Self {
-            physical_width: if physical_width == 0 {
-                WINPTY_DEFAULT_COLS
-            } else {
-                physical_width
-            },
-            pending_physical_line: String::new(),
-            pending_logical_fragment: String::new(),
-        }
-    }
-
-    pub(super) fn set_physical_width(&mut self, physical_width: usize) {
-        if physical_width != 0 {
-            self.physical_width = physical_width;
-        }
-    }
-
-    pub(super) fn filter_chunk(&mut self, chunk: &str) -> String {
-        self.pending_physical_line.push_str(chunk);
-
-        let mut output = String::new();
-        while let Some(newline) = self.pending_physical_line.find('\n') {
-            let line = self.pending_physical_line[..newline].to_string();
-            self.pending_physical_line.drain(..=newline);
-            self.process_physical_line(&line, &mut output);
-        }
-        output
-    }
-
-    pub(super) fn drain_pending(&mut self) -> String {
-        let mut output = String::new();
-        if !self.pending_physical_line.is_empty() {
-            let line = std::mem::take(&mut self.pending_physical_line);
-            self.process_final_physical_line(&line, &mut output);
-        }
-        if !self.pending_logical_fragment.is_empty() {
-            let line = std::mem::take(&mut self.pending_logical_fragment);
-            output.push_str(&line);
-        }
-        output
-    }
-
-    fn process_physical_line(&mut self, raw_line: &str, output: &mut String) {
-        self.process_physical_line_with_mode(raw_line, output, TrailingFragmentMode::Buffer);
-    }
-
-    fn process_final_physical_line(&mut self, raw_line: &str, output: &mut String) {
-        // EOF finalization must surface the visible fragment without inventing a newline.
-        self.process_physical_line_with_mode(raw_line, output, TrailingFragmentMode::Emit);
-    }
-
-    fn process_physical_line_with_mode(
-        &mut self,
-        raw_line: &str,
-        output: &mut String,
-        trailing_fragment_mode: TrailingFragmentMode,
-    ) {
-        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
-
-        if let Some((left, right)) = self.split_winpty_repaint_line(line) {
-            self.emit_repaint_prefix(&left, output);
-            match trailing_fragment_mode {
-                TrailingFragmentMode::Buffer => self.pending_logical_fragment = right,
-                TrailingFragmentMode::Emit => output.push_str(&right),
-            }
-            return;
-        }
-
-        self.emit_line_with_pending_fragment(
-            line,
-            output,
-            matches!(trailing_fragment_mode, TrailingFragmentMode::Buffer),
-        );
-    }
-
-    fn emit_repaint_prefix(&mut self, left: &str, output: &mut String) {
-        if !self.pending_logical_fragment.is_empty() {
-            let pending = std::mem::take(&mut self.pending_logical_fragment);
-            if left.is_empty() {
-                Self::emit_logical_line(&pending, output);
-            } else {
-                Self::emit_logical_line(&(pending + Self::trim_leading_spaces(left)), output);
-            }
-        } else if !left.is_empty() {
-            Self::emit_logical_line(left, output);
-        }
-    }
-
-    fn emit_line_with_pending_fragment(
-        &mut self,
-        line: &str,
-        output: &mut String,
-        terminated: bool,
-    ) {
-        if !self.pending_logical_fragment.is_empty() {
-            let pending = std::mem::take(&mut self.pending_logical_fragment);
-            let combined = pending + Self::trim_leading_spaces(line);
-            Self::emit_logical_text(&combined, output, terminated);
-            return;
-        }
-
-        Self::emit_logical_text(line, output, terminated);
-    }
-
-    fn emit_logical_line(line: &str, output: &mut String) {
-        Self::emit_logical_text(line, output, true);
-    }
-
-    fn emit_logical_text(line: &str, output: &mut String, terminated: bool) {
-        output.push_str(line);
-        if terminated {
-            output.push('\n');
-        }
-    }
-
-    fn split_winpty_repaint_line(&self, line: &str) -> Option<(String, String)> {
-        let line_width = conservative_cell_count_for_text(line);
-        if line_width > self.physical_width || line_width + 1 < self.physical_width {
-            return None;
-        }
-
-        let bytes = line.as_bytes();
-        let mut index = 0;
-        while index < bytes.len() {
-            if bytes[index] != b' ' {
-                index += 1;
-                continue;
-            }
-
-            let mut end = index;
-            while end < bytes.len() && bytes[end] == b' ' {
-                end += 1;
-            }
-
-            if end < bytes.len() {
-                let candidate_left = Self::trim_trailing_spaces(&line[..index]).to_string();
-                let candidate_right = line[end..].to_string();
-                let left_width = conservative_cell_count_for_text(&candidate_left);
-                let right_width = conservative_cell_count_for_text(&candidate_right);
-                if !candidate_right.is_empty() && left_width + right_width <= line_width {
-                    let right_start_col = conservative_cell_count_for_text(&line[..end]);
-                    let run_len = end - index;
-                    let expected_gap = line_width - left_width - right_width;
-                    let fills_row = run_len == expected_gap;
-                    let right_edge_fragment = right_start_col + right_width == line_width;
-                    let mostly_padding = run_len * 2 >= self.physical_width;
-                    let short_repaint_fragment = candidate_left.contains(['>', '$', '#'])
-                        && run_len * 4 >= self.physical_width;
-                    if fills_row
-                        && right_edge_fragment
-                        && (mostly_padding || short_repaint_fragment)
-                    {
-                        return Some((candidate_left, candidate_right));
-                    }
-                }
-            }
-
-            index = end;
-        }
-
-        None
-    }
-
-    fn trim_trailing_spaces(text: &str) -> &str {
-        text.trim_end_matches(' ')
-    }
-
-    fn trim_leading_spaces(text: &str) -> &str {
-        text.trim_start_matches(' ')
-    }
-}
-
 fn monotonic_ms() -> u64 {
     static START: OnceLock<Instant> = OnceLock::new();
     START.get_or_init(Instant::now).elapsed().as_millis() as u64
@@ -1011,10 +788,6 @@ fn closed_row_should_be_joinable(text: &str, physical_width: usize) -> bool {
     physical_width >= 80
         && line_has_nonspace_char(text)
         && !text.bytes().any(|byte| matches!(byte, b' ' | b'\t'))
-}
-
-fn conservative_cell_count_for_text(text: &str) -> usize {
-    text.chars().count()
 }
 
 fn merge_joinable_rows(previous: &str, current: &str) -> String {
@@ -1141,39 +914,7 @@ fn suffix_after_byte_len(text: &str, len: usize) -> &str {
 mod tests {
     use crate::exec::session::pty_filter::TerminalOutputFilter;
 
-    use super::{TerminalOutputRenderer, WinptyOutputState, WinptyTranscriptNormalizer};
-
-    fn winpty_repaint_physical_line(left: &str, right: &str, width: usize) -> String {
-        assert!(left.len() + right.len() <= width);
-        format!(
-            "{left}{}{right}\n",
-            " ".repeat(width - left.len() - right.len())
-        )
-    }
-
-    fn assert_winpty_command_repaint_width(width: usize) {
-        let mut normalizer = WinptyTranscriptNormalizer::new(width);
-        let prompt = "C:\\p>";
-        let command_line = format!("{prompt}echo hello");
-        let physical = winpty_repaint_physical_line(&command_line, "hello", width)
-            + &winpty_repaint_physical_line("", "C:\\p", width)
-            + ">\n";
-        let expected = format!("{command_line}\nhello\n{prompt}\n");
-
-        let actual = normalizer.filter_chunk(&physical) + &normalizer.drain_pending();
-        assert_eq!(actual, expected);
-    }
-
-    fn assert_winpty_one_column_short_repaint_width(width: usize) {
-        let mut normalizer = WinptyTranscriptNormalizer::new(width);
-        let prompt = "C:\\p>";
-        let command_line = format!("{prompt}echo hello");
-        let physical = winpty_repaint_physical_line(&command_line, "hell", width - 1) + "o\n";
-        let expected = format!("{command_line}\nhello\n");
-
-        let actual = normalizer.filter_chunk(&physical) + &normalizer.drain_pending();
-        assert_eq!(actual, expected);
-    }
+    use super::{TerminalOutputRenderer, WinptyOutputState};
 
     #[test]
     fn winpty_output_state_strips_control_sequences() {
@@ -1323,137 +1064,5 @@ mod tests {
             ""
         );
         assert_eq!(state.drain_pending(), "prompt>echo hello\nhello\n");
-    }
-
-    #[test]
-    fn winpty_transcript_normalizer_reconstructs_banner_and_prompt() {
-        let mut normalizer = WinptyTranscriptNormalizer::default();
-        let physical = concat!(
-            "Microsoft Windows XP [\u{7248}\u{672c} 5.1.2600]                                                                                    (C\n",
-            ") \u{7248}\u{6743}\u{6240}\u{6709} 1985-2001 Microsoft Corp.\n",
-            "                                                                                                                  C:\\chi\n",
-            "\\winpty-probe>\n",
-        );
-        let expected = concat!(
-            "Microsoft Windows XP [\u{7248}\u{672c} 5.1.2600]\n",
-            "(C) \u{7248}\u{6743}\u{6240}\u{6709} 1985-2001 Microsoft Corp.\n",
-            "C:\\chi\\winpty-probe>\n",
-        );
-
-        let actual = normalizer.filter_chunk(physical) + &normalizer.drain_pending();
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn winpty_transcript_normalizer_splits_echo_output_from_prompt_repaint() {
-        let mut normalizer = WinptyTranscriptNormalizer::default();
-        let physical = concat!(
-            "\\winpty-probe>echo hello                                                                                          hello\n",
-            "                                                                                                                  C:\\chi\n",
-            "\\winpty-probe>\n",
-        );
-        let expected = "\\winpty-probe>echo hello\nhello\nC:\\chi\\winpty-probe>\n";
-
-        let actual = normalizer.filter_chunk(physical) + &normalizer.drain_pending();
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn winpty_transcript_normalizer_handles_chunked_repaint_lines() {
-        let mut normalizer = WinptyTranscriptNormalizer::default();
-        let mut actual = String::new();
-        actual.push_str(&normalizer.filter_chunk(
-            "\\winpty-probe>echo hello                                                ",
-        ));
-        actual.push_str(&normalizer.filter_chunk(
-            "                                          hello\n                                                   ",
-        ));
-        actual.push_str(&normalizer.filter_chunk(
-            "                                                               C:\\chi\n\\winpty",
-        ));
-        actual.push_str(&normalizer.filter_chunk("-probe>\n"));
-        actual.push_str(&normalizer.drain_pending());
-
-        let expected = "\\winpty-probe>echo hello\nhello\nC:\\chi\\winpty-probe>\n";
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn winpty_transcript_normalizer_handles_windows_2000_short_wrap_fragment() {
-        let mut normalizer = WinptyTranscriptNormalizer::default();
-        let user_profile =
-            "DOCUME~1\\REMOTE~1\\LOCALS~1\\Temp\\remote-exec-cpp-session-store-test-probe";
-        let wrapped_prompt_fragment = format!("{}>", &user_profile[1..]);
-        let full_prompt = format!("C:\\{user_profile}>");
-        let command_line = format!("{wrapped_prompt_fragment}echo hello");
-        let physical =
-            winpty_repaint_physical_line(&command_line, "hell", 120) + "o\n" + &full_prompt + "\n";
-        let expected = format!("{command_line}\nhello\n{full_prompt}\n");
-
-        let actual = normalizer.filter_chunk(&physical) + &normalizer.drain_pending();
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn winpty_transcript_normalizer_merges_pending_repaint_fragment() {
-        let mut normalizer = WinptyTranscriptNormalizer::default();
-        let physical = concat!(
-            "                                                                                                                  C:\\chi\n",
-            "\\winpty-probe>\n",
-        );
-        let expected = "C:\\chi\\winpty-probe>\n";
-
-        let actual = normalizer.filter_chunk(physical) + &normalizer.drain_pending();
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn winpty_transcript_normalizer_preserves_regular_wide_spacing() {
-        let mut normalizer = WinptyTranscriptNormalizer::default();
-        let physical = "column-a                                                column-b                                 column-c\n";
-
-        let actual = normalizer.filter_chunk(physical) + &normalizer.drain_pending();
-        assert_eq!(actual, physical);
-    }
-
-    #[test]
-    fn winpty_transcript_normalizer_uses_configured_width() {
-        for width in [48, 72, 80, 100, 120, 160] {
-            assert_winpty_command_repaint_width(width);
-        }
-    }
-
-    #[test]
-    fn winpty_transcript_normalizer_accepts_one_column_short_rows() {
-        for width in [48, 80, 120, 160] {
-            assert_winpty_one_column_short_repaint_width(width);
-        }
-    }
-
-    #[test]
-    fn winpty_transcript_normalizer_updates_configured_width() {
-        let mut normalizer = WinptyTranscriptNormalizer::new(80);
-        let stale_width_physical = winpty_repaint_physical_line("C:\\p>echo hello", "hello", 100);
-        let mut actual = normalizer.filter_chunk(&stale_width_physical);
-
-        normalizer.set_physical_width(100);
-        actual.push_str(&normalizer.filter_chunk(
-            &(winpty_repaint_physical_line("C:\\p>echo hello", "hello", 100)
-                + &winpty_repaint_physical_line("", "C:\\p", 100)
-                + ">\n"),
-        ));
-        actual.push_str(&normalizer.drain_pending());
-
-        let expected = stale_width_physical + "C:\\p>echo hello\nhello\nC:\\p>\n";
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn winpty_transcript_normalizer_ignores_non_width_sized_padding() {
-        let mut normalizer = WinptyTranscriptNormalizer::new(120);
-        let physical = "C:\\probe>echo hello                                hello\n";
-
-        let actual = normalizer.filter_chunk(physical) + &normalizer.drain_pending();
-        assert_eq!(actual, physical);
     }
 }

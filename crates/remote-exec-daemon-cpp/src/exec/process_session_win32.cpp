@@ -592,8 +592,7 @@ public:
         : winpty_(std::move(winpty)), process_handle_(std::move(process_handle)),
           process_id_(process_id), stdin_write_(std::move(stdin_write)),
           stdout_read_(std::move(stdout_read)), console_closed_(false),
-          output_filter_(WINPTY_TRANSCRIPT_DEBOUNCE_MS, WINPTY_TRANSCRIPT_MAX_HOLD_MS),
-          transcript_normalizer_(DEFAULT_PTY_COLS) {}
+          output_filter_(WINPTY_TRANSCRIPT_DEBOUNCE_MS, WINPTY_TRANSCRIPT_MAX_HOLD_MS) {}
 
     ~WinptyProcessSession() override { terminate(); }
 
@@ -639,7 +638,6 @@ public:
             == FALSE) {
             throw std::runtime_error(winpty_error_message("winpty_set_size", &error));
         }
-        transcript_normalizer_.set_physical_width(cols);
     }
 
     std::string read_output(bool block, bool* eof, std::string* carry) override {
@@ -678,10 +676,7 @@ public:
 
     std::string flush_carry(std::string* carry) override {
         const std::string decoded = utf8_stream_decode::decode_utf8_stream_chunk(carry, "", true);
-        const std::string filtered =
-            output_filter_.filter_chunk(decoded) + output_filter_.drain_pending();
-        return transcript_normalizer_.filter_chunk(filtered)
-               + transcript_normalizer_.drain_pending();
+        return output_filter_.filter_chunk(decoded) + output_filter_.drain_pending();
     }
 
     bool has_exited(int* exit_code) override {
@@ -712,7 +707,7 @@ public:
 private:
     std::string filter_raw(const std::string& raw, std::string* carry) {
         const std::string decoded = utf8_stream_decode::decode_utf8_stream_chunk(carry, raw, false);
-        return transcript_normalizer_.filter_chunk(output_filter_.filter_chunk(decoded));
+        return output_filter_.filter_chunk(decoded);
     }
 
     std::string read_and_filter_available(bool* eof, std::string* carry) {
@@ -720,9 +715,7 @@ private:
                + flush_due_output();
     }
 
-    std::string flush_due_output() {
-        return transcript_normalizer_.filter_chunk(output_filter_.flush_due());
-    }
+    std::string flush_due_output() { return output_filter_.flush_due(); }
 
     void close_console() {
         if (console_closed_) {
@@ -755,7 +748,6 @@ private:
     UniqueHandle stdout_read_;
     bool console_closed_;
     TerminalOutputFilter output_filter_;
-    WinptyTranscriptNormalizer transcript_normalizer_;
 };
 
 std::unique_ptr<ProcessSession> launch_winpty_process_session(

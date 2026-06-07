@@ -43,10 +43,6 @@ impl TerminalOutputState {
     pub(super) fn drain_pending(&mut self) -> String {
         self.filter.drain_pending()
     }
-
-    pub(super) fn set_physical_width(&mut self, cols: u16) {
-        self.filter.set_physical_width(cols);
-    }
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -60,8 +56,6 @@ trait TerminalOutputFilter: Send {
     fn drain_pending(&mut self) -> String {
         String::new()
     }
-
-    fn set_physical_width(&mut self, _cols: u16) {}
 }
 
 #[derive(Default)]

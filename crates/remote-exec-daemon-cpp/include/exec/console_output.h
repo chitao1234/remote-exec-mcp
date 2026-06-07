@@ -95,45 +95,6 @@ private:
     bool debounce_enabled_;
 };
 
-class WinptyTranscriptNormalizer {
-public:
-    WinptyTranscriptNormalizer();
-    explicit WinptyTranscriptNormalizer(std::size_t physical_width);
-
-    void set_physical_width(std::size_t physical_width);
-    std::string filter_chunk(const std::string& chunk);
-    std::string drain_pending();
-
-private:
-    enum class TrailingFragmentMode {
-        Buffer,
-        Emit,
-    };
-
-    void process_physical_line(const std::string& line, std::string* output);
-    void process_physical_line_with_mode(
-        const std::string& line,
-        std::string* output,
-        TrailingFragmentMode trailing_fragment_mode
-    );
-    void emit_repaint_prefix(const std::string& left, std::string* output);
-    void emit_line_with_pending_fragment(
-        const std::string& line,
-        std::string* output,
-        bool terminated
-    );
-    void emit_logical_line(const std::string& line, std::string* output);
-    void emit_logical_text(const std::string& line, std::string* output, bool terminated);
-    bool split_winpty_repaint_line(const std::string& line, std::string* left, std::string* right)
-        const;
-    static std::string trim_trailing_spaces(const std::string& text);
-    static std::string trim_leading_spaces(const std::string& text);
-
-    std::size_t physical_width_;
-    std::string pending_physical_line_;
-    std::string pending_logical_fragment_;
-};
-
 #ifdef REMOTE_EXEC_CPP_TESTING
 std::string utf8_from_windows_wide_for_test(const std::wstring& wide);
 std::string utf8_from_windows_code_page_for_test(unsigned int code_page, const std::string& raw);
@@ -157,9 +118,4 @@ std::string filter_terminal_output_at_for_test(
 );
 std::string flush_terminal_output_due_for_test(TerminalOutputFilter* filter, std::uint64_t now_ms);
 std::string drain_terminal_output_for_test(TerminalOutputFilter* filter);
-std::string normalize_winpty_transcript_chunk_for_test(
-    WinptyTranscriptNormalizer* normalizer,
-    const std::string& chunk
-);
-std::string drain_winpty_transcript_for_test(WinptyTranscriptNormalizer* normalizer);
 #endif
