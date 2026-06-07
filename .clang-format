@@ -7,12 +7,14 @@ AllowAllParametersOfDeclarationOnNextLine: false
 AllowShortFunctionsOnASingleLine: InlineOnly
 BinPackArguments: false
 BinPackParameters: false
+BreakBeforeBinaryOperators: NonAssignment
 BreakBeforeBraces: Attach
-ColumnLimit: 120
+ColumnLimit: 100
 ContinuationIndentWidth: 4
 DerivePointerAlignment: false
 IncludeBlocks: Preserve
 IndentWidth: 4
+PenaltyReturnTypeOnItsOwnLine: 1000000
 PointerAlignment: Left
 ReferenceAlignment: Left
 SortIncludes: true
