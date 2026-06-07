@@ -158,7 +158,7 @@ HttpResponse handle_health(const HealthRouteContext& context) {
                Json{
                    {"status", "ok"},
                    {"daemon_version", REMOTE_EXEC_CPP_VERSION},
-                   {"daemon_instance_id", *context.daemon_instance_id},
+                   {"daemon_instance_id", context.daemon_instance_id},
                });
     return response;
 }
@@ -166,14 +166,14 @@ HttpResponse handle_health(const HealthRouteContext& context) {
 HttpResponse handle_target_info(const TargetInfoRouteContext& context) {
     HttpResponse response;
     Json body{
-        {"target", *context.target},
+        {"target", context.target},
         {"daemon_version", REMOTE_EXEC_CPP_VERSION},
-        {"daemon_instance_id", *context.daemon_instance_id},
-        {"hostname", *context.hostname},
+        {"daemon_instance_id", context.daemon_instance_id},
+        {"hostname", context.hostname},
         {"platform", platform::platform_name()},
         {"arch", platform::arch_name()},
     };
-    write_daemon_capabilities(&body, *context.capabilities);
+    write_daemon_capabilities(&body, context.capabilities);
     write_json(response, body);
     return response;
 }
@@ -190,7 +190,7 @@ HttpResponse handle_patch_apply(const PatchRouteContext& context, const HttpRequ
         write_json(response,
                    Json{
                        {"output", result.output},
-                       {"daemon_instance_id", *context.daemon_instance_id},
+                       {"daemon_instance_id", context.daemon_instance_id},
                        {"updated_paths", result.updated_paths},
                    });
     });

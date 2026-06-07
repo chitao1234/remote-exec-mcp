@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -22,7 +23,7 @@ HttpConnectionContext make_test_http_connection_context(TestDaemonState& state);
 
 struct TestRouteHarness {
     TestDaemonState state;
-    ServerRouteContext routes;
+    std::unique_ptr<ServerRouteContext> routes;
 
     explicit TestRouteHarness(const test_fs::path& root);
     void refresh_context();
@@ -30,7 +31,7 @@ struct TestRouteHarness {
 
 struct TestHttpConnectionHarness {
     TestDaemonState state;
-    HttpConnectionContext connection;
+    std::unique_ptr<HttpConnectionContext> connection;
 
     explicit TestHttpConnectionHarness(const test_fs::path& root);
     void refresh_context();
@@ -49,9 +50,9 @@ void enable_test_daemon_sandbox(TestDaemonState& state);
 HttpRequest make_json_http_request(const std::string& path, const Json& body);
 
 inline HttpResponse route_request(TestRouteHarness& harness, const HttpRequest& request) {
-    return route_request(harness.routes, request);
+    return route_request(*harness.routes, request);
 }
 
 inline void handle_client(TestHttpConnectionHarness& harness, UniqueSocket client) {
-    handle_client(harness.connection, std::move(client));
+    handle_client(*harness.connection, std::move(client));
 }

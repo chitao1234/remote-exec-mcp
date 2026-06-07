@@ -66,7 +66,7 @@ TransferImportRequestSpec prepare_transfer_import_request(const TransferRouteCon
     require_uncompressed_transfer(import_request.metadata.compression);
     import_request.destination_path =
         resolve_authorized_transfer_path(context.paths, import_request.metadata.destination_path, SANDBOX_WRITE);
-    import_request.limits = *context.limits;
+    import_request.limits = context.limits;
     import_request.authorizer = make_transfer_write_authorizer(context.paths);
     return import_request;
 }

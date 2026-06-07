@@ -8,7 +8,8 @@
 #include "runtime/route_context.h"
 
 struct PortTunnelUpgradeRoute {
-    PortTunnelUpgradeRoute() : context(), upgrade_token(), response_headers() {}
+    explicit PortTunnelUpgradeRoute(const PortTunnelRouteContext& context_value)
+        : context(context_value), upgrade_token(), response_headers() {}
 
     PortTunnelRouteContext context;
     std::string upgrade_token;

@@ -160,7 +160,7 @@ void handle_client(const HttpConnectionContext& context, UniqueSocket client) {
     HttpReadControl read_control;
     read_control.idle_timeout_ms = context.http_connection_idle_timeout_ms;
     read_control.poll_timeout_ms = HTTP_SHUTDOWN_READ_POLL_MS;
-    read_control.stop_requested = [&context]() { return context.shutdown_requested->load(); };
+    read_control.stop_requested = [&context]() { return context.shutdown_requested.load(); };
 
     for (;;) {
         try {

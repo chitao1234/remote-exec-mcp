@@ -30,7 +30,7 @@ TestRouteHarness::TestRouteHarness(const test_fs::path& root) : state(), routes(
 }
 
 void TestRouteHarness::refresh_context() {
-    routes = make_test_server_route_context(state);
+    routes.reset(new ServerRouteContext(make_test_server_route_context(state)));
 }
 
 TestHttpConnectionHarness::TestHttpConnectionHarness(const test_fs::path& root) : state(), connection() {
@@ -39,7 +39,7 @@ TestHttpConnectionHarness::TestHttpConnectionHarness(const test_fs::path& root) 
 }
 
 void TestHttpConnectionHarness::refresh_context() {
-    connection = make_test_http_connection_context(state);
+    connection.reset(new HttpConnectionContext(make_test_http_connection_context(state)));
 }
 
 test_fs::path make_daemon_test_root(const std::string& directory_name) {

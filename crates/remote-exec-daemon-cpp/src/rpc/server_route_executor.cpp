@@ -178,7 +178,7 @@ RpcRouteExecution execute_rpc_route(const ServerRouteContext& routes,
         return streaming_export_execution(response, transfer);
     }
     if (mode == ROUTE_EXECUTION_UPGRADE) {
-        PortTunnelUpgradeRoute upgrade;
+        PortTunnelUpgradeRoute upgrade(port_tunnel);
         HttpResponse response = prepare_port_tunnel_route_upgrade(port_tunnel, request, &upgrade);
         write_request_id_header(response, request);
         if (response.status != 101) {

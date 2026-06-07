@@ -20,8 +20,7 @@ std::string resolve_path_from_base(const std::string& base, const std::string& r
 } // namespace
 
 bool reject_before_route(const HttpGateContext& context, const HttpRequest& request, HttpResponse* response) {
-    if (!context.http_auth_bearer_token->empty() &&
-        !request_has_bearer_auth(request, *context.http_auth_bearer_token)) {
+    if (!context.http_auth_bearer_token.empty() && !request_has_bearer_auth(request, context.http_auth_bearer_token)) {
         write_bearer_auth_challenge(*response);
         return true;
     }
@@ -35,12 +34,12 @@ bool reject_before_route(const HttpGateContext& context, const HttpRequest& requ
 }
 
 std::string resolve_workdir(const PathResolutionContext& context, const Json& body) {
-    const std::string raw = body.value("workdir", *context.default_workdir);
+    const std::string raw = body.value("workdir", context.default_workdir);
     if (raw.empty()) {
-        return *context.default_workdir;
+        return context.default_workdir;
     }
 
-    return resolve_path_from_base(*context.default_workdir, raw);
+    return resolve_path_from_base(context.default_workdir, raw);
 }
 
 std::string resolve_authorized_workdir(const PathResolutionContext& context, const Json& body, SandboxAccess access) {

@@ -72,13 +72,13 @@ PortTunnelFrame make_tunnel_ready_frame(const PortForwardLimitConfig& limits,
 }
 
 void run_port_tunnel_connection(SOCKET client,
-                                std::shared_ptr<PortTunnelService>* service,
+                                std::shared_ptr<PortTunnelService>& service,
                                 const PortForwardLimitConfig& limits) {
-    if (!*service) {
-        *service = create_port_tunnel_service(limits);
+    if (!service) {
+        service = create_port_tunnel_service(limits);
     }
     set_socket_timeout_ms(client, limits.tunnel_io_timeout_ms);
-    std::shared_ptr<PortTunnelConnection> tunnel(new PortTunnelConnection(client, *service));
+    std::shared_ptr<PortTunnelConnection> tunnel(new PortTunnelConnection(client, service));
     tunnel->run();
 }
 

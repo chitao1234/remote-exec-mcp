@@ -39,8 +39,8 @@ HttpResponse prepare_port_tunnel_route_upgrade(const PortTunnelRouteContext& con
                                                const HttpRequest& request,
                                                PortTunnelUpgradeRoute* upgrade) {
     HttpResponse response;
-    if (!context.gate.http_auth_bearer_token->empty() &&
-        !request_has_bearer_auth(request, *context.gate.http_auth_bearer_token)) {
+    if (!context.gate.http_auth_bearer_token.empty() &&
+        !request_has_bearer_auth(request, context.gate.http_auth_bearer_token)) {
         write_bearer_auth_challenge(response);
         return response;
     }
@@ -52,7 +52,6 @@ HttpResponse prepare_port_tunnel_route_upgrade(const PortTunnelRouteContext& con
         return response;
     }
 
-    upgrade->context = context;
     upgrade->upgrade_token = server_contract::PORT_TUNNEL_UPGRADE_TOKEN;
     upgrade->response_headers[request_id_header_name()] = request_id_for_request(request);
 
@@ -61,5 +60,5 @@ HttpResponse prepare_port_tunnel_route_upgrade(const PortTunnelRouteContext& con
 }
 
 void run_port_tunnel_route_upgrade(const PortTunnelUpgradeRoute& upgrade, SOCKET client) {
-    run_port_tunnel_connection(client, upgrade.context.service, *upgrade.context.limits);
+    run_port_tunnel_connection(client, upgrade.context.service, upgrade.context.limits);
 }
