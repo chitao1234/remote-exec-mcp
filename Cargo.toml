@@ -12,6 +12,7 @@ members = [
 exclude = [
   "winptyrs",
   "portable-pty",
+  ".worktrees",
 ]
 resolver = "3"
 
