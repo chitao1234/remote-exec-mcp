@@ -14,6 +14,7 @@
 #endif
 
 #include "rpc/rpc_failures.h"
+#include "rpc/transfer_wire.h"
 #include "test_contract_fixtures.h"
 #include "test_filesystem.h"
 #include "transfer/transfer_ops.h"

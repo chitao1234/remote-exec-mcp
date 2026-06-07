@@ -5,7 +5,8 @@
 #include <string>
 #include <vector>
 
-#include "transfer/transfer_ops.h"
+#include "transfer/transfer_archive_io.h"
+#include "transfer/transfer_types.h"
 
 namespace transfer_tar_codec {
 

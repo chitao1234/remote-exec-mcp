@@ -14,6 +14,7 @@
 #include "port_forward/port_tunnel.h"
 #include "rpc/server_contract.h"
 #include "rpc/server_routes.h"
+#include "rpc/transfer_wire.h"
 #include "test_contract_fixtures.h"
 #include "test_filesystem.h"
 #include "test_server_routes_shared.h"

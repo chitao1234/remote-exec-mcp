@@ -2,6 +2,8 @@
 
 #include "policy/path_policy.h"
 #include "rpc/server_request_utils.h"
+#include "rpc/transfer_wire.h"
+#include "transfer/transfer_ops.h"
 
 namespace {
 

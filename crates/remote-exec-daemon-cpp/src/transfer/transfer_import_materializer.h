@@ -3,7 +3,8 @@
 #include <cstdint>
 #include <string>
 
-#include "transfer/transfer_ops.h"
+#include "transfer/transfer_archive_io.h"
+#include "transfer/transfer_types.h"
 
 namespace transfer_import_materializer {
 

@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "rpc/rpc_failures.h"
+#include "transfer/transfer_ops.h"
 #include "transfer_archive.h"
 #include "transfer_filesystem.h"
 #include "transfer_import_materializer.h"

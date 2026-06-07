@@ -4,6 +4,7 @@
 # NMAKE. Rule logic stays in dialect-specific makefiles.
 
 TRANSFER_SRCS = \
+	$(SOURCE_PREFIX)src/transfer/transfer_archive_io.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_ops.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_archive.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_ops_fs.cpp \
@@ -22,6 +23,8 @@ POLICY_SRCS = \
 	$(SOURCE_PREFIX)src/policy/filesystem_sandbox.cpp
 
 RPC_FAILURE_SRCS = $(SOURCE_PREFIX)src/rpc/rpc_failures.cpp
+
+TRANSFER_WIRE_SRCS = $(SOURCE_PREFIX)src/rpc/transfer_wire.cpp
 
 PATCH_SRCS = $(SOURCE_PREFIX)src/patch/patch_engine.cpp
 
@@ -79,6 +82,7 @@ ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/rpc/transfer_http_codec.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_stream_codec.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_stream_io.cpp \
+	$(TRANSFER_WIRE_SRCS) \
 	$(SOURCE_PREFIX)src/rpc/transfer_request_utils.cpp
 
 PORT_FORWARD_SRCS = \
@@ -198,6 +202,7 @@ HOST_TRANSFER_SRCS = \
 	$(SOURCE_PREFIX)tests/test_transfer.cpp \
 	$(PATH_UTILS_SRCS) \
 	$(TRANSFER_SRCS) \
+	$(TRANSFER_WIRE_SRCS) \
 	$(RPC_FAILURE_SRCS)
 
 WINDOWS_TRANSFER_TEST_SRCS = \

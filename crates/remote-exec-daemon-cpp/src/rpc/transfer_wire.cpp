@@ -1,0 +1,85 @@
+#include "rpc/transfer_wire.h"
+
+const char* transfer_source_type_wire_value(TransferSourceType source_type) {
+    switch (source_type) {
+    case TransferSourceType::File:
+        return "file";
+    case TransferSourceType::Directory:
+        return "directory";
+    case TransferSourceType::Multiple:
+        return "multiple";
+    }
+    return "file";
+}
+
+bool parse_transfer_source_type_wire_value(const std::string& value, TransferSourceType* source_type) {
+    if (value == "file") {
+        *source_type = TransferSourceType::File;
+        return true;
+    }
+    if (value == "directory") {
+        *source_type = TransferSourceType::Directory;
+        return true;
+    }
+    if (value == "multiple") {
+        *source_type = TransferSourceType::Multiple;
+        return true;
+    }
+    return false;
+}
+
+const char* transfer_symlink_mode_wire_value(TransferSymlinkMode symlink_mode) {
+    switch (symlink_mode) {
+    case TransferSymlinkMode::Preserve:
+        return "preserve";
+    case TransferSymlinkMode::Follow:
+        return "follow";
+    case TransferSymlinkMode::Skip:
+        return "skip";
+    }
+    return "preserve";
+}
+
+bool parse_transfer_symlink_mode_wire_value(const std::string& value, TransferSymlinkMode* symlink_mode) {
+    if (value == "preserve") {
+        *symlink_mode = TransferSymlinkMode::Preserve;
+        return true;
+    }
+    if (value == "follow") {
+        *symlink_mode = TransferSymlinkMode::Follow;
+        return true;
+    }
+    if (value == "skip") {
+        *symlink_mode = TransferSymlinkMode::Skip;
+        return true;
+    }
+    return false;
+}
+
+const char* transfer_overwrite_wire_value(TransferOverwrite overwrite) {
+    switch (overwrite) {
+    case TransferOverwrite::Fail:
+        return "fail";
+    case TransferOverwrite::Merge:
+        return "merge";
+    case TransferOverwrite::Replace:
+        return "replace";
+    }
+    return "fail";
+}
+
+bool parse_transfer_overwrite_wire_value(const std::string& value, TransferOverwrite* overwrite) {
+    if (value == "fail") {
+        *overwrite = TransferOverwrite::Fail;
+        return true;
+    }
+    if (value == "merge") {
+        *overwrite = TransferOverwrite::Merge;
+        return true;
+    }
+    if (value == "replace") {
+        *overwrite = TransferOverwrite::Replace;
+        return true;
+    }
+    return false;
+}

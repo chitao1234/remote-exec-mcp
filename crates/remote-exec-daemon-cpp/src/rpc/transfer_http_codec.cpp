@@ -6,6 +6,7 @@
 #include "rpc/rpc_failures.h"
 #include "rpc/server_contract.h"
 #include "rpc/transfer_http_codec.h"
+#include "rpc/transfer_wire.h"
 
 namespace {
 

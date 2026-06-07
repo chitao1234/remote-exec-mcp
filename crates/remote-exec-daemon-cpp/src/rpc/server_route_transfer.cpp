@@ -8,6 +8,8 @@
 #include "rpc/transfer_request_utils.h"
 #include "rpc/transfer_stream_codec.h"
 #include "rpc/transfer_stream_io.h"
+#include "rpc/transfer_wire.h"
+#include "transfer/transfer_ops.h"
 
 namespace {
 
