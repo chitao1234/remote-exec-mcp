@@ -516,6 +516,7 @@ make -C crates/remote-exec-daemon-cpp check-windows-xp-ansi
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1-ansi
 make -C crates/remote-exec-daemon-cpp check-windows-9x-ws1-ansi
+make -C crates/remote-exec-daemon-cpp check-windows-9x-ws2-ansi
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws2
 bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
@@ -527,10 +528,11 @@ empty. The GNU make default is `wine` on non-Windows hosts and empty on
 Windows.
 Add `WINDOWS_CHAR_API=ansi`, or use aliases such as `check-windows-xp-ansi` and
 `check-windows-nt4-ws1-ansi`, to build the daemon-owned ANSI Win32 API path.
-Use `check-windows-9x-ws1-ansi` for the GNU 9x/Me ANSI Winsock 1.1 path; it
-sets `WINVER=0x0400`, `_WIN32_WINDOWS=0x0400`, and `_CHICAGO_`. ANSI builds use
-the active Windows ANSI code page for Win32 paths and command strings, reject
-unrepresentable UTF-8 input, and disable GNU winpty auto-enable.
+Use `check-windows-9x-ws1-ansi` or `check-windows-9x-ws2-ansi` for the GNU
+9x/Me ANSI paths; they set `WINVER=0x0400`, `_WIN32_WINDOWS=0x0400`, and
+`_CHICAGO_`. ANSI builds use the active Windows ANSI code page for Win32 paths
+and command strings, reject unrepresentable UTF-8 input, and disable GNU winpty
+auto-enable.
 
 From an x86 Visual Studio developer prompt:
 

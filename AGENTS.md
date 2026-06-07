@@ -32,9 +32,9 @@ and legacy Windows build paths. The GNU make matrix separates the Win32 API
 floor from the Winsock version and Windows family macros, covering a Winsock 1
 path tested on Windows NT 3.51 and Windows NT 4.0, an NT 4.0 Winsock 2 path,
 Windows 2000 and Windows XP combinations, and an ANSI Win32 API Winsock 1.1
-path tested on Windows 98 SE. In this repository, "Windows XP-compatible"
-means a toolchain and binary target that can both compile the C++ daemon as
-C++11 and target Windows XP.
+and Winsock 2 path tested on Windows 98 SE. In this repository, "Windows
+XP-compatible" means a toolchain and binary target that can both compile the
+C++ daemon as C++11 and target Windows XP.
 
 The MCP tool surface is:
 

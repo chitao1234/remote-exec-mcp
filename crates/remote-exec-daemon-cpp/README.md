@@ -18,8 +18,8 @@ Winsock 1.1 Unicode variant, which has also been tested on Windows NT 4.0. The
 GNU Windows NT 4.0 API-floor build also supports Winsock 2 when that runtime is
 installed. A GNU ANSI Win32 API path is available for Windows 9x/Me
 compatibility work and has been tested on Windows 98 SE. Its 9x aliases keep a
-0x0400 Win32 API floor, define `_WIN32_WINDOWS=0x0400`, use Winsock 1.1, and
-exclude winpty.
+0x0400 Win32 API floor, define `_WIN32_WINDOWS=0x0400`, support Winsock 1.1
+and Winsock 2, and exclude winpty.
 
 The former `remote-exec-daemon-xp` name referred to the original Windows XP-only
 shape. Current live behavior is documented here and in the repository root
@@ -109,6 +109,7 @@ Windows GNU build matrix:
 - `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1`
 - `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1 WINDOWS_CHAR_API=ansi`
 - `make check-windows-9x-ws1-ansi`
+- `make check-windows-9x-ws2-ansi`
 - `make all-windows WINDOWS_TOOLCHAIN=native WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2` on Windows
   under MSYS2/MINGW32
 - `make check-windows WINDOWS_TOOLCHAIN=native WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2` on Windows
@@ -147,6 +148,10 @@ Windows GNU build matrix:
   WINDOWS_WINSOCK_VERSION=1 WINDOWS_CHAR_API=ansi` is the GNU 9x/Me ANSI
   Winsock 1.1 path. Use `9x-ws1-ansi` or `98-ws1-ansi` aliases for this
   variant.
+- `WINDOWS_FAMILY=9x WINDOWS_WINVER=0x0400 WINDOWS_WIN32_WINDOWS=0x0400
+  WINDOWS_WINSOCK_VERSION=2 WINDOWS_CHAR_API=ansi` is the GNU 9x/Me ANSI
+  Winsock 2 path. Use `9x-ws2-ansi` or `98-ws2-ansi` aliases for this
+  variant.
 - `WINDOWS_WINPTY=auto|on|off` controls whether the GNU build vendors `winpty`.
   `auto` enables `winpty` for Windows NT 4.0, Windows 2000, and XP API-floor
   Unicode builds, independent of the selected Winsock backend. GNU ANSI builds
@@ -168,6 +173,8 @@ Compatibility aliases remain:
 - `make check-windows-nt4-ws1-ansi`
 - `make all-windows-9x-ws1-ansi`
 - `make check-windows-9x-ws1-ansi`
+- `make all-windows-9x-ws2-ansi`
+- `make check-windows-9x-ws2-ansi`
 - `make all-windows-nt4-ws2`
 - `make check-windows-nt4-ws2`
 - `make all-windows-2000`
@@ -178,6 +185,8 @@ Compatibility aliases remain:
 - `make check-windows-xp-ansi`
 - `make all-windows-98-ws1-ansi`
 - `make check-windows-98-ws1-ansi`
+- `make all-windows-98-ws2-ansi`
+- `make check-windows-98-ws2-ansi`
 - `make all-windows-native`
 - `make check-windows-native`
 
@@ -305,6 +314,12 @@ Windows 9x/Me GNU Winsock 1.1 with ANSI Win32 APIs:
 
 ```bat
 build\remote-exec-daemon-cpp-9x-ws1-ansi.exe config\daemon-cpp.example.ini
+```
+
+Windows 9x/Me GNU Winsock 2 with ANSI Win32 APIs:
+
+```bat
+build\remote-exec-daemon-cpp-9x-ws2-ansi.exe config\daemon-cpp.example.ini
 ```
 
 Windows NT 4.0-compatible GNU Winsock 2:
@@ -587,8 +602,8 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
   Winsock 1.1 Unicode variant is the minimum supported path and has been tested
   on Windows NT 3.51 and Windows NT 4.0. The GNU NT 4.0 API-floor build also
   supports Winsock 2 when that runtime is installed. The GNU ANSI API build
-  path exists for Windows 9x/Me compatibility work and has been tested on
-  Windows 98 SE.
+  path exists for Windows 9x/Me compatibility work and has been tested with
+  Winsock 1.1 and Winsock 2 on Windows 98 SE.
 - `view_image` supports passthrough PNG, JPEG, and WebP only
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - broker-owned `forward_id` values do not persist across broker restart

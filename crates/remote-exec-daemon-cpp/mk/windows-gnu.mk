@@ -75,9 +75,6 @@ ifeq ($(WINDOWS_FAMILY),$(WINDOWS_FAMILY_9X))
 ifneq ($(WINDOWS_CHAR_API),$(WINDOWS_CHAR_API_ANSI))
 $(error WINDOWS_FAMILY=9x requires WINDOWS_CHAR_API=ansi)
 endif
-ifneq ($(WINDOWS_WINSOCK_VERSION),$(WINDOWS_WINSOCK1))
-$(error WINDOWS_FAMILY=9x requires WINDOWS_WINSOCK_VERSION=1)
-endif
 endif
 
 ifeq ($(filter $(WINDOWS_WINPTY),auto on off),)
@@ -352,6 +349,7 @@ WINDOWS_NATIVE_ALIAS_NAMES := native
 WINDOWS_NT4_WS1_ANSI_ALIAS_NAMES := nt4-ws1-ansi
 WINDOWS_XP_ANSI_ALIAS_NAMES := xp-ansi xp-ws2-ansi
 WINDOWS_9X_WS1_ANSI_ALIAS_NAMES := 9x-ws1-ansi 98-ws1-ansi
+WINDOWS_9X_WS2_ANSI_ALIAS_NAMES := 9x-ws2-ansi 98-ws2-ansi
 
 $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_NT4_WS1_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK1),$(WINDOWS_CHAR_API_UNICODE),$(WINDOWS_FAMILY_NT),$(WINDOWS_WINVER_NT4)))
 $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_NT4_WS2_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK2),$(WINDOWS_CHAR_API_UNICODE),$(WINDOWS_FAMILY_NT),$(WINDOWS_WINVER_NT4)))
@@ -361,6 +359,7 @@ $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_NATIVE_ALIAS_NAMES),
 $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_NT4_WS1_ANSI_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK1),$(WINDOWS_CHAR_API_ANSI),$(WINDOWS_FAMILY_NT),$(WINDOWS_WINVER_NT4)))
 $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_XP_ANSI_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2),$(WINDOWS_CHAR_API_ANSI),$(WINDOWS_FAMILY_NT),$(WINDOWS_WINVER_XP)))
 $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_9X_WS1_ANSI_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_9X),$(WINDOWS_WINVER_9X),$(WINDOWS_WINSOCK1),$(WINDOWS_CHAR_API_ANSI),$(WINDOWS_FAMILY_9X),$(WINDOWS_WINVER_9X)))
+$(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_9X_WS2_ANSI_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_9X),$(WINDOWS_WINVER_9X),$(WINDOWS_WINSOCK2),$(WINDOWS_CHAR_API_ANSI),$(WINDOWS_FAMILY_9X),$(WINDOWS_WINVER_9X)))
 
 define define_windows_variant_test_alias
 $1:
@@ -379,6 +378,7 @@ $(eval $(call define_windows_named_test_aliases,nt4-ws2,$(WINDOWS_COMMON_TEST_CA
 $(eval $(call define_windows_named_test_aliases,xp-ansi,$(WINDOWS_COMMON_TEST_CASES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2),$(WINDOWS_CHAR_API_ANSI),$(WINDOWS_FAMILY_NT),$(WINDOWS_WINVER_XP)))
 $(eval $(call define_windows_named_test_aliases,nt4-ws1-ansi,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK1),$(WINDOWS_CHAR_API_ANSI),$(WINDOWS_FAMILY_NT),$(WINDOWS_WINVER_NT4)))
 $(eval $(call define_windows_named_test_aliases,9x-ws1-ansi,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_9X),$(WINDOWS_WINVER_9X),$(WINDOWS_WINSOCK1),$(WINDOWS_CHAR_API_ANSI),$(WINDOWS_FAMILY_9X),$(WINDOWS_WINVER_9X)))
+$(eval $(call define_windows_named_test_aliases,9x-ws2-ansi,$(WINDOWS_COMMON_TEST_CASES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_9X),$(WINDOWS_WINVER_9X),$(WINDOWS_WINSOCK2),$(WINDOWS_CHAR_API_ANSI),$(WINDOWS_FAMILY_9X),$(WINDOWS_WINVER_9X)))
 
 windows_named_test_alias_phonies = $(foreach test,$2,test-windows-$1-$(WINDOWS_TEST_CASE_$(test)_NAME))
 windows_variant_alias_phonies = $(foreach alias_name,$1,all-windows-$(alias_name) test-windows-$(alias_name) check-windows-$(alias_name))
@@ -391,6 +391,7 @@ WINDOWS_NATIVE_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,nat
 WINDOWS_XP_ANSI_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,xp-ansi,$(WINDOWS_COMMON_TEST_CASES))
 WINDOWS_NT4_WS1_ANSI_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,nt4-ws1-ansi,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND)
 WINDOWS_9X_WS1_ANSI_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,9x-ws1-ansi,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND)
+WINDOWS_9X_WS2_ANSI_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,9x-ws2-ansi,$(WINDOWS_COMMON_TEST_CASES))
 WINDOWS_VARIANT_ALIAS_PHONIES := \
 	$(call windows_variant_alias_phonies,$(WINDOWS_NT4_WS1_ALIAS_NAMES)) \
 	$(call windows_variant_alias_phonies,$(WINDOWS_NT4_WS2_ALIAS_NAMES)) \
@@ -399,7 +400,8 @@ WINDOWS_VARIANT_ALIAS_PHONIES := \
 	$(call windows_variant_alias_phonies,$(WINDOWS_NATIVE_ALIAS_NAMES)) \
 	$(call windows_variant_alias_phonies,$(WINDOWS_NT4_WS1_ANSI_ALIAS_NAMES)) \
 	$(call windows_variant_alias_phonies,$(WINDOWS_XP_ANSI_ALIAS_NAMES)) \
-	$(call windows_variant_alias_phonies,$(WINDOWS_9X_WS1_ANSI_ALIAS_NAMES))
+	$(call windows_variant_alias_phonies,$(WINDOWS_9X_WS1_ANSI_ALIAS_NAMES)) \
+	$(call windows_variant_alias_phonies,$(WINDOWS_9X_WS2_ANSI_ALIAS_NAMES))
 
 .PHONY: \
 	all-windows \
@@ -414,6 +416,7 @@ WINDOWS_VARIANT_ALIAS_PHONIES := \
 	$(WINDOWS_NATIVE_TEST_ALIAS_PHONIES) \
 	$(WINDOWS_XP_ANSI_TEST_ALIAS_PHONIES) \
 	$(WINDOWS_NT4_WS1_ANSI_TEST_ALIAS_PHONIES) \
-	$(WINDOWS_9X_WS1_ANSI_TEST_ALIAS_PHONIES)
+	$(WINDOWS_9X_WS1_ANSI_TEST_ALIAS_PHONIES) \
+	$(WINDOWS_9X_WS2_ANSI_TEST_ALIAS_PHONIES)
 
 endif
