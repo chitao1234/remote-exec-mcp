@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use remote_exec_proto::transfer::{TransferSourceType, TransferSymlinkMode};
 
 use crate::error::TransferError;
-use crate::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
+use crate::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_resolved_path};
 
 use super::super::exclude_matcher::ExcludeMatcher;
 use super::super::{archive_error_to_transfer_error, host_path, internal_transfer_error};
@@ -17,15 +17,18 @@ pub(super) async fn prepare_export_path(
     windows_posix_root: Option<&Path>,
 ) -> Result<PreparedExport, TransferError> {
     let source_text = path.to_string();
-    let source_path =
+    let resolved_source_path =
         host_path(&source_text, windows_posix_root).map_err(internal_transfer_error)?;
-    authorize_path(sandbox, SandboxAccess::Read, &source_path).map_err(|err| {
-        crate::transfer::transfer_error_from_sandbox_error(
-            "transfer source path",
-            &source_text,
-            err,
-        )
-    })?;
+    authorize_resolved_path(sandbox, SandboxAccess::Read, &resolved_source_path).map_err(
+        |err| {
+            crate::transfer::transfer_error_from_sandbox_error(
+                "transfer source path",
+                &source_text,
+                err,
+            )
+        },
+    )?;
+    let source_path = resolved_source_path.into_path_buf();
 
     let metadata = tokio::fs::symlink_metadata(&source_path)
         .await

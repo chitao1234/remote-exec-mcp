@@ -26,8 +26,9 @@ pub async fn apply_patch_local(
         has_workdir = req.workdir.is_some(),
         "patch_apply received"
     );
-    let cwd = crate::exec::resolve_workdir(&state, req.workdir.as_deref())
+    let resolved_cwd = crate::exec::resolve_workdir_for_operation(&state, req.workdir.as_deref())
         .map_err(crate::exec::internal_error)?;
+    let cwd = resolved_cwd.into_path_buf();
     let actions = parser::parse_patch(&req.patch)
         .map_err(|err| logged_bad_request(RpcErrorCode::PatchFailed, err.to_string()))?;
     let planned = preflight::plan_actions(&state, &cwd, actions)

@@ -37,20 +37,19 @@ pub async fn read_image_local(
         }
     }
 
-    let cwd = crate::exec::resolve_workdir(&state, req.workdir.as_deref())
+    let cwd = crate::exec::resolve_workdir_for_operation(&state, req.workdir.as_deref())
         .map_err(|err| ImageError::internal(err.to_string()))?;
-    let path = crate::host_path::lexical_normalize(
-        &crate::exec::resolve_input_path_with_windows_posix_root(
-            &cwd,
-            &req.path,
-            state.config.windows_posix_root.as_deref(),
-        ),
+    let resolved_path = crate::host_path::resolve_input_path_for_operation(
+        cwd.path(),
+        &req.path,
+        state.config.windows_posix_root.as_deref(),
     );
-    crate::exec::ensure_sandbox_access(&state, SandboxAccess::Read, &path)
+    crate::exec::ensure_resolved_sandbox_access(&state, SandboxAccess::Read, &resolved_path)
         .map_err(|err| ImageError::sandbox_denied(err.to_string()))?;
+    let path = resolved_path.path();
     let metadata = tokio::fs::metadata(&path)
         .await
-        .map_err(|err| metadata_error(&path, err))?;
+        .map_err(|err| metadata_error(path, err))?;
     if !metadata.is_file() {
         return Err(ImageError::not_file(format!(
             "image path `{}` is not a file",
@@ -58,10 +57,10 @@ pub async fn read_image_local(
         )));
     }
 
-    let bytes = tokio::fs::read(&path)
+    let bytes = tokio::fs::read(path)
         .await
-        .map_err(|err| read_error(&path, err))?;
-    let (format, rendered_bytes) = render_image_bytes(&path, req.detail.as_deref(), bytes)?;
+        .map_err(|err| read_error(path, err))?;
+    let (format, rendered_bytes) = render_image_bytes(path, req.detail.as_deref(), bytes)?;
     let image_url = encode_data_url(format, rendered_bytes)?;
     tracing::info!(
         target = %state.config.target,

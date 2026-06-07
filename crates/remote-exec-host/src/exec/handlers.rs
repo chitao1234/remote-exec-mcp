@@ -12,8 +12,9 @@ use crate::{
 
 use super::{
     policy::{
-        ensure_sandbox_access, finish_response, has_exited, internal_error, poll_once, poll_until,
-        resolve_workdir, running_response, write_chars, write_yield_time_operation,
+        ensure_resolved_sandbox_access, finish_response, has_exited, internal_error, poll_once,
+        poll_until, resolve_workdir_for_operation, running_response, write_chars,
+        write_yield_time_operation,
     },
     session, shell,
     store::{SessionLease, SessionLockError},
@@ -198,9 +199,11 @@ fn prepare_exec_start(
     state: &Arc<AppState>,
     req: &ExecStartRequest,
 ) -> Result<PreparedExecStart, HostRpcError> {
-    let cwd = resolve_workdir(state, req.workdir.as_deref()).map_err(internal_error)?;
-    ensure_sandbox_access(state, SandboxAccess::ExecCwd, &cwd)
+    let resolved_cwd =
+        resolve_workdir_for_operation(state, req.workdir.as_deref()).map_err(internal_error)?;
+    ensure_resolved_sandbox_access(state, SandboxAccess::ExecCwd, &resolved_cwd)
         .map_err(|err| logged_bad_request(RpcErrorCode::SandboxDenied, err.to_string()))?;
+    let cwd = resolved_cwd.into_path_buf();
     ensure_requested_tty_supported(state, req.tty)?;
     let login = resolve_login_request(state, req.login)?;
     let shell = shell::selected_shell(

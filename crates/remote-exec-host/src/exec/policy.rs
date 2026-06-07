@@ -11,15 +11,25 @@ use crate::{
     AppState, HostRpcError,
     config::YieldTimeOperation,
     host_path,
-    sandbox::{SandboxAccess, SandboxError, authorize_path},
+    sandbox::{SandboxAccess, SandboxError, authorize_resolved_path},
 };
 
 use super::{output, session, timing::EXEC_POLL_INTERVAL};
 
 pub fn resolve_workdir(state: &Arc<AppState>, workdir: Option<&str>) -> anyhow::Result<PathBuf> {
+    Ok(resolve_workdir_for_operation(state, workdir)?.into_path_buf())
+}
+
+pub fn resolve_workdir_for_operation(
+    state: &Arc<AppState>,
+    workdir: Option<&str>,
+) -> anyhow::Result<host_path::ResolvedHostPath> {
     Ok(match workdir {
-        None => state.config.default_workdir.clone(),
-        Some(raw) => host_path::resolve_input_path(
+        None => host_path::ResolvedHostPath::new(
+            state.config.default_workdir.display().to_string(),
+            state.config.default_workdir.clone(),
+        ),
+        Some(raw) => host_path::resolve_input_path_for_operation(
             &state.config.default_workdir,
             raw,
             state.config.windows_posix_root.as_deref(),
@@ -36,7 +46,7 @@ pub fn resolve_input_path_with_windows_posix_root(
     raw: &str,
     windows_posix_root: Option<&Path>,
 ) -> PathBuf {
-    host_path::resolve_input_path(base, raw, windows_posix_root)
+    host_path::resolve_input_path_for_operation(base, raw, windows_posix_root).into_path_buf()
 }
 
 pub fn ensure_sandbox_access(
@@ -44,7 +54,16 @@ pub fn ensure_sandbox_access(
     access: SandboxAccess,
     path: &Path,
 ) -> Result<(), SandboxError> {
-    authorize_path(state.sandbox.as_ref(), access, path)
+    let resolved = host_path::ResolvedHostPath::new(path.display().to_string(), path.to_path_buf());
+    authorize_resolved_path(state.sandbox.as_ref(), access, &resolved)
+}
+
+pub fn ensure_resolved_sandbox_access(
+    state: &Arc<AppState>,
+    access: SandboxAccess,
+    path: &host_path::ResolvedHostPath,
+) -> Result<(), SandboxError> {
+    authorize_resolved_path(state.sandbox.as_ref(), access, path)
 }
 
 pub fn internal_error(err: anyhow::Error) -> HostRpcError {

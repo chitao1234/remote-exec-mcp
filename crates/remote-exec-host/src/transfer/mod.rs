@@ -12,7 +12,7 @@ use remote_exec_proto::transfer::TransferCompression;
 use crate::{
     AppState,
     error::TransferError,
-    sandbox::{CompiledFilesystemSandbox, SandboxAccess, SandboxError, authorize_path},
+    sandbox::{CompiledFilesystemSandbox, SandboxAccess, SandboxError, authorize_resolved_path},
 };
 
 pub fn path_info_for_request(
@@ -33,16 +33,16 @@ pub fn path_info_for_path(
 ) -> Result<TransferPathInfoResponse, TransferError> {
     let path = archive::host_path(raw_path, windows_posix_root)
         .map_err(|err| TransferError::internal(err.to_string()))?;
-    authorize_path(sandbox, SandboxAccess::Write, &path).map_err(|err| {
+    authorize_resolved_path(sandbox, SandboxAccess::Write, &path).map_err(|err| {
         transfer_error_from_sandbox_error("transfer endpoint path", raw_path, err)
     })?;
 
-    match std::fs::symlink_metadata(&path) {
+    match std::fs::symlink_metadata(path.path()) {
         Ok(metadata) => {
             if metadata.file_type().is_symlink() {
                 return Err(TransferError::destination_unsupported(format!(
                     "destination path contains unsupported symlink `{}`",
-                    path.display()
+                    path.path().display()
                 )));
             }
             Ok(TransferPathInfoResponse {

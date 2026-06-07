@@ -1,5 +1,5 @@
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use remote_exec_proto::rpc::{
@@ -9,6 +9,7 @@ use remote_exec_proto::rpc::{
 
 use crate::AppState;
 use crate::error::FileError;
+use crate::host_path::ResolvedHostPath;
 use crate::sandbox::SandboxAccess;
 use crate::text_file::{TextFile, TextFileError, TextFileErrorKind};
 
@@ -36,11 +37,12 @@ pub async fn read_file_local(
         ));
     }
 
-    let path = resolve_file_path(&state, &req.path);
-    crate::exec::ensure_sandbox_access(&state, SandboxAccess::Read, &path)?;
+    let resolved_path = resolve_file_path(&state, &req.path);
+    crate::exec::ensure_resolved_sandbox_access(&state, SandboxAccess::Read, &resolved_path)?;
+    let path = resolved_path.path();
     let metadata = tokio::fs::metadata(&path)
         .await
-        .map_err(|err| metadata_error(&path, err))?;
+        .map_err(|err| metadata_error(path, err))?;
     if !metadata.is_file() {
         return Err(FileError::not_file(format!(
             "file path `{}` is not a file",
@@ -56,7 +58,7 @@ pub async fn read_file_local(
         )));
     }
 
-    let text = read_text_file_with_max_bytes(&state, &path, req.max_bytes).await?;
+    let text = read_text_file_with_max_bytes(&state, path, req.max_bytes).await?;
     let rendered = render_read_output(&text.text, req.offset, req.limit);
     tracing::info!(
         target = %state.config.target,
@@ -93,15 +95,16 @@ pub async fn write_file_local(
         ));
     }
 
-    let path = resolve_file_path(&state, &req.path);
-    crate::exec::ensure_sandbox_access(&state, SandboxAccess::Write, &path)?;
-    let target = ensure_writable_file_target(&path, req.max_bytes).await?;
+    let resolved_path = resolve_file_path(&state, &req.path);
+    crate::exec::ensure_resolved_sandbox_access(&state, SandboxAccess::Write, &resolved_path)?;
+    let path = resolved_path.path();
+    let target = ensure_writable_file_target(path, req.max_bytes).await?;
     let content =
-        encode_for_existing_file(&state, &path, &req.content, !target.created, req.max_bytes)
+        encode_for_existing_file(&state, path, &req.content, !target.created, req.max_bytes)
             .await?;
-    tokio::fs::write(&path, content)
+    tokio::fs::write(path, content)
         .await
-        .map_err(|err| write_error(&path, err))?;
+        .map_err(|err| write_error(path, err))?;
     let line_count = count_lines(&req.content);
     tracing::info!(
         target = %state.config.target,
@@ -142,20 +145,21 @@ pub async fn edit_file_local(
         ));
     }
 
-    let path = resolve_file_path(&state, &req.path);
-    crate::exec::ensure_sandbox_access(&state, SandboxAccess::Write, &path)?;
+    let resolved_path = resolve_file_path(&state, &req.path);
+    crate::exec::ensure_resolved_sandbox_access(&state, SandboxAccess::Write, &resolved_path)?;
+    let path = resolved_path.path();
     let metadata = tokio::fs::metadata(&path)
         .await
-        .map_err(|err| metadata_error(&path, err))?;
+        .map_err(|err| metadata_error(path, err))?;
     if !metadata.is_file() {
         return Err(FileError::not_file(format!(
             "file path `{}` is not a file",
             path.display()
         )));
     }
-    enforce_max_bytes(&path, metadata.len(), req.max_bytes)?;
+    enforce_max_bytes(path, metadata.len(), req.max_bytes)?;
 
-    let text = read_text_file_with_max_bytes(&state, &path, req.max_bytes).await?;
+    let text = read_text_file_with_max_bytes(&state, path, req.max_bytes).await?;
     let matches = text.text.match_indices(&req.old_string).count();
     match matches {
         0 => {
@@ -181,10 +185,10 @@ pub async fn edit_file_local(
     };
     let content = text
         .encode(&updated)
-        .map_err(|err| text_write_encoding_error(&path, err))?;
-    tokio::fs::write(&path, content)
+        .map_err(|err| text_write_encoding_error(path, err))?;
+    tokio::fs::write(path, content)
         .await
-        .map_err(|err| write_error(&path, err))?;
+        .map_err(|err| write_error(path, err))?;
     let line_count = count_lines(&updated);
     tracing::info!(
         target = %state.config.target,
@@ -211,12 +215,12 @@ struct WritableFileTarget {
     created: bool,
 }
 
-fn resolve_file_path(state: &Arc<AppState>, raw: &str) -> PathBuf {
-    crate::host_path::lexical_normalize(&crate::exec::resolve_input_path_with_windows_posix_root(
+fn resolve_file_path(state: &Arc<AppState>, raw: &str) -> ResolvedHostPath {
+    crate::host_path::resolve_input_path_for_operation(
         &state.config.default_workdir,
         raw,
         state.config.windows_posix_root.as_deref(),
-    ))
+    )
 }
 
 async fn ensure_writable_file_target(

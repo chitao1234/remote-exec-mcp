@@ -127,6 +127,14 @@ pub fn authorize_path(
     )))
 }
 
+pub fn authorize_resolved_path(
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    access: SandboxAccess,
+    path: &host_path::ResolvedHostPath,
+) -> Result<(), SandboxError> {
+    authorize_path(sandbox, access, path.path())
+}
+
 fn compile_list(
     label: &str,
     list: &SandboxPathList,

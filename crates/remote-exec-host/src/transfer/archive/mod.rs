@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::host_path;
 use remote_exec_proto::path::PathPolicy;
@@ -53,12 +53,14 @@ pub struct ExportPathResult {
     pub warnings: Vec<TransferWarning>,
 }
 
-pub(crate) fn host_path(raw: &str, windows_posix_root: Option<&Path>) -> anyhow::Result<PathBuf> {
-    let policy = host_path::host_path_policy();
-    Ok(
-        host_path::resolve_absolute_input_path(raw, windows_posix_root)
-            .unwrap_or_else(|| PathBuf::from(policy.normalize_for_system(raw))),
-    )
+pub(crate) fn host_path(
+    raw: &str,
+    windows_posix_root: Option<&std::path::Path>,
+) -> anyhow::Result<host_path::ResolvedHostPath> {
+    Ok(host_path::resolve_path_text_for_operation(
+        raw,
+        windows_posix_root,
+    ))
 }
 
 pub(crate) fn archive_error_to_transfer_error(err: anyhow::Error) -> crate::error::TransferError {

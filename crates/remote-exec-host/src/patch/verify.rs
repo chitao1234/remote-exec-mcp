@@ -6,8 +6,8 @@ pub(super) fn resolve_patch_path(
     state: &std::sync::Arc<AppState>,
     cwd: &Path,
     path: &Path,
-) -> PathBuf {
-    crate::exec::resolve_input_path_with_windows_posix_root(
+) -> crate::host_path::ResolvedHostPath {
+    crate::host_path::resolve_input_path_for_operation(
         cwd,
         &path.as_os_str().to_string_lossy(),
         state.config.windows_posix_root.as_deref(),

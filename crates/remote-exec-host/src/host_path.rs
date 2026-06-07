@@ -5,6 +5,41 @@ use remote_exec_proto::path::windows_path_policy;
 
 pub use remote_exec_proto::path::host_policy as host_path_policy;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedHostPath {
+    raw: String,
+    path: PathBuf,
+}
+
+impl ResolvedHostPath {
+    pub fn new(raw: impl Into<String>, path: PathBuf) -> Self {
+        Self {
+            raw: raw.into(),
+            path,
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn into_path_buf(self) -> PathBuf {
+        self.path
+    }
+
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+
+    pub fn display_or_raw(&self) -> String {
+        if self.raw.is_empty() {
+            self.path.display().to_string()
+        } else {
+            self.raw.clone()
+        }
+    }
+}
+
 pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {
@@ -39,6 +74,27 @@ pub fn resolve_input_path(base: &Path, raw: &str, windows_posix_root: Option<&Pa
     let policy = host_path_policy();
     resolve_absolute_input_path(raw, windows_posix_root)
         .unwrap_or_else(|| base.join(policy.normalize_for_system(raw)))
+}
+
+pub fn resolve_input_path_for_operation(
+    base: &Path,
+    raw: &str,
+    windows_posix_root: Option<&Path>,
+) -> ResolvedHostPath {
+    ResolvedHostPath::new(
+        raw,
+        lexical_normalize(&resolve_input_path(base, raw, windows_posix_root)),
+    )
+}
+
+pub fn resolve_path_text_for_operation(
+    raw: &str,
+    windows_posix_root: Option<&Path>,
+) -> ResolvedHostPath {
+    let policy = host_path_policy();
+    let path = resolve_absolute_input_path(raw, windows_posix_root)
+        .unwrap_or_else(|| PathBuf::from(policy.normalize_for_system(raw)));
+    ResolvedHostPath::new(raw, path)
 }
 
 #[cfg(windows)]

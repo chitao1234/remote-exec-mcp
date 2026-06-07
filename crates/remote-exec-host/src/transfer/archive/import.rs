@@ -8,7 +8,9 @@ use remote_exec_proto::transfer::{
 };
 
 use crate::error::TransferError;
-use crate::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
+use crate::sandbox::{
+    CompiledFilesystemSandbox, SandboxAccess, authorize_path, authorize_resolved_path,
+};
 
 use super::codec::{open_archive_reader, wrap_archive_reader};
 use super::entry::{ensure_supported_archive_entry_type, normalize_archive_entry_path};
@@ -94,9 +96,10 @@ async fn prepare_import_destination(
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
 ) -> Result<PreparedImport, TransferError> {
-    let destination = host_path(&request.destination_path, windows_posix_root)
+    let resolved_destination = host_path(&request.destination_path, windows_posix_root)
         .map_err(internal_transfer_error)?;
-    authorize_write_path(sandbox, &destination, &request.destination_path)?;
+    authorize_resolved_write_path(sandbox, &resolved_destination, &request.destination_path)?;
+    let destination = resolved_destination.into_path_buf();
 
     let replaced = prepare_destination(&destination, request, sandbox).await?;
     Ok(PreparedImport {
@@ -733,6 +736,20 @@ fn authorize_write_path(
     raw_path: &str,
 ) -> Result<(), TransferError> {
     authorize_path(sandbox, SandboxAccess::Write, path).map_err(|err| {
+        crate::transfer::transfer_error_from_sandbox_error(
+            "transfer destination path",
+            raw_path,
+            err,
+        )
+    })
+}
+
+fn authorize_resolved_write_path(
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    path: &crate::host_path::ResolvedHostPath,
+    raw_path: &str,
+) -> Result<(), TransferError> {
+    authorize_resolved_path(sandbox, SandboxAccess::Write, path).map_err(|err| {
         crate::transfer::transfer_error_from_sandbox_error(
             "transfer destination path",
             raw_path,

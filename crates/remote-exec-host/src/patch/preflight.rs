@@ -140,8 +140,9 @@ async fn plan_add(
     lines: Vec<String>,
     overlay: &mut PathOverlay,
 ) -> Result<PlannedAction, PatchError> {
-    let absolute_path = resolve_patch_path(state, cwd, &path);
-    crate::exec::ensure_sandbox_access(state, SandboxAccess::Write, &absolute_path)?;
+    let resolved_path = resolve_patch_path(state, cwd, &path);
+    crate::exec::ensure_resolved_sandbox_access(state, SandboxAccess::Write, &resolved_path)?;
+    let absolute_path = resolved_path.path().to_path_buf();
     ensure_writable_file_target(cwd, &absolute_path, overlay).await?;
 
     let text = ensure_trailing_newline(lines.join("\n"), "\n");
@@ -176,8 +177,9 @@ async fn plan_delete(
     path: PathBuf,
     overlay: &mut PathOverlay,
 ) -> Result<PlannedAction, PatchError> {
-    let absolute_path = resolve_patch_path(state, cwd, &path);
-    crate::exec::ensure_sandbox_access(state, SandboxAccess::Write, &absolute_path)?;
+    let resolved_path = resolve_patch_path(state, cwd, &path);
+    crate::exec::ensure_resolved_sandbox_access(state, SandboxAccess::Write, &resolved_path)?;
+    let absolute_path = resolved_path.path().to_path_buf();
     let _ = require_file(state, cwd, &absolute_path, overlay).await?;
 
     overlay.set(absolute_path.clone(), PlannedPathState::Deleted);
@@ -196,16 +198,30 @@ async fn plan_update(
     hunks: Vec<super::parser::UpdateChunk>,
     overlay: &mut PathOverlay,
 ) -> Result<PlannedAction, PatchError> {
-    let source_path = resolve_patch_path(state, cwd, &path);
-    crate::exec::ensure_sandbox_access(state, SandboxAccess::Write, &source_path)?;
+    let resolved_source_path = resolve_patch_path(state, cwd, &path);
+    crate::exec::ensure_resolved_sandbox_access(
+        state,
+        SandboxAccess::Write,
+        &resolved_source_path,
+    )?;
+    let source_path = resolved_source_path.path().to_path_buf();
     let current = require_file(state, cwd, &source_path, overlay).await?;
-    let destination_path = move_to
+    let resolved_destination_path = move_to
         .as_ref()
-        .map(|destination| resolve_patch_path(state, cwd, destination))
+        .map(|destination| resolve_patch_path(state, cwd, destination));
+    let destination_path = resolved_destination_path
+        .as_ref()
+        .map(|destination| destination.path().to_path_buf())
         .unwrap_or_else(|| source_path.clone());
     let remove_source = move_to.is_some() && !path_eq(&source_path, &destination_path);
     if remove_source {
-        crate::exec::ensure_sandbox_access(state, SandboxAccess::Write, &destination_path)?;
+        crate::exec::ensure_resolved_sandbox_access(
+            state,
+            SandboxAccess::Write,
+            resolved_destination_path
+                .as_ref()
+                .expect("move destination exists when source should be removed"),
+        )?;
         ensure_writable_file_target(cwd, &destination_path, overlay).await?;
     }
 
