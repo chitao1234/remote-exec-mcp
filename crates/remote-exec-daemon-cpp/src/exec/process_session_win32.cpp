@@ -236,8 +236,8 @@ private:
 const unsigned short DEFAULT_PTY_ROWS = 24U;
 const unsigned short DEFAULT_PTY_COLS = 120U;
 const DWORD WINPTY_OPEN_TIMEOUT_MS = 10UL * 1000UL;
-const unsigned long WINPTY_TRANSCRIPT_DEBOUNCE_MS = 150UL;
-const unsigned long WINPTY_TRANSCRIPT_MAX_HOLD_MS = 500UL;
+const unsigned long WINPTY_OUTPUT_DEBOUNCE_MS = 150UL;
+const unsigned long WINPTY_OUTPUT_MAX_HOLD_MS = 500UL;
 const unsigned long WINPTY_READ_POLL_MS = 25UL;
 
 bool is_output_closed_error(DWORD error) {
@@ -592,7 +592,7 @@ public:
         : winpty_(std::move(winpty)), process_handle_(std::move(process_handle)),
           process_id_(process_id), stdin_write_(std::move(stdin_write)),
           stdout_read_(std::move(stdout_read)), console_closed_(false),
-          output_filter_(WINPTY_TRANSCRIPT_DEBOUNCE_MS, WINPTY_TRANSCRIPT_MAX_HOLD_MS) {}
+          output_filter_(WINPTY_OUTPUT_DEBOUNCE_MS, WINPTY_OUTPUT_MAX_HOLD_MS) {}
 
     ~WinptyProcessSession() override { terminate(); }
 

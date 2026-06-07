@@ -69,7 +69,7 @@ private:
     Line& ensure_line(std::size_t row);
     bool line_has_any_content(const Line& line) const;
     void clear_cells_range(Line* line, int start_col, int end_col);
-    std::string serialize_physical_line(std::size_t row) const;
+    std::string serialize_row(std::size_t row) const;
     void queue_touched_rows(std::uint64_t now_ms);
     bool pending_row_due(const PendingRow& pending, std::uint64_t now_ms) const;
     std::string emit_rows(const std::vector<std::size_t>& rows);

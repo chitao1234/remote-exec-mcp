@@ -281,8 +281,8 @@ bool is_prompt_marker_char(char ch) {
     return ch == '>' || ch == '$' || ch == '#';
 }
 
-bool closed_row_should_be_joinable(const std::string& text, std::size_t physical_width) {
-    return physical_width >= 80U && line_has_nonspace_char(text)
+bool closed_row_should_be_joinable(const std::string& text, std::size_t row_width) {
+    return row_width >= 80U && line_has_nonspace_char(text)
            && text.find_first_of(" \t") == std::string::npos;
 }
 
@@ -509,7 +509,7 @@ void TerminalOutputFilter::emit_control(unsigned char byte) {
         }
         {
             const std::size_t row = static_cast<std::size_t>(current_row_);
-            const std::string row_text = serialize_physical_line(row);
+            const std::string row_text = serialize_row(row);
             closed_row_text_[row] = row_text;
             closed_row_joinable_[row] =
                 closed_row_should_be_joinable(row_text, ensure_line(row).cells.size());
@@ -789,7 +789,7 @@ void TerminalOutputFilter::clear_cells_range(Line* line, int start_col, int end_
     }
 }
 
-std::string TerminalOutputFilter::serialize_physical_line(std::size_t row) const {
+std::string TerminalOutputFilter::serialize_row(std::size_t row) const {
     if (row >= lines_.size()) {
         return "";
     }
@@ -869,7 +869,7 @@ std::string TerminalOutputFilter::emit_rows(const std::vector<std::size_t>& rows
         }
 
         Line& line = lines_[row];
-        const std::string current = serialize_physical_line(row);
+        const std::string current = serialize_row(row);
 
         if (!line_has_any_content(line) && has_open_row_ && open_row_ == row) {
             output.push_back('\n');

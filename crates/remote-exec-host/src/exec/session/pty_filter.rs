@@ -28,7 +28,7 @@ impl TerminalOutputState {
     #[cfg(feature = "winpty")]
     pub(super) fn winpty() -> Self {
         Self {
-            filter: Box::<winpty::WinptyOutputState>::default(),
+            filter: Box::<winpty::WinptyOutputFilter>::default(),
         }
     }
 

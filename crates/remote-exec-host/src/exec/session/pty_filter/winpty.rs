@@ -4,48 +4,8 @@ use std::time::Instant;
 
 use super::{TerminalOutputFilter, TerminalOutputResult};
 
-const WINPTY_TRANSCRIPT_DEBOUNCE_MS: u64 = 150;
-const WINPTY_TRANSCRIPT_MAX_HOLD_MS: u64 = 500;
-
-pub(super) struct WinptyOutputState {
-    renderer: TerminalOutputRenderer,
-}
-
-impl Default for WinptyOutputState {
-    fn default() -> Self {
-        Self {
-            renderer: TerminalOutputRenderer::new(
-                WINPTY_TRANSCRIPT_DEBOUNCE_MS,
-                WINPTY_TRANSCRIPT_MAX_HOLD_MS,
-            ),
-        }
-    }
-}
-
-impl TerminalOutputFilter for WinptyOutputState {
-    fn filter_chunk(&mut self, chunk: &str) -> TerminalOutputResult {
-        self.renderer.filter_chunk(chunk)
-    }
-
-    fn flush_due(&mut self) -> String {
-        self.renderer.flush_due_at(monotonic_ms())
-    }
-
-    fn drain_pending(&mut self) -> String {
-        self.renderer.drain_pending()
-    }
-}
-
-#[cfg(test)]
-impl WinptyOutputState {
-    fn filter_chunk_at(&mut self, chunk: &str, now_ms: u64) -> TerminalOutputResult {
-        self.renderer.filter_chunk_at(chunk, now_ms)
-    }
-
-    fn flush_due_at(&mut self, now_ms: u64) -> String {
-        self.renderer.flush_due_at(now_ms)
-    }
-}
+const WINPTY_OUTPUT_DEBOUNCE_MS: u64 = 150;
+const WINPTY_OUTPUT_MAX_HOLD_MS: u64 = 500;
 
 #[derive(Debug, Clone, Default)]
 struct Cell {
@@ -79,7 +39,7 @@ enum RendererState {
 }
 
 #[derive(Debug)]
-struct TerminalOutputRenderer {
+pub(super) struct WinptyOutputFilter {
     lines: Vec<Line>,
     touched_rows: Vec<usize>,
     pending_rows: BTreeMap<usize, PendingRow>,
@@ -96,13 +56,27 @@ struct TerminalOutputRenderer {
     max_hold_ms: u64,
 }
 
-impl Default for TerminalOutputRenderer {
+impl Default for WinptyOutputFilter {
     fn default() -> Self {
-        Self::new(0, 0)
+        Self::new(WINPTY_OUTPUT_DEBOUNCE_MS, WINPTY_OUTPUT_MAX_HOLD_MS)
     }
 }
 
-impl TerminalOutputRenderer {
+impl TerminalOutputFilter for WinptyOutputFilter {
+    fn filter_chunk(&mut self, chunk: &str) -> TerminalOutputResult {
+        self.filter_chunk_at(chunk, monotonic_ms())
+    }
+
+    fn flush_due(&mut self) -> String {
+        self.flush_due_at(monotonic_ms())
+    }
+
+    fn drain_pending(&mut self) -> String {
+        self.drain_pending_rows()
+    }
+}
+
+impl WinptyOutputFilter {
     fn new(debounce_ms: u64, max_hold_ms: u64) -> Self {
         Self {
             lines: Vec::new(),
@@ -120,10 +94,6 @@ impl TerminalOutputRenderer {
             debounce_ms,
             max_hold_ms,
         }
-    }
-
-    pub(super) fn filter_chunk(&mut self, chunk: &str) -> TerminalOutputResult {
-        self.filter_chunk_at(chunk, monotonic_ms())
     }
 
     fn filter_chunk_at(&mut self, chunk: &str, now_ms: u64) -> TerminalOutputResult {
@@ -151,7 +121,7 @@ impl TerminalOutputRenderer {
         }
     }
 
-    pub(super) fn drain_pending(&mut self) -> String {
+    fn drain_pending_rows(&mut self) -> String {
         self.state = RendererState::Ground;
         self.csi_buffer.clear();
 
@@ -240,7 +210,7 @@ impl TerminalOutputRenderer {
                 }
 
                 let row = self.normalized_current_row();
-                let row_text = self.serialize_physical_line(row);
+                let row_text = self.serialize_row(row);
                 let width = self.ensure_line(row).cells.len();
                 self.closed_row_joinable
                     .insert(row, closed_row_should_be_joinable(&row_text, width));
@@ -462,7 +432,7 @@ impl TerminalOutputRenderer {
         self.lines.get(row).is_some_and(line_has_any_content)
     }
 
-    fn serialize_physical_line(&self, row: usize) -> String {
+    fn serialize_row(&self, row: usize) -> String {
         let Some(line) = self.lines.get(row) else {
             return String::new();
         };
@@ -530,7 +500,7 @@ impl TerminalOutputRenderer {
                 continue;
             }
 
-            let current = self.serialize_physical_line(row);
+            let current = self.serialize_row(row);
             let has_content = self.line_has_any_content(row);
 
             if !has_content && self.has_open_row && self.open_row == row {
@@ -784,8 +754,8 @@ fn is_prompt_marker_char(ch: char) -> bool {
     matches!(ch, '>' | '$' | '#')
 }
 
-fn closed_row_should_be_joinable(text: &str, physical_width: usize) -> bool {
-    physical_width >= 80
+fn closed_row_should_be_joinable(text: &str, row_width: usize) -> bool {
+    row_width >= 80
         && line_has_nonspace_char(text)
         && !text.bytes().any(|byte| matches!(byte, b' ' | b'\t'))
 }
@@ -914,81 +884,81 @@ fn suffix_after_byte_len(text: &str, len: usize) -> &str {
 mod tests {
     use crate::exec::session::pty_filter::TerminalOutputFilter;
 
-    use super::{TerminalOutputRenderer, WinptyOutputState};
+    use super::WinptyOutputFilter;
 
     #[test]
-    fn winpty_output_state_strips_control_sequences() {
-        let mut state = WinptyOutputState::default();
-        let result = state.filter_chunk("\x1b[0m\x1b[0Khello\x1b[0K\x1b[?25l\r\n\x1b[0K\x1b[?25h");
+    fn winpty_output_filter_strips_control_sequences() {
+        let mut filter = WinptyOutputFilter::default();
+        let result = filter.filter_chunk("\x1b[0m\x1b[0Khello\x1b[0K\x1b[?25l\r\n\x1b[0K\x1b[?25h");
 
         assert_eq!(result.output, "");
         assert_eq!(result.response, "");
-        assert_eq!(state.drain_pending(), "hello\n");
+        assert_eq!(filter.drain_pending(), "hello\n");
     }
 
     #[test]
-    fn winpty_terminal_output_state_replies_to_device_status_report() {
-        let mut state = WinptyOutputState::default();
-        let result = state.filter_chunk("before\x1b[5nafter");
+    fn winpty_output_filter_replies_to_device_status_report() {
+        let mut filter = WinptyOutputFilter::default();
+        let result = filter.filter_chunk("before\x1b[5nafter");
 
         assert_eq!(result.output, "");
         assert_eq!(result.response, "\x1b[0n");
-        assert_eq!(state.drain_pending(), "beforeafter");
+        assert_eq!(filter.drain_pending(), "beforeafter");
     }
 
     #[test]
-    fn winpty_terminal_output_state_replies_to_cursor_position_report() {
-        let mut state = WinptyOutputState::default();
-        let result = state.filter_chunk("before\x1b[6nafter");
+    fn winpty_output_filter_replies_to_cursor_position_report() {
+        let mut filter = WinptyOutputFilter::default();
+        let result = filter.filter_chunk("before\x1b[6nafter");
 
         assert_eq!(result.output, "");
         assert_eq!(result.response, "\x1b[1;1R");
-        assert_eq!(state.drain_pending(), "beforeafter");
+        assert_eq!(filter.drain_pending(), "beforeafter");
     }
 
     #[test]
-    fn terminal_output_renderer_strips_osc_title_sequences() {
-        let mut renderer = TerminalOutputRenderer::default();
-        let result = renderer.filter_chunk("\x1b]0;C:\\Windows\\system32\\cmd.exe\x07hello \r\n");
+    fn winpty_output_filter_strips_osc_title_sequences() {
+        let mut filter = WinptyOutputFilter::new(0, 0);
+        let result = filter.filter_chunk("\x1b]0;C:\\Windows\\system32\\cmd.exe\x07hello \r\n");
 
         assert_eq!(result.output, "hello\n");
         assert_eq!(result.response, "");
-        assert_eq!(renderer.drain_pending(), "");
+        assert_eq!(filter.drain_pending(), "");
     }
 
     #[test]
-    fn terminal_output_renderer_handles_split_escape_sequences() {
-        let mut renderer = TerminalOutputRenderer::default();
+    fn winpty_output_filter_handles_split_escape_sequences() {
+        let mut filter = WinptyOutputFilter::new(0, 0);
 
-        assert_eq!(renderer.filter_chunk("before\x1b[").output, "before");
-        assert_eq!(renderer.filter_chunk("0Kafter").output, "after");
-        assert_eq!(renderer.drain_pending(), "");
+        assert_eq!(filter.filter_chunk("before\x1b[").output, "before");
+        assert_eq!(filter.filter_chunk("0Kafter").output, "after");
+        assert_eq!(filter.drain_pending(), "");
     }
 
     #[test]
-    fn terminal_output_renderer_applies_backspace_to_utf8_codepoints() {
-        let mut renderer = TerminalOutputRenderer::default();
+    fn winpty_output_filter_applies_backspace_to_utf8_codepoints() {
+        let mut filter = WinptyOutputFilter::new(0, 0);
 
         assert_eq!(
-            renderer.filter_chunk("\u{4f60}\u{597d}\x08!\r\n").output,
+            filter.filter_chunk("\u{4f60}\u{597d}\x08!\r\n").output,
             "\u{4f60}!\n"
         );
     }
 
     #[test]
-    fn terminal_output_renderer_collapses_winpty_prompt_rewrites() {
-        let mut renderer = TerminalOutputRenderer::default();
-        let first = renderer
+    fn winpty_output_filter_collapses_prompt_rewrites() {
+        let mut filter = WinptyOutputFilter::new(0, 0);
+        let first = filter
             .filter_chunk(
                 "Microsoft Windows XP [\u{7248}\u{672c} 5.1.2600]\x1b[105G(C\r\n)\
                  ) \u{7248}\u{6743}\u{6240}\u{6709} 1985-2001 Microsoft Corp.\r\n\
                  \x1b[107GC:\\chi\r\n>\r",
             )
             .output;
-        let second = renderer
+        let second = filter
             .filter_chunk("\x1b[107GC:\\chi>e\r\ncho hello\x1b[100Ghello\r\n\x1b[107GC:\\chi>\r")
             .output;
-        let final_output = first + &second + &renderer.drain_pending();
+        let final_output = first + &second + &filter.drain_pending();
 
         assert!(final_output.contains("Microsoft Windows XP [\u{7248}\u{672c} 5.1.2600]"));
         assert!(
@@ -1004,65 +974,65 @@ mod tests {
     }
 
     #[test]
-    fn terminal_output_renderer_debounces_touched_rows() {
-        let mut renderer = TerminalOutputRenderer::new(100, 500);
+    fn winpty_output_filter_debounces_touched_rows() {
+        let mut filter = WinptyOutputFilter::new(100, 500);
 
-        assert_eq!(renderer.filter_chunk_at("hello", 1000).output, "");
-        assert_eq!(renderer.flush_due_at(1099), "");
-        assert_eq!(renderer.flush_due_at(1100), "hello");
-        assert_eq!(renderer.drain_pending(), "");
+        assert_eq!(filter.filter_chunk_at("hello", 1000).output, "");
+        assert_eq!(filter.flush_due_at(1099), "");
+        assert_eq!(filter.flush_due_at(1100), "hello");
+        assert_eq!(filter.drain_pending(), "");
     }
 
     #[test]
-    fn terminal_output_renderer_debounce_uses_latest_repaint() {
-        let mut renderer = TerminalOutputRenderer::new(100, 500);
+    fn winpty_output_filter_debounce_uses_latest_repaint() {
+        let mut filter = WinptyOutputFilter::new(100, 500);
 
         assert_eq!(
-            renderer
+            filter
                 .filter_chunk_at("prompt>echo hello\x1b[116Ghell\r\no", 1000)
                 .output,
             ""
         );
-        assert_eq!(renderer.flush_due_at(1050), "");
+        assert_eq!(filter.flush_due_at(1050), "");
         assert_eq!(
-            renderer
+            filter
                 .filter_chunk_at("\r\x1b[1Aprompt>echo hello\x1b[0K\r\nhello", 1050)
                 .output,
             ""
         );
-        assert_eq!(renderer.flush_due_at(1149), "");
+        assert_eq!(filter.flush_due_at(1149), "");
 
-        let emitted = renderer.flush_due_at(1150);
+        let emitted = filter.flush_due_at(1150);
         assert!(emitted.contains("prompt>echo hello"));
         assert!(emitted.contains("hello"));
         assert!(!emitted.contains("hell\no"));
     }
 
     #[test]
-    fn terminal_output_renderer_debounce_drain_flushes_immediately() {
-        let mut renderer = TerminalOutputRenderer::new(1000, 2000);
+    fn winpty_output_filter_debounce_drain_flushes_immediately() {
+        let mut filter = WinptyOutputFilter::new(1000, 2000);
 
-        assert_eq!(renderer.filter_chunk_at("prompt:", 1000).output, "");
-        assert_eq!(renderer.drain_pending(), "prompt:");
+        assert_eq!(filter.filter_chunk_at("prompt:", 1000).output, "");
+        assert_eq!(filter.drain_pending(), "prompt:");
     }
 
     #[test]
-    fn winpty_output_state_does_not_finalize_partial_rows_on_flush_due() {
-        let mut state = WinptyOutputState::default();
+    fn winpty_output_filter_does_not_finalize_partial_rows_on_flush_due() {
+        let mut filter = WinptyOutputFilter::default();
 
         assert_eq!(
-            state
+            filter
                 .filter_chunk_at("prompt>echo hello\x1b[116Ghell\r\no", 1000)
                 .output,
             ""
         );
-        assert_eq!(state.flush_due_at(1100), "");
+        assert_eq!(filter.flush_due_at(1100), "");
         assert_eq!(
-            state
+            filter
                 .filter_chunk_at("\r\x1b[1Aprompt>echo hello\x1b[0K\r\nhello\r\n", 1150)
                 .output,
             ""
         );
-        assert_eq!(state.drain_pending(), "prompt>echo hello\nhello\n");
+        assert_eq!(filter.drain_pending(), "prompt>echo hello\nhello\n");
     }
 }
