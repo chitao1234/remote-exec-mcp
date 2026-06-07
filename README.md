@@ -497,8 +497,7 @@ The GNU Windows NT 4.0 API-floor build also supports Winsock 2 when that
 runtime is installed. GNU Windows builds default to the Unicode Win32 API path.
 A GNU ANSI Win32 API path is available for Windows 9x/Me compatibility work
 and has been tested on Windows 98 SE. This path covers daemon-owned Win32
-file/process/path calls; compiler runtime libraries and vendored winpty API
-usage are separate compatibility concerns.
+file/process/path calls.
 
 The Rust and C++ daemons share the `max_open_sessions` default of 64. C++ also
 has daemon-local safety knobs for its handwritten HTTP parser and blocking

@@ -146,12 +146,10 @@ Windows GNU build matrix:
   API-floor Winsock 2 path. Use `nt4-ws2` aliases for this variant.
 - `WINDOWS_FAMILY=9x WINDOWS_WINVER=0x0400 WINDOWS_WIN32_WINDOWS=0x0400
   WINDOWS_WINSOCK_VERSION=1 WINDOWS_CHAR_API=ansi` is the GNU 9x/Me ANSI
-  Winsock 1.1 path. Use `9x-ws1-ansi` or `98-ws1-ansi` aliases for this
-  variant.
+  Winsock 1.1 path. Use `9x-ws1-ansi` aliases for this variant.
 - `WINDOWS_FAMILY=9x WINDOWS_WINVER=0x0400 WINDOWS_WIN32_WINDOWS=0x0400
   WINDOWS_WINSOCK_VERSION=2 WINDOWS_CHAR_API=ansi` is the GNU 9x/Me ANSI
-  Winsock 2 path. Use `9x-ws2-ansi` or `98-ws2-ansi` aliases for this
-  variant.
+  Winsock 2 path. Use `9x-ws2-ansi` aliases for this variant.
 - `WINDOWS_WINPTY=auto|on|off` controls whether the GNU build vendors `winpty`.
   `auto` enables `winpty` for Windows NT 4.0, Windows 2000, and XP API-floor
   Unicode builds, independent of the selected Winsock backend. GNU ANSI builds
@@ -183,10 +181,6 @@ Compatibility aliases remain:
 - `make check-windows-xp`
 - `make all-windows-xp-ansi`
 - `make check-windows-xp-ansi`
-- `make all-windows-98-ws1-ansi`
-- `make check-windows-98-ws1-ansi`
-- `make all-windows-98-ws2-ansi`
-- `make check-windows-98-ws2-ansi`
 - `make all-windows-native`
 - `make check-windows-native`
 

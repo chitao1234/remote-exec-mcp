@@ -36,6 +36,11 @@ and Winsock 2 path tested on Windows 98 SE. In this repository, "Windows
 XP-compatible" means a toolchain and binary target that can both compile the
 C++ daemon as C++11 and target Windows XP.
 
+For legacy Windows compatibility work, keep daemon-owned Win32 API usage
+separate from compiler target libraries and vendored `winpty` compatibility
+concerns. Public README text should describe supported build paths and tested
+daemon behavior without exposing that implementation boundary.
+
 The MCP tool surface is:
 
 - `list_targets`
