@@ -137,6 +137,28 @@ PipePair create_pipe_pair(const char* label) {
     return pair;
 }
 
+UniqueHandle duplicate_non_inheritable_handle(HANDLE handle, const char* label) {
+    HANDLE duplicate = nullptr;
+    if (DuplicateHandle(
+            GetCurrentProcess(),
+            handle,
+            GetCurrentProcess(),
+            &duplicate,
+            0,
+            FALSE,
+            DUPLICATE_SAME_ACCESS
+        )
+        == 0) {
+        throw std::runtime_error(last_error_message(label));
+    }
+    return UniqueHandle(duplicate);
+}
+
+void make_handle_non_inheritable(UniqueHandle* handle, const char* label) {
+    UniqueHandle duplicate = duplicate_non_inheritable_handle(handle->get(), label);
+    handle->reset(duplicate.release());
+}
+
 bool is_stdin_closed_error(DWORD error) {
     return error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA
            || error == ERROR_PIPE_NOT_CONNECTED;
@@ -786,8 +808,8 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
 
     PipePair stdout_pipe = create_pipe_pair("CreatePipe(stdout)");
     PipePair stdin_pipe = create_pipe_pair("CreatePipe(stdin)");
-    SetHandleInformation(stdout_pipe.read_end.get(), HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(stdin_pipe.write_end.get(), HANDLE_FLAG_INHERIT, 0);
+    make_handle_non_inheritable(&stdout_pipe.read_end, "DuplicateHandle(stdout)");
+    make_handle_non_inheritable(&stdin_pipe.write_end, "DuplicateHandle(stdin)");
 
     remote_exec_win32::NativeStartupInfo startup_info;
     ZeroMemory(&startup_info, sizeof(startup_info));
