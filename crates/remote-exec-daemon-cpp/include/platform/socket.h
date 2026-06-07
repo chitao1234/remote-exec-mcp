@@ -75,11 +75,13 @@ int recv_bounded(SOCKET client, char* data, std::size_t remaining, int flags);
 int send_bounded(SOCKET client, const char* data, std::size_t remaining, int flags);
 int recvfrom_bounded(SOCKET socket, char* data, std::size_t size, sockaddr* peer_address, socklen_t* peer_len);
 int sendto_bounded(SOCKET socket, const char* data, std::size_t size, const sockaddr* peer_address, socklen_t peer_len);
-bool resolve_socket_addresses(const char* node,
-                              const char* service,
-                              const SocketAddressQuery& query,
-                              std::vector<SocketAddress>* addresses,
-                              std::string* error);
+bool resolve_socket_addresses(
+    const char* node,
+    const char* service,
+    const SocketAddressQuery& query,
+    std::vector<SocketAddress>* addresses,
+    std::string* error
+);
 std::string numeric_socket_address(const sockaddr* address, socklen_t address_len);
 std::string socket_error_message(const std::string& operation);
 void close_socket(SOCKET socket);

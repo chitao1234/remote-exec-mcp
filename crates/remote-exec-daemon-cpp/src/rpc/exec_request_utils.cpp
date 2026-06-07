@@ -47,9 +47,11 @@ ExecPtySizeSpec requested_pty_size(const Json& body) {
 
 } // namespace
 
-ExecRequestFailure::ExecRequestFailure(int status_value,
-                                       const std::string& code_value,
-                                       const std::string& message_value)
+ExecRequestFailure::ExecRequestFailure(
+    int status_value,
+    const std::string& code_value,
+    const std::string& message_value
+)
     : std::runtime_error(message_value), status(status_value), code(code_value), message(message_value) {
 }
 

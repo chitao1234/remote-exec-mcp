@@ -84,9 +84,11 @@ void log_request_result(const HttpRequest& request, int status, std::uint64_t st
     log_message(level, "server", message.str());
 }
 
-bool try_send_upgrade_response(SOCKET client,
-                               const std::string& upgrade_token,
-                               const std::map<std::string, std::string>& headers) {
+bool try_send_upgrade_response(
+    SOCKET client,
+    const std::string& upgrade_token,
+    const std::map<std::string, std::string>& headers
+) {
     try {
         send_http_upgrade_response(client, upgrade_token, headers);
         return true;
@@ -96,11 +98,13 @@ bool try_send_upgrade_response(SOCKET client,
     }
 }
 
-int handle_client_request(const HttpConnectionContext& context,
-                          SOCKET client,
-                          const HttpRequestHead& request_head,
-                          const HttpReadControl& read_control,
-                          bool* close_after_response) {
+int handle_client_request(
+    const HttpConnectionContext& context,
+    SOCKET client,
+    const HttpRequestHead& request_head,
+    const HttpReadControl& read_control,
+    bool* close_after_response
+) {
     const std::uint64_t started_at_ms = platform::monotonic_ms();
     HttpRequest request = parse_http_request_head(request_head.raw_headers);
     assign_request_id(request);
@@ -113,13 +117,15 @@ int handle_client_request(const HttpConnectionContext& context,
             std::max(body_read_control.idle_timeout_ms, body_policy.min_idle_timeout_ms);
         set_socket_timeout_ms(client, body_read_control.idle_timeout_ms);
     }
-    HttpRequestBodyStream body(
-        client, request_head.initial_body, framing, body_policy.max_body_bytes, &body_read_control);
+    HttpRequestBodyStream
+        body(client, request_head.initial_body, framing, body_policy.max_body_bytes, &body_read_control);
 
     const RpcRouteExecution execution = execute_rpc_route(context.routes, context.port_tunnel, request, &body);
     if (execution.kind == RPC_ROUTE_EXECUTION_STREAMING_IMPORT_RESPONSE && execution.close_after_response) {
-        (void)body.discard_remaining_bounded(HTTP_STREAMING_TRANSFER_DRAIN_TIMEOUT_MS,
-                                             std::numeric_limits<std::size_t>::max());
+        (void)body.discard_remaining_bounded(
+            HTTP_STREAMING_TRANSFER_DRAIN_TIMEOUT_MS,
+            std::numeric_limits<std::size_t>::max()
+        );
         *close_after_response = true;
     }
 
@@ -167,7 +173,11 @@ void handle_client(const HttpConnectionContext& context, UniqueSocket client) {
             set_socket_timeout_ms(client.get(), context.http_connection_idle_timeout_ms);
             HttpRequestHead request_head;
             if (!try_read_http_request_head_controlled(
-                    client.get(), context.max_request_header_bytes, read_control, &request_head)) {
+                    client.get(),
+                    context.max_request_header_bytes,
+                    read_control,
+                    &request_head
+                )) {
                 return;
             }
             set_socket_timeout_ms(client.get(), context.http_connection_idle_timeout_ms);

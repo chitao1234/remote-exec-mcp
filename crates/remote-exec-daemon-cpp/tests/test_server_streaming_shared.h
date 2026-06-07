@@ -8,13 +8,13 @@
 
 #include "core/config.h"
 #include "http/http_helpers.h"
+#include "http/server_transport.h"
 #include "platform/platform.h"
 #include "port_forward/port_forward_endpoint.h"
 #include "port_forward/port_forward_socket_ops.h"
 #include "port_forward/port_tunnel.h"
 #include "port_forward/port_tunnel_frame.h"
 #include "runtime/app_context.h"
-#include "http/server_transport.h"
 #include "test_assert.h"
 #include "test_daemon_fixtures.h"
 #include "test_filesystem.h"
@@ -29,9 +29,11 @@ fs::path make_test_root();
 bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms);
 void wait_past_resume_timeout(unsigned long resume_timeout_ms);
 
-void initialize_state_with_port_forward_limits(TestDaemonState& state,
-                                               const fs::path& root,
-                                               const PortForwardLimitConfig& limits);
+void initialize_state_with_port_forward_limits(
+    TestDaemonState& state,
+    const fs::path& root,
+    const PortForwardLimitConfig& limits
+);
 void initialize_state_with_worker_limit(TestDaemonState& state, const fs::path& root, unsigned long max_workers);
 void initialize_state(TestDaemonState& state, const fs::path& root);
 void enable_sandbox(TestDaemonState& state);
@@ -39,10 +41,12 @@ void enable_sandbox(TestDaemonState& state);
 const char* tunnel_frame_type_name(PortTunnelFrameType type);
 PortTunnelFrame read_tunnel_frame(SOCKET socket);
 PortTunnelFrame read_tunnel_frame_for_phase(SOCKET socket, const char* phase, unsigned long timeout_ms);
-PortTunnelFrame expect_tunnel_frame(SOCKET socket,
-                                    PortTunnelFrameType expected_type,
-                                    const char* phase,
-                                    unsigned long timeout_ms = kTunnelFrameReadTimeoutMs);
+PortTunnelFrame expect_tunnel_frame(
+    SOCKET socket,
+    PortTunnelFrameType expected_type,
+    const char* phase,
+    unsigned long timeout_ms = kTunnelFrameReadTimeoutMs
+);
 void send_tunnel_frame(SOCKET socket, const PortTunnelFrame& frame);
 bool try_read_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms, PortTunnelFrame* frame);
 bool socket_readable_within(SOCKET socket, unsigned long timeout_ms);
@@ -55,19 +59,23 @@ void assert_forward_drop(const PortTunnelFrame& frame, const std::string& kind, 
 PortTunnelFrame json_frame(PortTunnelFrameType type, uint32_t stream_id, const Json& meta);
 PortTunnelFrame data_frame(PortTunnelFrameType type, uint32_t stream_id, const std::vector<unsigned char>& data);
 PortTunnelFrame empty_frame(PortTunnelFrameType type, uint32_t stream_id);
-Json tunnel_open_meta(const std::string& role,
-                      const std::string& protocol,
-                      uint64_t generation,
-                      const std::string& resume_session_id = std::string());
+Json tunnel_open_meta(
+    const std::string& role,
+    const std::string& protocol,
+    uint64_t generation,
+    const std::string& resume_session_id = std::string()
+);
 
 void open_tunnel(TestDaemonState& state, UniqueSocket* client_socket, std::thread* server_thread);
-PortTunnelFrame open_v4_tunnel(TestDaemonState& state,
-                               UniqueSocket* client_socket,
-                               std::thread* server_thread,
-                               const std::string& role,
-                               const std::string& protocol,
-                               uint64_t generation,
-                               const std::string& resume_session_id = std::string());
+PortTunnelFrame open_v4_tunnel(
+    TestDaemonState& state,
+    UniqueSocket* client_socket,
+    std::thread* server_thread,
+    const std::string& role,
+    const std::string& protocol,
+    uint64_t generation,
+    const std::string& resume_session_id = std::string()
+);
 void close_tunnel(UniqueSocket* client_socket, std::thread* server_thread);
 void wait_until_bindable(const std::string& endpoint);
 

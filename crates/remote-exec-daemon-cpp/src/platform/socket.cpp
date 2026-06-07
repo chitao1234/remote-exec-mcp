@@ -43,8 +43,9 @@ int recv_bounded(SOCKET client, char* data, std::size_t remaining, int flags) {
 #ifdef _WIN32
     return recv(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags);
 #else
-    return posix_eintr::retry<int>(
-        [&]() { return recv(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags); });
+    return posix_eintr::retry<int>([&]() {
+        return recv(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags);
+    });
 #endif
 }
 
@@ -53,8 +54,9 @@ int send_bounded(SOCKET client, const char* data, std::size_t remaining, int fla
     return send(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags);
 #else
     const int send_flags = send_without_sigpipe_flags(flags);
-    return posix_eintr::retry<int>(
-        [&]() { return send(client, data, static_cast<int>(bounded_socket_io_size(remaining)), send_flags); });
+    return posix_eintr::retry<int>([&]() {
+        return send(client, data, static_cast<int>(bounded_socket_io_size(remaining)), send_flags);
+    });
 #endif
 }
 
@@ -69,7 +71,12 @@ int recvfrom_bounded(SOCKET socket, char* data, std::size_t size, sockaddr* peer
 }
 
 int sendto_bounded(
-    SOCKET socket, const char* data, std::size_t size, const sockaddr* peer_address, socklen_t peer_len) {
+    SOCKET socket,
+    const char* data,
+    std::size_t size,
+    const sockaddr* peer_address,
+    socklen_t peer_len
+) {
     if (size > static_cast<std::size_t>(INT_MAX)) {
 #ifdef _WIN32
         WSASetLastError(WSAEMSGSIZE);
@@ -82,8 +89,9 @@ int sendto_bounded(
     return sendto(socket, data, static_cast<int>(size), 0, peer_address, peer_len);
 #else
     const int send_flags = send_without_sigpipe_flags(0);
-    return posix_eintr::retry<int>(
-        [&]() { return sendto(socket, data, static_cast<int>(size), send_flags, peer_address, peer_len); });
+    return posix_eintr::retry<int>([&]() {
+        return sendto(socket, data, static_cast<int>(size), send_flags, peer_address, peer_len);
+    });
 #endif
 }
 

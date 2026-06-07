@@ -143,8 +143,10 @@ PortTunnelFrame decode_port_tunnel_frame(const std::vector<unsigned char>& bytes
     frame.stream_id = read_u32_be(bytes, 4U);
     const std::size_t data_offset = PORT_TUNNEL_HEADER_LEN + static_cast<std::size_t>(meta_len);
     if (meta_len > 0U) {
-        frame.meta.assign(reinterpret_cast<const char*>(bytes.data() + PORT_TUNNEL_HEADER_LEN),
-                          static_cast<std::size_t>(meta_len));
+        frame.meta.assign(
+            reinterpret_cast<const char*>(bytes.data() + PORT_TUNNEL_HEADER_LEN),
+            static_cast<std::size_t>(meta_len)
+        );
     } else {
         frame.meta.clear();
     }

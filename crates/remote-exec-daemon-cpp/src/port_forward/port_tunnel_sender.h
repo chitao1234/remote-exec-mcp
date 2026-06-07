@@ -43,15 +43,19 @@ private:
     void writer_loop();
     void join_writer_thread();
     bool ensure_writer_started_locked();
-    bool enqueue_encoded_frame(std::vector<unsigned char> bytes,
-                               QueueReservationKind charge_kind,
-                               unsigned long charge_value);
+    bool enqueue_encoded_frame(
+        std::vector<unsigned char> bytes,
+        QueueReservationKind charge_kind,
+        unsigned long charge_value
+    );
     unsigned long control_queue_byte_limit() const;
     bool try_reserve_queued_bytes(std::atomic<unsigned long>& counter, unsigned long limit, unsigned long charge_value);
-    bool try_reserve_frame_bytes(std::size_t byte_count,
-                                 std::atomic<unsigned long>& counter,
-                                 unsigned long limit,
-                                 unsigned long* charge_value);
+    bool try_reserve_frame_bytes(
+        std::size_t byte_count,
+        std::atomic<unsigned long>& counter,
+        unsigned long limit,
+        unsigned long* charge_value
+    );
     bool try_reserve_data_frame(const PortTunnelFrame& frame, unsigned long* charge_value);
     bool try_reserve_control_frame(const std::vector<unsigned char>& bytes, unsigned long* charge_value);
     void release_data_frame_reservation(unsigned long charge_value);

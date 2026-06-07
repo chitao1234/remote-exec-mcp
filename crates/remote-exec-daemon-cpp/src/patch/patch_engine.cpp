@@ -483,10 +483,12 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
     return actions;
 }
 
-static std::size_t find_sequence(const std::vector<std::string>& lines,
-                                 const std::vector<std::string>& needle,
-                                 std::size_t start,
-                                 bool require_eof) {
+static std::size_t find_sequence(
+    const std::vector<std::string>& lines,
+    const std::vector<std::string>& needle,
+    std::size_t start,
+    bool require_eof
+) {
     if (needle.empty()) {
         return std::min(start, lines.size());
     }
@@ -513,10 +515,12 @@ static std::size_t find_sequence(const std::vector<std::string>& lines,
     return std::string::npos;
 }
 
-static std::size_t find_context_anchor(const std::vector<std::string>& lines,
-                                       const std::string& context,
-                                       std::size_t start,
-                                       bool require_eof) {
+static std::size_t find_context_anchor(
+    const std::vector<std::string>& lines,
+    const std::string& context,
+    std::size_t start,
+    bool require_eof
+) {
     const std::vector<std::string> needle(1, context);
     return find_sequence(lines, needle, start, require_eof);
 }
@@ -722,10 +726,12 @@ PlannedFile require_planned_file(const std::string& path, const PathOverlay& ove
     return file;
 }
 
-PlannedAction plan_add_action(const std::string& root,
-                              const PatchAction& action,
-                              const PatchPathAuthorizer& authorizer,
-                              PathOverlay* overlay) {
+PlannedAction plan_add_action(
+    const std::string& root,
+    const PatchAction& action,
+    const PatchPathAuthorizer& authorizer,
+    PathOverlay* overlay
+) {
     const std::string source_path = resolve_patch_path(root, action.path);
     if (authorizer) {
         authorizer(source_path);
@@ -746,10 +752,12 @@ PlannedAction plan_add_action(const std::string& root,
     return planned;
 }
 
-PlannedAction plan_delete_action(const std::string& root,
-                                 const PatchAction& action,
-                                 const PatchPathAuthorizer& authorizer,
-                                 PathOverlay* overlay) {
+PlannedAction plan_delete_action(
+    const std::string& root,
+    const PatchAction& action,
+    const PatchPathAuthorizer& authorizer,
+    PathOverlay* overlay
+) {
     const std::string source_path = resolve_patch_path(root, action.path);
     if (authorizer) {
         authorizer(source_path);
@@ -766,10 +774,12 @@ PlannedAction plan_delete_action(const std::string& root,
     return planned;
 }
 
-PlannedAction plan_update_action(const std::string& root,
-                                 const PatchAction& action,
-                                 const PatchPathAuthorizer& authorizer,
-                                 PathOverlay* overlay) {
+PlannedAction plan_update_action(
+    const std::string& root,
+    const PatchAction& action,
+    const PatchPathAuthorizer& authorizer,
+    PathOverlay* overlay
+) {
     const std::string source_path = resolve_patch_path(root, action.path);
     if (authorizer) {
         authorizer(source_path);
@@ -802,9 +812,11 @@ PlannedAction plan_update_action(const std::string& root,
     return planned;
 }
 
-std::vector<PlannedAction> plan_patch_actions(const std::string& root,
-                                              const std::vector<PatchAction>& actions,
-                                              const PatchPathAuthorizer& authorizer) {
+std::vector<PlannedAction> plan_patch_actions(
+    const std::string& root,
+    const std::vector<PatchAction>& actions,
+    const PatchPathAuthorizer& authorizer
+) {
     PathOverlay overlay;
     std::vector<PlannedAction> planned;
     planned.reserve(actions.size());

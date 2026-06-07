@@ -148,14 +148,17 @@ static void validate_yield_time_operation(const YieldTimeOperationConfig& config
         throw std::runtime_error(key_prefix + "_min_ms must be less than or equal to " + key_prefix + "_max_ms");
     }
     if (config.default_ms < config.min_ms || config.default_ms > config.max_ms) {
-        throw std::runtime_error(key_prefix + "_default_ms must be between " + key_prefix + "_min_ms and " +
-                                 key_prefix + "_max_ms");
+        throw std::runtime_error(
+            key_prefix + "_default_ms must be between " + key_prefix + "_min_ms and " + key_prefix + "_max_ms"
+        );
     }
 }
 
-static YieldTimeOperationConfig read_yield_time_operation(const ConfigValues& values,
-                                                          const std::string& key_prefix,
-                                                          const YieldTimeOperationConfig& defaults) {
+static YieldTimeOperationConfig read_yield_time_operation(
+    const ConfigValues& values,
+    const std::string& key_prefix,
+    const YieldTimeOperationConfig& defaults
+) {
     YieldTimeOperationConfig config;
     config.default_ms = read_optional_unsigned_long(values, key_prefix + "_default_ms", defaults.default_ms);
     config.max_ms = read_optional_unsigned_long(values, key_prefix + "_max_ms", defaults.max_ms);

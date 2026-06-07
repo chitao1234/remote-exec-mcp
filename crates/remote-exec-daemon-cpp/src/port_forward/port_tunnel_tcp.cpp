@@ -10,17 +10,21 @@
 
 using Json = nlohmann::json;
 
-bool PortTunnelService::spawn_tcp_listener_loop(const std::shared_ptr<PortTunnelSession>& session,
-                                                const std::shared_ptr<RetainedTcpListener>& listener,
-                                                PortTunnelWorkerLease worker_lease) {
+bool PortTunnelService::spawn_tcp_listener_loop(
+    const std::shared_ptr<PortTunnelSession>& session,
+    const std::shared_ptr<RetainedTcpListener>& listener,
+    PortTunnelWorkerLease worker_lease
+) {
     std::shared_ptr<PortTunnelService> self = shared_from_this();
     return spawn_tracked_worker("spawn tcp listener thread", std::move(worker_lease), [self, session, listener]() {
         self->tcp_accept_loop(session, listener);
     });
 }
 
-void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>& session,
-                                        const std::shared_ptr<RetainedTcpListener>& listener) {
+void PortTunnelService::tcp_accept_loop(
+    const std::shared_ptr<PortTunnelSession>& session,
+    const std::shared_ptr<RetainedTcpListener>& listener
+) {
     for (;;) {
         std::shared_ptr<PortTunnelSessionAttachment> attachment = wait_for_attachment(session);
         if (attachment.get() == nullptr) {
@@ -70,7 +74,10 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
                 return;
             }
             accepted = accept_port_forward_peer(
-                listener->listener.get(), reinterpret_cast<sockaddr*>(&peer_address), &peer_len);
+                listener->listener.get(),
+                reinterpret_cast<sockaddr*>(&peer_address),
+                &peer_len
+            );
         }
         if (accepted == INVALID_SOCKET) {
             const int error = last_socket_error();
@@ -106,7 +113,8 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
                 attachment,
                 listener->stream_id,
                 std::move(accepted_socket),
-                printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len))) {
+                printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)
+            )) {
             if (session_is_unavailable(session)) {
                 return;
             }
@@ -177,7 +185,8 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
 
     UniqueSocket connected_socket(connect_port_forward_socket(endpoint, "tcp", service_->limits().connect_timeout_ms));
     std::shared_ptr<TunnelTcpStream> stream(
-        new TunnelTcpStream(connected_socket.release(), std::move(active_stream_budget)));
+        new TunnelTcpStream(connected_socket.release(), std::move(active_stream_budget))
+    );
 
     connection_local_streams_.insert_tcp(frame.stream_id, stream);
     PortTunnelWorkerLease worker_lease;
@@ -186,11 +195,13 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
         send_worker_limit(frame.stream_id);
         return;
     }
-    if (!send_tcp_success_after_io_threads_started(make_empty_frame(PortTunnelFrameType::TcpConnectOk, frame.stream_id),
-                                                   &connection_local_streams_,
-                                                   frame.stream_id,
-                                                   stream,
-                                                   std::move(worker_lease))) {
+    if (!send_tcp_success_after_io_threads_started(
+            make_empty_frame(PortTunnelFrameType::TcpConnectOk, frame.stream_id),
+            &connection_local_streams_,
+            frame.stream_id,
+            stream,
+            std::move(worker_lease)
+        )) {
         send_worker_limit(frame.stream_id);
         return;
     }

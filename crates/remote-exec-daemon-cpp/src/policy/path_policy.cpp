@@ -65,7 +65,9 @@ bool translate_windows_posix_drive_path(const std::string& raw, std::string* out
     }
 
     *output = build_windows_drive_path(
-        raw[prefix.size()], raw.substr(raw.size() == prefix.size() + 1 ? prefix.size() + 1 : prefix.size() + 2));
+        raw[prefix.size()],
+        raw.substr(raw.size() == prefix.size() + 1 ? prefix.size() + 1 : prefix.size() + 2)
+    );
     return true;
 }
 

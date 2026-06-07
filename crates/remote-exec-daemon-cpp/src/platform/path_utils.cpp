@@ -79,10 +79,12 @@ bool has_find_wildcard(const std::wstring& path) {
     return false;
 }
 
-void fill_metadata_from_win32_attributes(PathMetadata* metadata,
-                                         DWORD attributes,
-                                         DWORD file_size_high,
-                                         DWORD file_size_low) {
+void fill_metadata_from_win32_attributes(
+    PathMetadata* metadata,
+    DWORD attributes,
+    DWORD file_size_high,
+    DWORD file_size_low
+) {
     *metadata = PathMetadata();
     metadata->exists = true;
     metadata->is_symlink = (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
@@ -465,7 +467,8 @@ std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path) 
         const bool entry_is_directory =
             !entry_is_symlink && (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         entries.push_back(
-            DirectoryEntryInfo{name, entry_is_directory, !entry_is_directory && !entry_is_symlink, entry_is_symlink});
+            DirectoryEntryInfo{name, entry_is_directory, !entry_is_directory && !entry_is_symlink, entry_is_symlink}
+        );
     } while (FindNextFileW(handle.get(), &find_data) != 0);
 
     const DWORD last_error = GetLastError();
@@ -494,8 +497,8 @@ std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path) 
         if (!path_metadata_no_follow(child, &metadata)) {
             throw std::runtime_error("unable to stat path " + child);
         }
-        entries.push_back(
-            DirectoryEntryInfo{name, metadata.is_directory, metadata.is_regular_file, metadata.is_symlink});
+        entries.push_back(DirectoryEntryInfo{name, metadata.is_directory, metadata.is_regular_file, metadata.is_symlink}
+        );
         errno = 0;
     }
     if (errno != 0) {

@@ -1,5 +1,5 @@
-#include <algorithm>
 #include "test_assert.h"
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <iterator>
@@ -8,8 +8,8 @@
 #include "codec/base64_codec.h"
 #include "core/config.h"
 #include "http/http_helpers.h"
-#include "policy/path_policy.h"
 #include "platform/platform.h"
+#include "policy/path_policy.h"
 #include "port_forward/port_forward_endpoint.h"
 #include "port_forward/port_tunnel.h"
 #include "rpc/server_contract.h"
@@ -50,12 +50,20 @@ DaemonConfig make_server_routes_test_config(const fs::path& root) {
 static std::string octal_field(std::size_t width, std::uint64_t value) {
     char buffer[64];
     std::snprintf(
-        buffer, sizeof(buffer), "%0*llo", static_cast<int>(width - 1), static_cast<unsigned long long>(value));
+        buffer,
+        sizeof(buffer),
+        "%0*llo",
+        static_cast<int>(width - 1),
+        static_cast<unsigned long long>(value)
+    );
     std::string field(width, '\0');
     const std::string digits(buffer);
     const std::size_t start = width - 1 - std::min(width - 1, digits.size());
     field.replace(
-        start, std::min(width - 1, digits.size()), digits.substr(digits.size() - std::min(width - 1, digits.size())));
+        start,
+        std::min(width - 1, digits.size()),
+        digits.substr(digits.size() - std::min(width - 1, digits.size()))
+    );
     field[width - 1] = ' ';
     return field;
 }
@@ -163,8 +171,9 @@ static std::string framed_transfer_body(const std::string& archive) {
 }
 
 static std::string decode_framed_transfer_archive(const std::string& body) {
-    TEST_ASSERT(body.compare(0, server_contract::TRANSFER_STREAM_PREFACE_LEN, server_contract::TRANSFER_STREAM_PREFACE) ==
-                0);
+    TEST_ASSERT(
+        body.compare(0, server_contract::TRANSFER_STREAM_PREFACE_LEN, server_contract::TRANSFER_STREAM_PREFACE) == 0
+    );
     std::size_t offset = server_contract::TRANSFER_STREAM_PREFACE_LEN;
     std::string archive;
     for (;;) {
@@ -192,21 +201,21 @@ static std::string decode_framed_transfer_archive(const std::string& body) {
 
 static HttpRequest transfer_export_request(const Json& body) {
     HttpRequest request = make_json_http_request("/v1/transfer/export", body);
-    request.headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] =
-        server_contract::TRANSFER_STREAM_VERSION_VALUE;
+    request.headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] = server_contract::TRANSFER_STREAM_VERSION_VALUE;
     return request;
 }
 
-static HttpRequest transfer_import_request(const fs::path& destination,
-                                           const std::string& archive,
-                                           const char* source_type = "file",
-                                           const char* overwrite = "replace") {
+static HttpRequest transfer_import_request(
+    const fs::path& destination,
+    const std::string& archive,
+    const char* source_type = "file",
+    const char* overwrite = "replace"
+) {
     HttpRequest request;
     request.method = "POST";
     request.path = "/v1/transfer/import";
     request.headers["content-type"] = server_contract::TRANSFER_STREAM_CONTENT_TYPE;
-    request.headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] =
-        server_contract::TRANSFER_STREAM_VERSION_VALUE;
+    request.headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] = server_contract::TRANSFER_STREAM_VERSION_VALUE;
     request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = source_type;
     request.headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] = encoded_destination_path_header(destination);
     request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = overwrite;
@@ -217,10 +226,12 @@ static HttpRequest transfer_import_request(const fs::path& destination,
     return request;
 }
 
-static void assert_bad_request_for_transfer_import(TestRouteHarness& harness,
-                                                   const HttpRequest& request,
-                                                   const fs::path& destination,
-                                                   const std::string& message_fragment) {
+static void assert_bad_request_for_transfer_import(
+    TestRouteHarness& harness,
+    const HttpRequest& request,
+    const fs::path& destination,
+    const std::string& message_fragment
+) {
     const HttpResponse response = route_request(harness, request);
     TEST_ASSERT(response.status == 400);
     const Json body = Json::parse(response.body);
@@ -242,11 +253,14 @@ static void assert_target_info_and_basic_helpers(TestRouteHarness& harness) {
     TEST_ASSERT(info.at("supports_pty").get<bool>() == harness.state.metadata.capabilities.supports_pty);
     TEST_ASSERT(info.at("supports_image_read").get<bool>());
     TEST_ASSERT(!info.at("supports_transfer_compression").get<bool>());
-    TEST_ASSERT(info.at("transfer_stream_protocol_version").get<unsigned int>() ==
-                server_contract::TRANSFER_STREAM_PROTOCOL_VERSION);
+    TEST_ASSERT(
+        info.at("transfer_stream_protocol_version").get<unsigned int>() ==
+        server_contract::TRANSFER_STREAM_PROTOCOL_VERSION
+    );
     TEST_ASSERT(info.at("supports_port_forward").get<bool>());
-    TEST_ASSERT(info.at("port_forward_protocol_version").get<unsigned int>() ==
-                server_contract::PORT_TUNNEL_PROTOCOL_VERSION);
+    TEST_ASSERT(
+        info.at("port_forward_protocol_version").get<unsigned int>() == server_contract::PORT_TUNNEL_PROTOCOL_VERSION
+    );
 
     HttpRequest generated_request;
     generated_request.method = "POST";
@@ -263,32 +277,45 @@ static void assert_shared_server_contract() {
     const Json& port_tunnel_contract = test_contract::port_tunnel_contract();
     const Json& transfer_headers = test_contract::transfer_headers_contract().at("headers");
 
-    TEST_ASSERT(port_tunnel_contract.at("protocol_version_header").get<std::string>() ==
-                server_contract::PORT_TUNNEL_VERSION_HEADER);
-    TEST_ASSERT(port_tunnel_contract.at("protocol_version_value").get<std::string>() ==
-                server_contract::PORT_TUNNEL_VERSION_VALUE);
-    TEST_ASSERT(port_tunnel_contract.at("protocol_version_number").get<unsigned int>() ==
-                server_contract::PORT_TUNNEL_PROTOCOL_VERSION);
-    TEST_ASSERT(port_tunnel_contract.at("upgrade_token").get<std::string>() ==
-                server_contract::PORT_TUNNEL_UPGRADE_TOKEN);
+    TEST_ASSERT(
+        port_tunnel_contract.at("protocol_version_header").get<std::string>() ==
+        server_contract::PORT_TUNNEL_VERSION_HEADER
+    );
+    TEST_ASSERT(
+        port_tunnel_contract.at("protocol_version_value").get<std::string>() ==
+        server_contract::PORT_TUNNEL_VERSION_VALUE
+    );
+    TEST_ASSERT(
+        port_tunnel_contract.at("protocol_version_number").get<unsigned int>() ==
+        server_contract::PORT_TUNNEL_PROTOCOL_VERSION
+    );
+    TEST_ASSERT(
+        port_tunnel_contract.at("upgrade_token").get<std::string>() == server_contract::PORT_TUNNEL_UPGRADE_TOKEN
+    );
 
-    TEST_ASSERT(transfer_headers.at("destination_path").get<std::string>() ==
-                server_contract::TRANSFER_DESTINATION_PATH_HEADER);
+    TEST_ASSERT(
+        transfer_headers.at("destination_path").get<std::string>() == server_contract::TRANSFER_DESTINATION_PATH_HEADER
+    );
     TEST_ASSERT(transfer_headers.at("overwrite").get<std::string>() == server_contract::TRANSFER_OVERWRITE_HEADER);
-    TEST_ASSERT(transfer_headers.at("create_parent").get<std::string>() ==
-                server_contract::TRANSFER_CREATE_PARENT_HEADER);
+    TEST_ASSERT(
+        transfer_headers.at("create_parent").get<std::string>() == server_contract::TRANSFER_CREATE_PARENT_HEADER
+    );
     TEST_ASSERT(transfer_headers.at("source_type").get<std::string>() == server_contract::TRANSFER_SOURCE_TYPE_HEADER);
     TEST_ASSERT(transfer_headers.at("compression").get<std::string>() == server_contract::TRANSFER_COMPRESSION_HEADER);
-    TEST_ASSERT(transfer_headers.at("symlink_mode").get<std::string>() ==
-                server_contract::TRANSFER_SYMLINK_MODE_HEADER);
+    TEST_ASSERT(
+        transfer_headers.at("symlink_mode").get<std::string>() == server_contract::TRANSFER_SYMLINK_MODE_HEADER
+    );
 }
 
 static void assert_transfer_export_errors(TestRouteHarness& harness, const fs::path& root) {
     const HttpResponse compression_response = route_request(
         harness,
-        transfer_export_request(Json{{"path", (root / "missing.txt").string()}, {"compression", "zstd"}}));
+        transfer_export_request(Json{{"path", (root / "missing.txt").string()}, {"compression", "zstd"}})
+    );
     TEST_ASSERT(compression_response.status == 400);
-    TEST_ASSERT(Json::parse(compression_response.body).at("code").get<std::string>() == "transfer_compression_unsupported");
+    TEST_ASSERT(
+        Json::parse(compression_response.body).at("code").get<std::string>() == "transfer_compression_unsupported"
+    );
 
     const HttpResponse missing_source_response =
         route_request(harness, transfer_export_request(Json{{"path", (root / "missing.txt").string()}}));
@@ -301,11 +328,15 @@ static void assert_image_routes(TestRouteHarness& harness, const fs::path& root)
     write_binary_file(
         image_file,
         base64_decode_bytes(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL9sAAAAASUVORK5CYII="));
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL9sAAAAASUVORK5CYII="
+        )
+    );
     const std::string original_image = read_binary_file(image_file);
 
-    const HttpResponse image_response =
-        route_request(harness, make_json_http_request("/v1/image/read", Json{{"path", "tiny.png"}, {"workdir", root.string()}}));
+    const HttpResponse image_response = route_request(
+        harness,
+        make_json_http_request("/v1/image/read", Json{{"path", "tiny.png"}, {"workdir", root.string()}})
+    );
     TEST_ASSERT(image_response.status == 200);
     const Json image = Json::parse(image_response.body);
     TEST_ASSERT(image.at("detail").get<std::string>() == "original");
@@ -314,13 +345,19 @@ static void assert_image_routes(TestRouteHarness& harness, const fs::path& root)
 
     const HttpResponse invalid_detail_response = route_request(
         harness,
-        make_json_http_request("/v1/image/read", Json{{"path", "tiny.png"}, {"workdir", root.string()}, {"detail", "low"}}));
+        make_json_http_request(
+            "/v1/image/read",
+            Json{{"path", "tiny.png"}, {"workdir", root.string()}, {"detail", "low"}}
+        )
+    );
     TEST_ASSERT(invalid_detail_response.status == 400);
     const Json invalid_detail = Json::parse(invalid_detail_response.body);
     TEST_ASSERT(invalid_detail.at("code").get<std::string>() == "invalid_detail");
 
-    const HttpResponse missing_image_response =
-        route_request(harness, make_json_http_request("/v1/image/read", Json{{"path", "missing.png"}, {"workdir", root.string()}}));
+    const HttpResponse missing_image_response = route_request(
+        harness,
+        make_json_http_request("/v1/image/read", Json{{"path", "missing.png"}, {"workdir", root.string()}})
+    );
     TEST_ASSERT(missing_image_response.status == 400);
     const Json missing_image = Json::parse(missing_image_response.body);
     TEST_ASSERT(missing_image.at("code").get<std::string>() == "image_missing");
@@ -328,8 +365,10 @@ static void assert_image_routes(TestRouteHarness& harness, const fs::path& root)
     const fs::path gif_file = root / "tiny.gif";
     write_binary_file(gif_file, base64_decode_bytes("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="));
 
-    const HttpResponse gif_response =
-        route_request(harness, make_json_http_request("/v1/image/read", Json{{"path", "tiny.gif"}, {"workdir", root.string()}}));
+    const HttpResponse gif_response = route_request(
+        harness,
+        make_json_http_request("/v1/image/read", Json{{"path", "tiny.gif"}, {"workdir", root.string()}})
+    );
     TEST_ASSERT(gif_response.status == 400);
     const Json gif_error = Json::parse(gif_response.body);
     TEST_ASSERT(gif_error.at("code").get<std::string>() == "image_decode_failed");
@@ -340,7 +379,9 @@ static void assert_image_routes(TestRouteHarness& harness, const fs::path& root)
     write_binary_file(
         blocked_image_dir / "blocked.png",
         base64_decode_bytes(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg=="));
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg=="
+        )
+    );
     fs::permissions(blocked_image_dir, fs::perms::none, fs::perm_options::replace);
     const fs::path blocked_image_path = blocked_image_dir / "blocked.png";
     const bool platform_enforces_blocked_directory = !path_can_be_opened_for_read(blocked_image_path);
@@ -350,7 +391,11 @@ static void assert_image_routes(TestRouteHarness& harness, const fs::path& root)
     if (platform_enforces_blocked_directory) {
         blocked_image_response = route_request(
             harness,
-            make_json_http_request("/v1/image/read", Json{{"path", "blocked-image/blocked.png"}, {"workdir", root.string()}}));
+            make_json_http_request(
+                "/v1/image/read",
+                Json{{"path", "blocked-image/blocked.png"}, {"workdir", root.string()}}
+            )
+        );
     }
     fs::permissions(blocked_image_dir, fs::perms::owner_all, fs::perm_options::replace);
     if (platform_enforces_blocked_directory) {
@@ -368,8 +413,10 @@ static void assert_patch_route_audit_fields(TestRouteHarness& harness, const fs:
                                    "+audit\n"
                                    "*** End Patch\n";
 
-    const HttpResponse response =
-        route_request(harness, make_json_http_request("/v1/patch/apply", Json{{"workdir", root.string()}, {"patch", patch_text}}));
+    const HttpResponse response = route_request(
+        harness,
+        make_json_http_request("/v1/patch/apply", Json{{"workdir", root.string()}, {"patch", patch_text}})
+    );
     TEST_ASSERT(response.status == 200);
     const Json body = Json::parse(response.body);
     TEST_ASSERT(body.at("output").get<std::string>().find("A patch-audit.txt") != std::string::npos);
@@ -412,8 +459,10 @@ static void assert_transfer_path_info_routes(TestRouteHarness& harness, const fs
     const bool platform_enforces_blocked_transfer_directory = !path_can_be_opened_for_read(blocked_transfer_file);
     HttpResponse blocked_transfer_info_response;
     if (platform_enforces_blocked_transfer_directory) {
-        blocked_transfer_info_response =
-            route_request(harness, make_json_http_request("/v1/transfer/path-info", Json{{"path", blocked_transfer_file.string()}}));
+        blocked_transfer_info_response = route_request(
+            harness,
+            make_json_http_request("/v1/transfer/path-info", Json{{"path", blocked_transfer_file.string()}})
+        );
     }
     fs::permissions(blocked_transfer_dir, fs::perms::owner_all, fs::perm_options::replace);
     if (platform_enforces_blocked_transfer_directory) {
@@ -432,8 +481,10 @@ static std::string assert_transfer_export_and_exclude_routes(TestRouteHarness& h
         route_request(harness, transfer_export_request(Json{{"path", source_file.string()}}));
     TEST_ASSERT(export_response.status == 200);
     TEST_ASSERT(export_response.headers.at("Content-Type") == server_contract::TRANSFER_EXPORT_CONTENT_TYPE);
-    TEST_ASSERT(export_response.headers.at(server_contract::TRANSFER_STREAM_VERSION_HEADER) ==
-                server_contract::TRANSFER_STREAM_VERSION_VALUE);
+    TEST_ASSERT(
+        export_response.headers.at(server_contract::TRANSFER_STREAM_VERSION_HEADER) ==
+        server_contract::TRANSFER_STREAM_VERSION_VALUE
+    );
     TEST_ASSERT(export_response.headers.at(server_contract::TRANSFER_SOURCE_TYPE_HEADER) == "file");
     TEST_ASSERT(export_response.headers.at(server_contract::TRANSFER_COMPRESSION_HEADER) == "none");
     TEST_ASSERT(!export_response.body.empty());
@@ -452,13 +503,16 @@ static std::string assert_transfer_export_and_exclude_routes(TestRouteHarness& h
     exclude_patterns.push_back(".git/**");
     const HttpResponse export_excluded_response = route_request(
         harness,
-        transfer_export_request(Json{{"path", exclude_source.string()}, {"exclude", exclude_patterns}}));
+        transfer_export_request(Json{{"path", exclude_source.string()}, {"exclude", exclude_patterns}})
+    );
     TEST_ASSERT(export_excluded_response.status == 200);
-    const ImportSummary excluded_import = import_path(decode_framed_transfer_archive(export_excluded_response.body),
-                                                      TransferSourceType::Directory,
-                                                      (root / "transfer-exclude-dest").string(),
-                                                      TransferOverwrite::Replace,
-                                                      true);
+    const ImportSummary excluded_import = import_path(
+        decode_framed_transfer_archive(export_excluded_response.body),
+        TransferSourceType::Directory,
+        (root / "transfer-exclude-dest").string(),
+        TransferOverwrite::Replace,
+        true
+    );
     TEST_ASSERT(excluded_import.warnings.empty());
     TEST_ASSERT(read_text_file(root / "transfer-exclude-dest" / "keep.txt") == "keep");
     TEST_ASSERT(read_text_file(root / "transfer-exclude-dest" / "logs" / "readme.txt") == "keep");
@@ -470,7 +524,8 @@ static std::string assert_transfer_export_and_exclude_routes(TestRouteHarness& h
     malformed_exclude.push_back("tmp/[abc");
     const HttpResponse invalid_exclude_response = route_request(
         harness,
-        transfer_export_request(Json{{"path", exclude_source.string()}, {"exclude", malformed_exclude}}));
+        transfer_export_request(Json{{"path", exclude_source.string()}, {"exclude", malformed_exclude}})
+    );
     TEST_ASSERT(invalid_exclude_response.status == 400);
     const Json invalid_exclude = Json::parse(invalid_exclude_response.body);
     TEST_ASSERT(invalid_exclude.at("code").get<std::string>() == "transfer_failed");
@@ -479,7 +534,8 @@ static std::string assert_transfer_export_and_exclude_routes(TestRouteHarness& h
     return export_archive;
 }
 
-static void assert_transfer_import_success(TestRouteHarness& harness, const fs::path& root, const std::string& export_body) {
+static void
+assert_transfer_import_success(TestRouteHarness& harness, const fs::path& root, const std::string& export_body) {
     HttpRequest import_request = transfer_import_request(root / "transfer-dest.txt", export_body);
 
     const HttpResponse import_response = route_request(harness, import_request);
@@ -493,9 +549,11 @@ static void assert_transfer_import_success(TestRouteHarness& harness, const fs::
     TEST_ASSERT(read_text_file(root / "transfer-dest.txt") == "route transfer payload");
 }
 
-static void assert_transfer_import_optional_defaults(TestRouteHarness& harness,
-                                                     const fs::path& root,
-                                                     const std::string& export_body) {
+static void assert_transfer_import_optional_defaults(
+    TestRouteHarness& harness,
+    const fs::path& root,
+    const std::string& export_body
+) {
     HttpRequest optional_defaults_import = transfer_import_request(root / "transfer-defaults.txt", export_body);
     optional_defaults_import.headers.erase(server_contract::TRANSFER_SYMLINK_MODE_HEADER);
     optional_defaults_import.headers.erase(server_contract::TRANSFER_COMPRESSION_HEADER);
@@ -504,16 +562,19 @@ static void assert_transfer_import_optional_defaults(TestRouteHarness& harness,
     TEST_ASSERT(read_text_file(root / "transfer-defaults.txt") == "route transfer payload");
 }
 
-static void assert_transfer_import_header_validation(TestRouteHarness& harness,
-                                                     const fs::path& root,
-                                                     const std::string& export_body) {
+static void assert_transfer_import_header_validation(
+    TestRouteHarness& harness,
+    const fs::path& root,
+    const std::string& export_body
+) {
     HttpRequest missing_create_parent = transfer_import_request(root / "missing-create-parent.txt", export_body);
     missing_create_parent.headers.erase(server_contract::TRANSFER_CREATE_PARENT_HEADER);
     assert_bad_request_for_transfer_import(
         harness,
         missing_create_parent,
         root / "missing-create-parent.txt",
-        server_contract::TRANSFER_CREATE_PARENT_HEADER);
+        server_contract::TRANSFER_CREATE_PARENT_HEADER
+    );
 
     HttpRequest invalid_create_parent = transfer_import_request(root / "invalid-create-parent.txt", export_body);
     invalid_create_parent.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "yes";
@@ -521,7 +582,8 @@ static void assert_transfer_import_header_validation(TestRouteHarness& harness,
         harness,
         invalid_create_parent,
         root / "invalid-create-parent.txt",
-        server_contract::TRANSFER_CREATE_PARENT_HEADER);
+        server_contract::TRANSFER_CREATE_PARENT_HEADER
+    );
 
     HttpRequest invalid_source_type = transfer_import_request(root / "invalid-source-type.txt", export_body);
     invalid_source_type.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "folder";
@@ -529,7 +591,8 @@ static void assert_transfer_import_header_validation(TestRouteHarness& harness,
         harness,
         invalid_source_type,
         root / "invalid-source-type.txt",
-        server_contract::TRANSFER_SOURCE_TYPE_HEADER);
+        server_contract::TRANSFER_SOURCE_TYPE_HEADER
+    );
 
     HttpRequest invalid_overwrite = transfer_import_request(root / "invalid-overwrite.txt", export_body);
     invalid_overwrite.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "clobber";
@@ -537,7 +600,8 @@ static void assert_transfer_import_header_validation(TestRouteHarness& harness,
         harness,
         invalid_overwrite,
         root / "invalid-overwrite.txt",
-        server_contract::TRANSFER_OVERWRITE_HEADER);
+        server_contract::TRANSFER_OVERWRITE_HEADER
+    );
 
     HttpRequest invalid_compression = transfer_import_request(root / "invalid-compression.txt", export_body);
     invalid_compression.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "gzip";
@@ -545,7 +609,8 @@ static void assert_transfer_import_header_validation(TestRouteHarness& harness,
         harness,
         invalid_compression,
         root / "invalid-compression.txt",
-        server_contract::TRANSFER_COMPRESSION_HEADER);
+        server_contract::TRANSFER_COMPRESSION_HEADER
+    );
 
     HttpRequest invalid_symlink_mode = transfer_import_request(root / "invalid-symlink-mode.txt", export_body);
     invalid_symlink_mode.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "copy";
@@ -553,12 +618,15 @@ static void assert_transfer_import_header_validation(TestRouteHarness& harness,
         harness,
         invalid_symlink_mode,
         root / "invalid-symlink-mode.txt",
-        server_contract::TRANSFER_SYMLINK_MODE_HEADER);
+        server_contract::TRANSFER_SYMLINK_MODE_HEADER
+    );
 }
 
-static void assert_transfer_import_rejects_file_merge_into_directory(TestRouteHarness& harness,
-                                                                     const fs::path& root,
-                                                                     const std::string& export_body) {
+static void assert_transfer_import_rejects_file_merge_into_directory(
+    TestRouteHarness& harness,
+    const fs::path& root,
+    const std::string& export_body
+) {
     fs::create_directories(root / "merge-dir");
     HttpRequest merge_file_into_directory_request =
         transfer_import_request(root / "merge-dir", export_body, "file", "merge");
@@ -568,7 +636,8 @@ static void assert_transfer_import_rejects_file_merge_into_directory(TestRouteHa
     TEST_ASSERT(merge_file_into_directory_error.at("code").get<std::string>() == "transfer_destination_unsupported");
 }
 
-static void assert_transfer_import_routes(TestRouteHarness& harness, const fs::path& root, const std::string& export_body) {
+static void
+assert_transfer_import_routes(TestRouteHarness& harness, const fs::path& root, const std::string& export_body) {
     assert_transfer_import_success(harness, root, export_body);
     assert_transfer_import_optional_defaults(harness, root, export_body);
     assert_transfer_import_header_validation(harness, root, export_body);
@@ -581,25 +650,26 @@ static void assert_sandbox_denied(const HttpResponse& response) {
 }
 
 static void assert_sandbox_export_and_path_info_denied(TestRouteHarness& sandbox, const fs::path& outside) {
-    const HttpResponse sandbox_export_denied = route_request(
-        sandbox, transfer_export_request(Json{{"path", (outside / "outside.txt").string()}}));
+    const HttpResponse sandbox_export_denied =
+        route_request(sandbox, transfer_export_request(Json{{"path", (outside / "outside.txt").string()}}));
     assert_sandbox_denied(sandbox_export_denied);
 
     const HttpResponse sandbox_path_info_denied = route_request(
-        sandbox, make_json_http_request("/v1/transfer/path-info", Json{{"path", (outside / "dest.txt").string()}}));
+        sandbox,
+        make_json_http_request("/v1/transfer/path-info", Json{{"path", (outside / "dest.txt").string()}})
+    );
     assert_sandbox_denied(sandbox_path_info_denied);
 }
 
 static std::string assert_sandbox_export_allowed(TestRouteHarness& sandbox, const fs::path& read_allowed) {
-    const HttpResponse sandbox_export_allowed = route_request(
-        sandbox, transfer_export_request(Json{{"path", (read_allowed / "source.txt").string()}}));
+    const HttpResponse sandbox_export_allowed =
+        route_request(sandbox, transfer_export_request(Json{{"path", (read_allowed / "source.txt").string()}}));
     TEST_ASSERT(sandbox_export_allowed.status == 200);
     return decode_framed_transfer_archive(sandbox_export_allowed.body);
 }
 
-static void assert_sandbox_import_denied(TestRouteHarness& sandbox,
-                                         const fs::path& outside,
-                                         const std::string& export_body) {
+static void
+assert_sandbox_import_denied(TestRouteHarness& sandbox, const fs::path& outside, const std::string& export_body) {
     HttpRequest sandbox_import_denied_request = transfer_import_request(outside / "dest.txt", export_body);
     const HttpResponse sandbox_import_denied = route_request(sandbox, sandbox_import_denied_request);
     assert_sandbox_denied(sandbox_import_denied);
@@ -614,14 +684,14 @@ static void assert_sandbox_symlink_target_denied(TestRouteHarness& sandbox, cons
 
     HttpRequest sandbox_symlink_target_denied_request =
         transfer_import_request(write_allowed, denied_symlink_archive, "directory", "merge");
-    const HttpResponse sandbox_symlink_target_denied =
-        route_request(sandbox, sandbox_symlink_target_denied_request);
+    const HttpResponse sandbox_symlink_target_denied = route_request(sandbox, sandbox_symlink_target_denied_request);
     assert_sandbox_denied(sandbox_symlink_target_denied);
     TEST_ASSERT(!fs::exists(write_allowed / "allowed-link"));
 }
 #endif
 
-static void assert_sandbox_patch_denied(TestRouteHarness& sandbox, const fs::path& outside, const fs::path& write_allowed) {
+static void
+assert_sandbox_patch_denied(TestRouteHarness& sandbox, const fs::path& outside, const fs::path& write_allowed) {
     const std::string patch_denied_text = "*** Begin Patch\n"
                                           "*** Add File: " +
                                           (outside / "patched.txt").string() +
@@ -630,21 +700,29 @@ static void assert_sandbox_patch_denied(TestRouteHarness& sandbox, const fs::pat
                                           "*** End Patch\n";
     const HttpResponse sandbox_patch_denied = route_request(
         sandbox,
-        make_json_http_request("/v1/patch/apply", Json{{"workdir", write_allowed.string()}, {"patch", patch_denied_text}}));
+        make_json_http_request(
+            "/v1/patch/apply",
+            Json{{"workdir", write_allowed.string()}, {"patch", patch_denied_text}}
+        )
+    );
     assert_sandbox_denied(sandbox_patch_denied);
     TEST_ASSERT(!fs::exists(outside / "patched.txt"));
 }
 
 static void assert_sandbox_exec_denied(TestRouteHarness& sandbox, const fs::path& outside) {
-    const HttpResponse sandbox_exec_denied = route_request(sandbox,
-                                                           make_json_http_request("/v1/exec/start",
-                                                                             Json{
-                                                                                 {"cmd", "printf denied"},
-                                                                                 {"workdir", outside.string()},
-                                                                                 {"login", false},
-                                                                                 {"tty", false},
-                                                                                 {"yield_time_ms", 250},
-                                                                             }));
+    const HttpResponse sandbox_exec_denied = route_request(
+        sandbox,
+        make_json_http_request(
+            "/v1/exec/start",
+            Json{
+                {"cmd", "printf denied"},
+                {"workdir", outside.string()},
+                {"login", false},
+                {"tty", false},
+                {"yield_time_ms", 250},
+            }
+        )
+    );
     assert_sandbox_denied(sandbox_exec_denied);
 }
 

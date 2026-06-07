@@ -20,20 +20,26 @@ public:
     void udp_read_loop_connection_local(uint32_t stream_id, std::shared_ptr<TunnelUdpSocket> socket_value);
     void send_error(uint32_t stream_id, const std::string& code, const std::string& message);
     void send_terminal_error(uint32_t stream_id, const std::string& code, const std::string& message);
-    void send_forward_drop(uint32_t stream_id,
-                           const std::string& kind,
-                           const std::string& reason,
-                           const std::string& message);
+    void send_forward_drop(
+        uint32_t stream_id,
+        const std::string& kind,
+        const std::string& reason,
+        const std::string& message
+    );
     bool owns_attachment(const std::shared_ptr<PortTunnelSessionAttachment>& attachment);
-    bool accept_session_tcp_stream(const std::shared_ptr<PortTunnelSession>& session,
-                                   const std::shared_ptr<PortTunnelSessionAttachment>& attachment,
-                                   uint32_t listener_stream_id,
-                                   UniqueSocket accepted_socket,
-                                   const std::string& peer);
-    bool emit_session_udp_datagram(const std::shared_ptr<PortTunnelSessionAttachment>& attachment,
-                                   uint32_t stream_id,
-                                   const std::string& peer,
-                                   const std::vector<unsigned char>& data);
+    bool accept_session_tcp_stream(
+        const std::shared_ptr<PortTunnelSession>& session,
+        const std::shared_ptr<PortTunnelSessionAttachment>& attachment,
+        uint32_t listener_stream_id,
+        UniqueSocket accepted_socket,
+        const std::string& peer
+    );
+    bool emit_session_udp_datagram(
+        const std::shared_ptr<PortTunnelSessionAttachment>& attachment,
+        uint32_t stream_id,
+        const std::string& peer,
+        const std::vector<unsigned char>& data
+    );
 
 private:
     PortTunnelConnection(const PortTunnelConnection&) = delete;
@@ -47,14 +53,18 @@ private:
     bool send_data_frame_or_drop_on_limit(const PortTunnelFrame& frame);
     bool closed() const;
     void mark_closed();
-    bool send_tcp_success_after_io_threads_started(const PortTunnelFrame& success,
-                                                   ConnectionLocalStreams* local_streams,
-                                                   uint32_t stream_id,
-                                                   const std::shared_ptr<TunnelTcpStream>& stream,
-                                                   PortTunnelWorkerLease worker_lease);
-    void drop_tcp_stream(ConnectionLocalStreams* local_streams,
-                         uint32_t stream_id,
-                         const std::shared_ptr<TunnelTcpStream>& fallback);
+    bool send_tcp_success_after_io_threads_started(
+        const PortTunnelFrame& success,
+        ConnectionLocalStreams* local_streams,
+        uint32_t stream_id,
+        const std::shared_ptr<TunnelTcpStream>& stream,
+        PortTunnelWorkerLease worker_lease
+    );
+    void drop_tcp_stream(
+        ConnectionLocalStreams* local_streams,
+        uint32_t stream_id,
+        const std::shared_ptr<TunnelTcpStream>& fallback
+    );
     void handle_frame(const PortTunnelFrame& frame);
     void tunnel_open(const PortTunnelFrame& frame);
     void tunnel_close(const PortTunnelFrame& frame);

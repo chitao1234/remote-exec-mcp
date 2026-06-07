@@ -48,8 +48,10 @@ struct RpcRouteExecution {
 };
 
 RpcRouteBodyPolicy rpc_route_body_policy(const HttpRequest& request, std::size_t default_max_body_bytes);
-RpcRouteExecution execute_rpc_route(const ServerRouteContext& routes,
-                                    const PortTunnelRouteContext& port_tunnel,
-                                    const HttpRequest& request,
-                                    HttpRequestBodyStream* body);
+RpcRouteExecution execute_rpc_route(
+    const ServerRouteContext& routes,
+    const PortTunnelRouteContext& port_tunnel,
+    const HttpRequest& request,
+    HttpRequestBodyStream* body
+);
 HttpResponse execute_buffered_rpc_route(const ServerRouteContext& context, const HttpRequest& request);

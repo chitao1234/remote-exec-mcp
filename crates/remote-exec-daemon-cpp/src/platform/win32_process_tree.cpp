@@ -36,7 +36,8 @@ ToolhelpApi load_toolhelp_api() {
     }
 
     api.create_snapshot = remote_exec_win32::proc_address_as<CreateToolhelp32SnapshotFn>(
-        GetProcAddress(kernel32, "CreateToolhelp32Snapshot"));
+        GetProcAddress(kernel32, "CreateToolhelp32Snapshot")
+    );
     api.process_first =
         remote_exec_win32::proc_address_as<Process32FirstWFn>(GetProcAddress(kernel32, "Process32FirstW"));
     api.process_next = remote_exec_win32::proc_address_as<Process32NextWFn>(GetProcAddress(kernel32, "Process32NextW"));
@@ -67,9 +68,11 @@ std::vector<ProcessEntry> snapshot_processes(const ToolhelpApi& api, bool* suppo
 
     UniqueHandle snapshot(api.create_snapshot(TH32CS_SNAPPROCESS, 0U));
     if (!snapshot.valid()) {
-        log_message(LOG_WARN,
-                    "process_tree",
-                    std::string("CreateToolhelp32Snapshot failed: ") + last_error_message("CreateToolhelp32Snapshot"));
+        log_message(
+            LOG_WARN,
+            "process_tree",
+            std::string("CreateToolhelp32Snapshot failed: ") + last_error_message("CreateToolhelp32Snapshot")
+        );
         return entries;
     }
 
@@ -80,9 +83,11 @@ std::vector<ProcessEntry> snapshot_processes(const ToolhelpApi& api, bool* suppo
     if (api.process_first(snapshot.get(), &raw_entry) == 0) {
         const DWORD error = GetLastError();
         if (error != ERROR_NO_MORE_FILES) {
-            log_message(LOG_WARN,
-                        "process_tree",
-                        std::string("Process32FirstW failed: ") + error_message_from_code("Process32FirstW", error));
+            log_message(
+                LOG_WARN,
+                "process_tree",
+                std::string("Process32FirstW failed: ") + error_message_from_code("Process32FirstW", error)
+            );
         }
         return entries;
     }
@@ -98,9 +103,11 @@ std::vector<ProcessEntry> snapshot_processes(const ToolhelpApi& api, bool* suppo
         if (api.process_next(snapshot.get(), &raw_entry) == 0) {
             const DWORD error = GetLastError();
             if (error != ERROR_NO_MORE_FILES) {
-                log_message(LOG_WARN,
-                            "process_tree",
-                            std::string("Process32NextW failed: ") + error_message_from_code("Process32NextW", error));
+                log_message(
+                    LOG_WARN,
+                    "process_tree",
+                    std::string("Process32NextW failed: ") + error_message_from_code("Process32NextW", error)
+                );
             }
             break;
         }
@@ -109,9 +116,11 @@ std::vector<ProcessEntry> snapshot_processes(const ToolhelpApi& api, bool* suppo
     return entries;
 }
 
-void append_descendants(DWORD pid,
-                        const std::map<DWORD, std::vector<DWORD>>& children_by_parent,
-                        std::vector<DWORD>* process_ids) {
+void append_descendants(
+    DWORD pid,
+    const std::map<DWORD, std::vector<DWORD>>& children_by_parent,
+    std::vector<DWORD>* process_ids
+) {
     std::map<DWORD, std::vector<DWORD>>::const_iterator children = children_by_parent.find(pid);
     if (children == children_by_parent.end()) {
         return;
@@ -131,19 +140,23 @@ bool terminate_pid(DWORD pid) {
         if (error == ERROR_INVALID_PARAMETER) {
             return true;
         }
-        log_message(LOG_WARN,
-                    "process_tree",
-                    std::string("OpenProcess failed for pid ") + std::to_string(pid) + ": " +
-                        error_message_from_code("OpenProcess", error));
+        log_message(
+            LOG_WARN,
+            "process_tree",
+            std::string("OpenProcess failed for pid ") + std::to_string(pid) + ": " +
+                error_message_from_code("OpenProcess", error)
+        );
         return false;
     }
 
     if (TerminateProcess(process.get(), 1U) == 0) {
         const DWORD error = GetLastError();
-        log_message(LOG_WARN,
-                    "process_tree",
-                    std::string("TerminateProcess failed for pid ") + std::to_string(pid) + ": " +
-                        error_message_from_code("TerminateProcess", error));
+        log_message(
+            LOG_WARN,
+            "process_tree",
+            std::string("TerminateProcess failed for pid ") + std::to_string(pid) + ": " +
+                error_message_from_code("TerminateProcess", error)
+        );
         return false;
     }
     return true;

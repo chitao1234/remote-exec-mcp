@@ -9,8 +9,10 @@ PortTunnelRetainedResource take_retained_resource_locked(PortTunnelSession* sess
     return resource;
 }
 
-void move_retained_resource_to_teardown(const PortTunnelRetainedResource& resource,
-                                        PortTunnelSessionTeardown* teardown) {
+void move_retained_resource_to_teardown(
+    const PortTunnelRetainedResource& resource,
+    PortTunnelSessionTeardown* teardown
+) {
     if (resource.kind == PortTunnelRetainedResourceKind::TcpListener) {
         teardown->retained_listener = resource.tcp_listener;
     } else if (resource.kind == PortTunnelRetainedResourceKind::UdpBind) {
@@ -56,45 +58,50 @@ const char* retained_resource_kind_name(PortTunnelRetainedResourceKind kind) {
 
 // These transition helpers require PortTunnelSession::mutex to be held. They
 // return attachment/resource work to close after the caller releases the lock.
-std::shared_ptr<PortTunnelSessionAttachment>
-transition_session_to_attached_locked(PortTunnelSession* session,
-                                      const std::shared_ptr<PortTunnelConnection>& connection) {
+std::shared_ptr<PortTunnelSessionAttachment> transition_session_to_attached_locked(
+    PortTunnelSession* session,
+    const std::shared_ptr<PortTunnelConnection>& connection
+) {
     const PortTunnelSessionState previous_state = session->state;
     session->state = PortTunnelSessionState::Attached;
     session->resume_deadline_ms = 0ULL;
     std::shared_ptr<PortTunnelSessionAttachment> previous = session->attachment;
     session->attachment.reset(new PortTunnelSessionAttachment(connection));
     session->state_changed.broadcast();
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("session attach")
-                    .quoted_field("session_id", session->session_id)
-                    .raw(std::string("from=") + session_state_name(previous_state))
-                    .raw(std::string("to=") + session_state_name(session->state))
-                    .field("generation", session->generation)
-                    .bool_field("replaced_attachment", previous.get() != nullptr)
-                    .str());
+    log_message(
+        LOG_DEBUG,
+        "port_tunnel",
+        LogMessageBuilder("session attach")
+            .quoted_field("session_id", session->session_id)
+            .raw(std::string("from=") + session_state_name(previous_state))
+            .raw(std::string("to=") + session_state_name(session->state))
+            .field("generation", session->generation)
+            .bool_field("replaced_attachment", previous.get() != nullptr)
+            .str()
+    );
     return previous;
 }
 
-std::shared_ptr<PortTunnelSessionAttachment> transition_session_to_detached_locked(PortTunnelSession* session,
-                                                                                   std::uint64_t deadline_ms) {
+std::shared_ptr<PortTunnelSessionAttachment>
+transition_session_to_detached_locked(PortTunnelSession* session, std::uint64_t deadline_ms) {
     const PortTunnelSessionState previous_state = session->state;
     session->state = PortTunnelSessionState::Detached;
     session->resume_deadline_ms = deadline_ms;
     std::shared_ptr<PortTunnelSessionAttachment> previous = session->attachment;
     session->attachment.reset();
     session->state_changed.broadcast();
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("session detach")
-                    .quoted_field("session_id", session->session_id)
-                    .raw(std::string("from=") + session_state_name(previous_state))
-                    .raw(std::string("to=") + session_state_name(session->state))
-                    .field("generation", session->generation)
-                    .field("resume_deadline_ms", session->resume_deadline_ms)
-                    .bool_field("had_attachment", previous.get() != nullptr)
-                    .str());
+    log_message(
+        LOG_DEBUG,
+        "port_tunnel",
+        LogMessageBuilder("session detach")
+            .quoted_field("session_id", session->session_id)
+            .raw(std::string("from=") + session_state_name(previous_state))
+            .raw(std::string("to=") + session_state_name(session->state))
+            .field("generation", session->generation)
+            .field("resume_deadline_ms", session->resume_deadline_ms)
+            .bool_field("had_attachment", previous.get() != nullptr)
+            .str()
+    );
     return previous;
 }
 
@@ -111,16 +118,18 @@ PortTunnelSessionTeardown transition_session_to_terminal_locked(PortTunnelSessio
     session->retained_session_budget.reset();
     move_retained_resource_to_teardown(take_retained_resource_locked(session), &state);
     session->state_changed.broadcast();
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("session terminal")
-                    .quoted_field("session_id", session->session_id)
-                    .raw(std::string("from=") + session_state_name(previous_state))
-                    .raw(std::string("to=") + session_state_name(session->state))
-                    .field("generation", session->generation)
-                    .raw(std::string("retained_resource=") + retained_resource_kind_name(previous_resource_kind))
-                    .field("retained_stream_id", previous_resource_stream_id)
-                    .str());
+    log_message(
+        LOG_DEBUG,
+        "port_tunnel",
+        LogMessageBuilder("session terminal")
+            .quoted_field("session_id", session->session_id)
+            .raw(std::string("from=") + session_state_name(previous_state))
+            .raw(std::string("to=") + session_state_name(session->state))
+            .field("generation", session->generation)
+            .raw(std::string("retained_resource=") + retained_resource_kind_name(previous_resource_kind))
+            .field("retained_stream_id", previous_resource_stream_id)
+            .str()
+    );
     return state;
 }
 
@@ -136,18 +145,22 @@ bool session_resume_expired_locked(const PortTunnelSession* session, std::uint64
 
 } // namespace
 
-bool PortTunnelSession::attach_new(const std::shared_ptr<PortTunnelConnection>& connection,
-                                   std::uint64_t generation_value) {
+bool PortTunnelSession::attach_new(
+    const std::shared_ptr<PortTunnelConnection>& connection,
+    std::uint64_t generation_value
+) {
     BasicLockGuard lock(mutex);
     if (state != PortTunnelSessionState::New || attachment.get() != nullptr) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("session new attach rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw(std::string("state=") + session_state_name(state))
-                        .field("generation", generation)
-                        .field("requested_generation", generation_value)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("session new attach rejected")
+                .quoted_field("session_id", session_id)
+                .raw(std::string("state=") + session_state_name(state))
+                .field("generation", generation)
+                .field("requested_generation", generation_value)
+                .str()
+        );
         return false;
     }
     generation = generation_value;
@@ -155,55 +168,65 @@ bool PortTunnelSession::attach_new(const std::shared_ptr<PortTunnelConnection>& 
     return true;
 }
 
-PortTunnelSessionResumeResult PortTunnelSession::attach_resumed(const std::shared_ptr<PortTunnelConnection>& connection,
-                                                                std::uint64_t generation_value,
-                                                                std::uint64_t now_ms) {
+PortTunnelSessionResumeResult PortTunnelSession::attach_resumed(
+    const std::shared_ptr<PortTunnelConnection>& connection,
+    std::uint64_t generation_value,
+    std::uint64_t now_ms
+) {
     BasicLockGuard lock(mutex);
     if (state == PortTunnelSessionState::Closed) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("session resume attach rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw("reason=closed")
-                        .field("generation", generation)
-                        .field("requested_generation", generation_value)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("session resume attach rejected")
+                .quoted_field("session_id", session_id)
+                .raw("reason=closed")
+                .field("generation", generation)
+                .field("requested_generation", generation_value)
+                .str()
+        );
         return PortTunnelSessionResumeResult::Unknown;
     }
     if (session_state_attached(state) || attachment.get() != nullptr) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("session resume attach rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw("reason=already_attached")
-                        .field("generation", generation)
-                        .field("requested_generation", generation_value)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("session resume attach rejected")
+                .quoted_field("session_id", session_id)
+                .raw("reason=already_attached")
+                .field("generation", generation)
+                .field("requested_generation", generation_value)
+                .str()
+        );
         return PortTunnelSessionResumeResult::AlreadyAttached;
     }
     if (session_resume_expired_locked(this, now_ms)) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("session resume attach rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw("reason=expired")
-                        .field("generation", generation)
-                        .field("requested_generation", generation_value)
-                        .field("now_ms", now_ms)
-                        .field("resume_deadline_ms", resume_deadline_ms)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("session resume attach rejected")
+                .quoted_field("session_id", session_id)
+                .raw("reason=expired")
+                .field("generation", generation)
+                .field("requested_generation", generation_value)
+                .field("now_ms", now_ms)
+                .field("resume_deadline_ms", resume_deadline_ms)
+                .str()
+        );
         return PortTunnelSessionResumeResult::Expired;
     }
     if (state != PortTunnelSessionState::Detached || resume_deadline_ms == 0ULL) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("session resume attach rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw("reason=not_detached")
-                        .raw(std::string("state=") + session_state_name(state))
-                        .field("generation", generation)
-                        .field("requested_generation", generation_value)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("session resume attach rejected")
+                .quoted_field("session_id", session_id)
+                .raw("reason=not_detached")
+                .raw(std::string("state=") + session_state_name(state))
+                .field("generation", generation)
+                .field("requested_generation", generation_value)
+                .str()
+        );
         return PortTunnelSessionResumeResult::Unknown;
     }
     generation = generation_value;
@@ -211,20 +234,22 @@ PortTunnelSessionResumeResult PortTunnelSession::attach_resumed(const std::share
     return PortTunnelSessionResumeResult::Ready;
 }
 
-std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::detach_until(std::uint64_t deadline_ms,
-                                                                             bool* detached) {
+std::shared_ptr<PortTunnelSessionAttachment>
+PortTunnelSession::detach_until(std::uint64_t deadline_ms, bool* detached) {
     BasicLockGuard lock(mutex);
     if (state != PortTunnelSessionState::Attached || attachment.get() == nullptr) {
         if (detached != nullptr) {
             *detached = false;
         }
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("session detach rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw(std::string("state=") + session_state_name(state))
-                        .field("generation", generation)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("session detach rejected")
+                .quoted_field("session_id", session_id)
+                .raw(std::string("state=") + session_state_name(state))
+                .field("generation", generation)
+                .str()
+        );
         return std::shared_ptr<PortTunnelSessionAttachment>();
     }
     if (detached != nullptr) {
@@ -236,14 +261,16 @@ std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::detach_until(std
 PortTunnelSessionTeardown PortTunnelSession::close_terminal(bool mark_expired) {
     BasicLockGuard lock(mutex);
     if (session_state_terminal(state)) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("session terminal ignored")
-                        .quoted_field("session_id", session_id)
-                        .raw(std::string("state=") + session_state_name(state))
-                        .field("generation", generation)
-                        .bool_field("mark_expired", mark_expired)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("session terminal ignored")
+                .quoted_field("session_id", session_id)
+                .raw(std::string("state=") + session_state_name(state))
+                .field("generation", generation)
+                .bool_field("mark_expired", mark_expired)
+                .str()
+        );
         return PortTunnelSessionTeardown();
     }
     return transition_session_to_terminal_locked(this, mark_expired);
@@ -257,14 +284,16 @@ PortTunnelSessionTeardown PortTunnelSession::expire_if_due(std::uint64_t now_ms)
     if (resume_deadline_ms == 0ULL || now_ms < resume_deadline_ms) {
         return PortTunnelSessionTeardown();
     }
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("session expiry due")
-                    .quoted_field("session_id", session_id)
-                    .field("generation", generation)
-                    .field("now_ms", now_ms)
-                    .field("resume_deadline_ms", resume_deadline_ms)
-                    .str());
+    log_message(
+        LOG_DEBUG,
+        "port_tunnel",
+        LogMessageBuilder("session expiry due")
+            .quoted_field("session_id", session_id)
+            .field("generation", generation)
+            .field("now_ms", now_ms)
+            .field("resume_deadline_ms", resume_deadline_ms)
+            .str()
+    );
     return transition_session_to_terminal_locked(this, true);
 }
 
@@ -295,7 +324,8 @@ PortTunnelSession::connection_for_attachment(const std::shared_ptr<PortTunnelSes
 bool PortTunnelSession::insert_tcp_stream_if_attached(
     const std::shared_ptr<PortTunnelSessionAttachment>& expected_attachment,
     const std::shared_ptr<TunnelTcpStream>& stream,
-    std::uint32_t* stream_id) {
+    std::uint32_t* stream_id
+) {
     BasicLockGuard lock(mutex);
     if (!session_state_attached(state) || attachment.get() != expected_attachment.get()) {
         return false;
@@ -316,77 +346,89 @@ SessionRetainedInstallResult
 PortTunnelSession::install_tcp_listener(uint32_t stream_id, const std::shared_ptr<RetainedTcpListener>& listener) {
     BasicLockGuard lock(mutex);
     if (!session_state_attached(state) || attachment.get() == nullptr) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("retain tcp listener rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw(std::string("state=") + session_state_name(state))
-                        .field("stream_id", stream_id)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("retain tcp listener rejected")
+                .quoted_field("session_id", session_id)
+                .raw(std::string("state=") + session_state_name(state))
+                .field("stream_id", stream_id)
+                .str()
+        );
         return SessionRetainedInstallResult::Unavailable;
     }
     if (retained_resource.kind != PortTunnelRetainedResourceKind::None) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("retain tcp listener rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw("reason=conflict")
-                        .raw(std::string("existing=") + retained_resource_kind_name(retained_resource.kind))
-                        .field("stream_id", stream_id)
-                        .field("existing_stream_id", retained_resource.stream_id)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("retain tcp listener rejected")
+                .quoted_field("session_id", session_id)
+                .raw("reason=conflict")
+                .raw(std::string("existing=") + retained_resource_kind_name(retained_resource.kind))
+                .field("stream_id", stream_id)
+                .field("existing_stream_id", retained_resource.stream_id)
+                .str()
+        );
         return SessionRetainedInstallResult::Conflict;
     }
     retained_resource.kind = PortTunnelRetainedResourceKind::TcpListener;
     retained_resource.stream_id = stream_id;
     retained_resource.tcp_listener = listener;
     retained_resource.udp_bind.reset();
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("retain tcp listener")
-                    .quoted_field("session_id", session_id)
-                    .field("stream_id", stream_id)
-                    .field("generation", generation)
-                    .str());
+    log_message(
+        LOG_DEBUG,
+        "port_tunnel",
+        LogMessageBuilder("retain tcp listener")
+            .quoted_field("session_id", session_id)
+            .field("stream_id", stream_id)
+            .field("generation", generation)
+            .str()
+    );
     return SessionRetainedInstallResult::Installed;
 }
 
-SessionRetainedInstallResult PortTunnelSession::install_udp_bind(uint32_t stream_id,
-                                                                 const std::shared_ptr<TunnelUdpSocket>& socket_value) {
+SessionRetainedInstallResult
+PortTunnelSession::install_udp_bind(uint32_t stream_id, const std::shared_ptr<TunnelUdpSocket>& socket_value) {
     BasicLockGuard lock(mutex);
     if (!session_state_attached(state) || attachment.get() == nullptr) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("retain udp bind rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw(std::string("state=") + session_state_name(state))
-                        .field("stream_id", stream_id)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("retain udp bind rejected")
+                .quoted_field("session_id", session_id)
+                .raw(std::string("state=") + session_state_name(state))
+                .field("stream_id", stream_id)
+                .str()
+        );
         return SessionRetainedInstallResult::Unavailable;
     }
     if (retained_resource.kind != PortTunnelRetainedResourceKind::None) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("retain udp bind rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw("reason=conflict")
-                        .raw(std::string("existing=") + retained_resource_kind_name(retained_resource.kind))
-                        .field("stream_id", stream_id)
-                        .field("existing_stream_id", retained_resource.stream_id)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("retain udp bind rejected")
+                .quoted_field("session_id", session_id)
+                .raw("reason=conflict")
+                .raw(std::string("existing=") + retained_resource_kind_name(retained_resource.kind))
+                .field("stream_id", stream_id)
+                .field("existing_stream_id", retained_resource.stream_id)
+                .str()
+        );
         return SessionRetainedInstallResult::Conflict;
     }
     retained_resource.kind = PortTunnelRetainedResourceKind::UdpBind;
     retained_resource.stream_id = stream_id;
     retained_resource.tcp_listener.reset();
     retained_resource.udp_bind = socket_value;
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("retain udp bind")
-                    .quoted_field("session_id", session_id)
-                    .field("stream_id", stream_id)
-                    .field("generation", generation)
-                    .str());
+    log_message(
+        LOG_DEBUG,
+        "port_tunnel",
+        LogMessageBuilder("retain udp bind")
+            .quoted_field("session_id", session_id)
+            .field("stream_id", stream_id)
+            .field("generation", generation)
+            .str()
+    );
     return SessionRetainedInstallResult::Installed;
 }
 
@@ -404,26 +446,30 @@ PortTunnelRetainedResource PortTunnelSession::remove_retained_resource(uint32_t 
         if (removed != nullptr) {
             *removed = false;
         }
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("retained resource remove skipped")
-                        .quoted_field("session_id", session_id)
-                        .field("stream_id", stream_id)
-                        .raw(std::string("existing=") + retained_resource_kind_name(retained_resource.kind))
-                        .field("existing_stream_id", retained_resource.stream_id)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("retained resource remove skipped")
+                .quoted_field("session_id", session_id)
+                .field("stream_id", stream_id)
+                .raw(std::string("existing=") + retained_resource_kind_name(retained_resource.kind))
+                .field("existing_stream_id", retained_resource.stream_id)
+                .str()
+        );
         return PortTunnelRetainedResource();
     }
     if (removed != nullptr) {
         *removed = true;
     }
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("retained resource remove")
-                    .quoted_field("session_id", session_id)
-                    .field("stream_id", stream_id)
-                    .raw(std::string("kind=") + retained_resource_kind_name(retained_resource.kind))
-                    .str());
+    log_message(
+        LOG_DEBUG,
+        "port_tunnel",
+        LogMessageBuilder("retained resource remove")
+            .quoted_field("session_id", session_id)
+            .field("stream_id", stream_id)
+            .raw(std::string("kind=") + retained_resource_kind_name(retained_resource.kind))
+            .str()
+    );
     return take_retained_resource_locked(this);
 }
 

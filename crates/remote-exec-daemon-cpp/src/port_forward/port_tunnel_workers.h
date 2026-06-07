@@ -18,10 +18,12 @@ struct PortTunnelService::WorkerGroup {
         std::unique_ptr<std::thread> thread;
     };
 
-    bool spawn(const std::shared_ptr<PortTunnelService>& service,
-               const char* operation,
-               PortTunnelWorkerLease worker_lease,
-               const std::function<void()>& work);
+    bool spawn(
+        const std::shared_ptr<PortTunnelService>& service,
+        const char* operation,
+        PortTunnelWorkerLease worker_lease,
+        const std::function<void()>& work
+    );
     void begin_shutdown();
     void collect_finished(std::vector<std::shared_ptr<Thread>>* finished_workers);
     void join_workers(const std::vector<std::shared_ptr<Thread>>& workers);

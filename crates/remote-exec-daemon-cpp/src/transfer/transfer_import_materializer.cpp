@@ -23,9 +23,11 @@ void authorize_path_if_present(const TransferPathAuthorizer& authorizer, const s
 
 } // namespace
 
-void authorize_materialized_relative_path(const std::string& destination_root,
-                                          const std::string& relative_path,
-                                          const TransferPathAuthorizer& authorizer) {
+void authorize_materialized_relative_path(
+    const std::string& destination_root,
+    const std::string& relative_path,
+    const TransferPathAuthorizer& authorizer
+) {
     if (!authorizer) {
         return;
     }
@@ -56,20 +58,24 @@ void ensure_no_existing_symlink_in_path(const std::string& destination_root, con
     }
 }
 
-void write_validated_symlink(const std::string& raw_target,
-                             const std::string& output_path,
-                             const TransferPathAuthorizer& authorizer) {
+void write_validated_symlink(
+    const std::string& raw_target,
+    const std::string& output_path,
+    const TransferPathAuthorizer& authorizer
+) {
     const std::string target = transfer_import_plan::validate_relative_symlink_target(raw_target);
     authorize_path_if_present(authorizer, output_path);
     authorize_path_if_present(authorizer, transfer_import_plan::resolved_symlink_target_path(output_path, target));
     transfer_filesystem::write_symlink(target, output_path);
 }
 
-void write_entry_body_to_file(TransferArchiveReader& reader,
-                              const std::string& path,
-                              std::uint64_t size,
-                              std::uint64_t mode,
-                              const TransferPathAuthorizer& authorizer) {
+void write_entry_body_to_file(
+    TransferArchiveReader& reader,
+    const std::string& path,
+    std::uint64_t size,
+    std::uint64_t mode,
+    const TransferPathAuthorizer& authorizer
+) {
     authorize_path_if_present(authorizer, path);
     ScopedFile output(path_utils::open_file(path, "wb"));
     if (!output.valid()) {
@@ -101,33 +107,39 @@ void write_entry_body_to_file(TransferArchiveReader& reader,
     }
 }
 
-void materialize_directory_entry(const std::string& destination_root,
-                                 const std::string& relative_path,
-                                 const std::string& output_path,
-                                 const TransferPathAuthorizer& authorizer) {
+void materialize_directory_entry(
+    const std::string& destination_root,
+    const std::string& relative_path,
+    const std::string& output_path,
+    const TransferPathAuthorizer& authorizer
+) {
     authorize_materialized_relative_path(destination_root, relative_path, authorizer);
     ensure_no_existing_symlink_in_path(destination_root, relative_path);
     transfer_filesystem::ensure_parent_directory(output_path, true);
     transfer_filesystem::make_directory_if_missing(output_path);
 }
 
-void materialize_symlink_entry(const std::string& raw_target,
-                               const std::string& destination_root,
-                               const std::string& relative_path,
-                               const std::string& output_path,
-                               const TransferPathAuthorizer& authorizer) {
+void materialize_symlink_entry(
+    const std::string& raw_target,
+    const std::string& destination_root,
+    const std::string& relative_path,
+    const std::string& output_path,
+    const TransferPathAuthorizer& authorizer
+) {
     authorize_materialized_relative_path(destination_root, relative_path, authorizer);
     ensure_no_existing_symlink_in_path(destination_root, relative_path);
     write_validated_symlink(raw_target, output_path, authorizer);
 }
 
-void materialize_file_entry(TransferArchiveReader& reader,
-                            const std::string& destination_root,
-                            const std::string& relative_path,
-                            const std::string& output_path,
-                            std::uint64_t size,
-                            std::uint64_t mode,
-                            const TransferPathAuthorizer& authorizer) {
+void materialize_file_entry(
+    TransferArchiveReader& reader,
+    const std::string& destination_root,
+    const std::string& relative_path,
+    const std::string& output_path,
+    std::uint64_t size,
+    std::uint64_t mode,
+    const TransferPathAuthorizer& authorizer
+) {
     authorize_materialized_relative_path(destination_root, relative_path, authorizer);
     ensure_no_existing_symlink_in_path(destination_root, relative_path);
     transfer_filesystem::ensure_parent_directory(output_path, true);

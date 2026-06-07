@@ -145,10 +145,12 @@ bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, Htt
     throw BadHttpRequest("incomplete http request");
 }
 
-bool try_read_http_request_head_controlled(SOCKET client,
-                                           std::size_t max_header_bytes,
-                                           const HttpReadControl& read_control,
-                                           HttpRequestHead* head) {
+bool try_read_http_request_head_controlled(
+    SOCKET client,
+    std::size_t max_header_bytes,
+    const HttpReadControl& read_control,
+    HttpRequestHead* head
+) {
     std::string data;
     char buffer[HTTP_READ_BUFFER_SIZE];
     std::size_t search_offset = 0;
@@ -215,18 +217,22 @@ HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_byt
     throw BadHttpRequest("incomplete http request");
 }
 
-HttpRequestBodyStream::HttpRequestBodyStream(SOCKET client,
-                                             const std::string& initial_body,
-                                             const HttpRequestBodyFraming& framing,
-                                             std::size_t max_body_bytes)
+HttpRequestBodyStream::HttpRequestBodyStream(
+    SOCKET client,
+    const std::string& initial_body,
+    const HttpRequestBodyFraming& framing,
+    std::size_t max_body_bytes
+)
     : HttpRequestBodyStream(client, initial_body, framing, max_body_bytes, nullptr) {
 }
 
-HttpRequestBodyStream::HttpRequestBodyStream(SOCKET client,
-                                             const std::string& initial_body,
-                                             const HttpRequestBodyFraming& framing,
-                                             std::size_t max_body_bytes,
-                                             const HttpReadControl* read_control)
+HttpRequestBodyStream::HttpRequestBodyStream(
+    SOCKET client,
+    const std::string& initial_body,
+    const HttpRequestBodyFraming& framing,
+    std::size_t max_body_bytes,
+    const HttpReadControl* read_control
+)
     : client_(client), read_control_(read_control), read_deadline_ms_(read_deadline_after(read_control)),
       raw_(initial_body), raw_offset_(0), framing_(framing), decoded_size_(0), max_body_bytes_(max_body_bytes),
       remaining_content_length_(framing.content_length), remaining_chunk_size_(0), chunked_finished_(false) {
@@ -596,9 +602,11 @@ void send_http_response_head(SOCKET client, const HttpResponse& response) {
     send_all(client, render_http_response_head(response));
 }
 
-void send_http_upgrade_response(SOCKET client,
-                                const std::string& upgrade_token,
-                                const std::map<std::string, std::string>& headers) {
+void send_http_upgrade_response(
+    SOCKET client,
+    const std::string& upgrade_token,
+    const std::map<std::string, std::string>& headers
+) {
     send_all(client, render_http_upgrade_response(upgrade_token, headers));
 }
 

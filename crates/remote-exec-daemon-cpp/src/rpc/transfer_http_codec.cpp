@@ -41,8 +41,10 @@ void require_one_of(const char* name, const std::string& value, std::initializer
             return;
         }
     }
-    throw TransferFailure(TransferRpcCode::BadRequest,
-                          invalid_header_message(name, "unsupported value `" + value + "`"));
+    throw TransferFailure(
+        TransferRpcCode::BadRequest,
+        invalid_header_message(name, "unsupported value `" + value + "`")
+    );
 }
 
 bool parse_create_parent(const std::string& value) {
@@ -54,16 +56,21 @@ bool parse_create_parent(const std::string& value) {
     }
     throw TransferFailure(
         TransferRpcCode::BadRequest,
-        invalid_header_message(server_contract::TRANSFER_CREATE_PARENT_HEADER, "expected `true` or `false`"));
+        invalid_header_message(server_contract::TRANSFER_CREATE_PARENT_HEADER, "expected `true` or `false`")
+    );
 }
 
 std::string decode_destination_path_header(const std::string& encoded) {
     try {
         return base64_decode_bytes(encoded);
     } catch (const std::runtime_error& ex) {
-        throw TransferFailure(TransferRpcCode::BadRequest,
-                              invalid_header_message(server_contract::TRANSFER_DESTINATION_PATH_HEADER,
-                                                     "expected base64-encoded UTF-8 path: " + std::string(ex.what())));
+        throw TransferFailure(
+            TransferRpcCode::BadRequest,
+            invalid_header_message(
+                server_contract::TRANSFER_DESTINATION_PATH_HEADER,
+                "expected base64-encoded UTF-8 path: " + std::string(ex.what())
+            )
+        );
     }
 }
 
@@ -71,24 +78,30 @@ std::string decode_destination_path_header(const std::string& encoded) {
 
 void require_uncompressed_transfer(const std::string& compression) {
     if (!compression.empty() && compression != "none") {
-        throw TransferFailure(TransferRpcCode::CompressionUnsupported,
-                              "this daemon does not support transfer compression");
+        throw TransferFailure(
+            TransferRpcCode::CompressionUnsupported,
+            "this daemon does not support transfer compression"
+        );
     }
 }
 
 void require_transfer_stream_version(const HttpRequest& request) {
     const std::string version = required_header(request, server_contract::TRANSFER_STREAM_VERSION_HEADER);
     if (version != server_contract::TRANSFER_STREAM_VERSION_VALUE) {
-        throw TransferFailure(TransferRpcCode::BadRequest,
-                              "unsupported transfer stream protocol version `" + version + "`");
+        throw TransferFailure(
+            TransferRpcCode::BadRequest,
+            "unsupported transfer stream protocol version `" + version + "`"
+        );
     }
 }
 
 void require_transfer_stream_content_type(const HttpRequest& request) {
     const std::string content_type = required_header(request, "content-type");
     if (content_type != server_contract::TRANSFER_STREAM_CONTENT_TYPE) {
-        throw TransferFailure(TransferRpcCode::BadRequest,
-                              "unsupported transfer stream content type `" + content_type + "`");
+        throw TransferFailure(
+            TransferRpcCode::BadRequest,
+            "unsupported transfer stream content type `" + content_type + "`"
+        );
     }
 }
 
@@ -98,26 +111,35 @@ TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request
         decode_destination_path_header(required_header(request, server_contract::TRANSFER_DESTINATION_PATH_HEADER));
     const std::string overwrite = required_header(request, server_contract::TRANSFER_OVERWRITE_HEADER);
     if (!parse_transfer_overwrite_wire_value(overwrite, &metadata.overwrite)) {
-        throw TransferFailure(TransferRpcCode::BadRequest,
-                              invalid_header_message(server_contract::TRANSFER_OVERWRITE_HEADER,
-                                                     "unsupported value `" + overwrite + "`"));
+        throw TransferFailure(
+            TransferRpcCode::BadRequest,
+            invalid_header_message(server_contract::TRANSFER_OVERWRITE_HEADER, "unsupported value `" + overwrite + "`")
+        );
     }
     metadata.create_parent =
         parse_create_parent(required_header(request, server_contract::TRANSFER_CREATE_PARENT_HEADER));
     const std::string source_type = required_header(request, server_contract::TRANSFER_SOURCE_TYPE_HEADER);
     if (!parse_transfer_source_type_wire_value(source_type, &metadata.source_type)) {
-        throw TransferFailure(TransferRpcCode::BadRequest,
-                              invalid_header_message(server_contract::TRANSFER_SOURCE_TYPE_HEADER,
-                                                     "unsupported value `" + source_type + "`"));
+        throw TransferFailure(
+            TransferRpcCode::BadRequest,
+            invalid_header_message(
+                server_contract::TRANSFER_SOURCE_TYPE_HEADER,
+                "unsupported value `" + source_type + "`"
+            )
+        );
     }
     metadata.compression = optional_header_or(request, server_contract::TRANSFER_COMPRESSION_HEADER, "none");
     require_one_of(server_contract::TRANSFER_COMPRESSION_HEADER, metadata.compression, {"none", "zstd"});
     const std::string symlink_mode =
         optional_header_or(request, server_contract::TRANSFER_SYMLINK_MODE_HEADER, "preserve");
     if (!parse_transfer_symlink_mode_wire_value(symlink_mode, &metadata.symlink_mode)) {
-        throw TransferFailure(TransferRpcCode::BadRequest,
-                              invalid_header_message(server_contract::TRANSFER_SYMLINK_MODE_HEADER,
-                                                     "unsupported value `" + symlink_mode + "`"));
+        throw TransferFailure(
+            TransferRpcCode::BadRequest,
+            invalid_header_message(
+                server_contract::TRANSFER_SYMLINK_MODE_HEADER,
+                "unsupported value `" + symlink_mode + "`"
+            )
+        );
     }
     return metadata;
 }

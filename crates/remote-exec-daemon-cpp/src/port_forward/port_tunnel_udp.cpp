@@ -9,20 +9,25 @@
 
 using Json = nlohmann::json;
 
-bool PortTunnelService::spawn_udp_bind_loop(const std::shared_ptr<PortTunnelSession>& session,
-                                            uint32_t stream_id,
-                                            const std::shared_ptr<TunnelUdpSocket>& socket_value,
-                                            PortTunnelWorkerLease worker_lease) {
+bool PortTunnelService::spawn_udp_bind_loop(
+    const std::shared_ptr<PortTunnelSession>& session,
+    uint32_t stream_id,
+    const std::shared_ptr<TunnelUdpSocket>& socket_value,
+    PortTunnelWorkerLease worker_lease
+) {
     std::shared_ptr<PortTunnelService> self = shared_from_this();
     return spawn_tracked_worker(
-        "spawn udp bind thread", std::move(worker_lease), [self, session, stream_id, socket_value]() {
-            self->udp_read_loop(session, stream_id, socket_value);
-        });
+        "spawn udp bind thread",
+        std::move(worker_lease),
+        [self, session, stream_id, socket_value]() { self->udp_read_loop(session, stream_id, socket_value); }
+    );
 }
 
-void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& session,
-                                      uint32_t stream_id,
-                                      const std::shared_ptr<TunnelUdpSocket>& socket_value) {
+void PortTunnelService::udp_read_loop(
+    const std::shared_ptr<PortTunnelSession>& session,
+    uint32_t stream_id,
+    const std::shared_ptr<TunnelUdpSocket>& socket_value
+) {
     std::vector<unsigned char> buffer(READ_BUFFER_SIZE);
     for (;;) {
         std::shared_ptr<PortTunnelSessionAttachment> attachment = wait_for_attachment(session);
@@ -72,11 +77,13 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
             if (socket_value->is_closing_or_closed_locked()) {
                 return;
             }
-            received = recv_port_forward_datagram(socket_value->socket.get(),
-                                                  reinterpret_cast<char*>(buffer.data()),
-                                                  buffer.size(),
-                                                  reinterpret_cast<sockaddr*>(&peer_address),
-                                                  &peer_len);
+            received = recv_port_forward_datagram(
+                socket_value->socket.get(),
+                reinterpret_cast<char*>(buffer.data()),
+                buffer.size(),
+                reinterpret_cast<sockaddr*>(&peer_address),
+                &peer_len
+            );
         }
         if (received < 0) {
             const int error = last_socket_error();
@@ -104,7 +111,8 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
                 attachment,
                 stream_id,
                 printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len),
-                payload)) {
+                payload
+            )) {
             if (session_is_unavailable(session)) {
                 return;
             }
@@ -171,7 +179,12 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
         }
         connection_local_streams_.insert_udp(frame.stream_id, socket_value);
         if (!spawn_udp_read_thread(
-                service_, shared_from_this(), frame.stream_id, socket_value, std::move(worker_lease))) {
+                service_,
+                shared_from_this(),
+                frame.stream_id,
+                socket_value,
+                std::move(worker_lease)
+            )) {
             std::shared_ptr<TunnelUdpSocket> removed_socket = connection_local_streams_.remove_udp(frame.stream_id);
             if (removed_socket.get() != nullptr) {
                 removed_socket->close();
@@ -188,8 +201,10 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
     send_frame(ok);
 }
 
-void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
-                                                          std::shared_ptr<TunnelUdpSocket> socket_value) {
+void PortTunnelConnection::udp_read_loop_connection_local(
+    uint32_t stream_id,
+    std::shared_ptr<TunnelUdpSocket> socket_value
+) {
     std::vector<unsigned char> buffer(READ_BUFFER_SIZE);
     for (;;) {
         sockaddr_storage peer_address;
@@ -223,11 +238,13 @@ void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
             if (socket_value->is_closing_or_closed_locked()) {
                 return;
             }
-            received = recv_port_forward_datagram(socket_value->socket.get(),
-                                                  reinterpret_cast<char*>(buffer.data()),
-                                                  buffer.size(),
-                                                  reinterpret_cast<sockaddr*>(&peer_address),
-                                                  &peer_len);
+            received = recv_port_forward_datagram(
+                socket_value->socket.get(),
+                reinterpret_cast<char*>(buffer.data()),
+                buffer.size(),
+                reinterpret_cast<sockaddr*>(&peer_address),
+                &peer_len
+            );
         }
         if (received < 0) {
             const int error = last_socket_error();
@@ -244,8 +261,8 @@ void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
         }
         PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::UdpDatagram, stream_id);
         frame.meta =
-            Json{{"peer", printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)}}
-                .dump();
+            Json{{"peer", printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)}
+            }.dump();
         frame.data.assign(buffer.begin(), buffer.begin() + received);
         if (!send_data_frame_or_drop_on_limit(frame)) {
             continue;
@@ -283,11 +300,13 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
             if (socket_value->is_closing_or_closed_locked()) {
                 throw PortForwardError(400, "port_connection_closed", "udp bind was closed");
             }
-            sent = send_port_forward_datagram(socket_value->socket.get(),
-                                              reinterpret_cast<const char*>(frame.data.data()),
-                                              frame.data.size(),
-                                              peer_address.sockaddr_ptr(),
-                                              peer_address.address_len);
+            sent = send_port_forward_datagram(
+                socket_value->socket.get(),
+                reinterpret_cast<const char*>(frame.data.data()),
+                frame.data.size(),
+                peer_address.sockaddr_ptr(),
+                peer_address.address_len
+            );
         }
         if (sent >= 0) {
             break;

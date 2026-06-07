@@ -28,10 +28,12 @@ void ensure_not_existing_symlink(const std::string& path);
 void write_symlink(const std::string& target, const std::string& path);
 std::vector<DirectoryEntry> list_directory_entries(const std::string& path);
 void replace_existing_path(const std::string& path, const TransferPathAuthorizer& authorizer);
-bool prepare_destination_path(const std::string& absolute_path,
-                              TransferSourceType source_type,
-                              TransferOverwrite overwrite,
-                              bool create_parent,
-                              const TransferPathAuthorizer& authorizer);
+bool prepare_destination_path(
+    const std::string& absolute_path,
+    TransferSourceType source_type,
+    TransferOverwrite overwrite,
+    bool create_parent,
+    const TransferPathAuthorizer& authorizer
+);
 
 } // namespace transfer_filesystem

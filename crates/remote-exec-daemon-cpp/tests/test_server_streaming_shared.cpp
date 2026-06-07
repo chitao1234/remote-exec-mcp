@@ -33,9 +33,11 @@ void wait_past_resume_timeout(unsigned long resume_timeout_ms) {
     platform::sleep_ms(resume_timeout_ms + RESUME_TIMEOUT_EXPIRY_MARGIN_MS);
 }
 
-void initialize_state_with_port_forward_limits(TestDaemonState& state,
-                                               const fs::path& root,
-                                               const PortForwardLimitConfig& limits) {
+void initialize_state_with_port_forward_limits(
+    TestDaemonState& state,
+    const fs::path& root,
+    const PortForwardLimitConfig& limits
+) {
     initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 }
 
@@ -72,11 +74,13 @@ static unsigned long remaining_timeout_ms(std::uint64_t deadline_ms) {
     return remaining > static_cast<std::uint64_t>(ULONG_MAX) ? ULONG_MAX : static_cast<unsigned long>(remaining);
 }
 
-static std::string tunnel_read_failure_message(SOCKET socket,
-                                               const char* phase,
-                                               const char* detail,
-                                               std::size_t offset,
-                                               std::size_t size) {
+static std::string tunnel_read_failure_message(
+    SOCKET socket,
+    const char* phase,
+    const char* detail,
+    std::size_t offset,
+    std::size_t size
+) {
     std::ostringstream out;
     out << "tunnel frame read failed";
     out << " phase=`" << phase << "`";
@@ -91,7 +95,8 @@ static bool socket_readable_until(SOCKET socket, std::uint64_t deadline_ms) {
     return socket_readable_within(socket, remaining_timeout_ms(deadline_ms));
 }
 
-static bool recv_exact_until(SOCKET socket, char* data, std::size_t size, std::uint64_t deadline_ms, const char* phase) {
+static bool
+recv_exact_until(SOCKET socket, char* data, std::size_t size, std::uint64_t deadline_ms, const char* phase) {
     std::size_t offset = 0;
     while (offset < size) {
         if (!socket_readable_until(socket, deadline_ms)) {
@@ -201,11 +206,13 @@ PortTunnelFrame read_tunnel_frame_for_phase(SOCKET socket, const char* phase, un
     const uint32_t data_len = read_u32_be(bytes, 12U);
     bytes.resize(PORT_TUNNEL_HEADER_LEN + meta_len + data_len);
     if (meta_len + data_len > 0U) {
-        recv_exact_until(socket,
-                         reinterpret_cast<char*>(bytes.data() + PORT_TUNNEL_HEADER_LEN),
-                         static_cast<std::size_t>(meta_len + data_len),
-                         deadline_ms,
-                         phase);
+        recv_exact_until(
+            socket,
+            reinterpret_cast<char*>(bytes.data() + PORT_TUNNEL_HEADER_LEN),
+            static_cast<std::size_t>(meta_len + data_len),
+            deadline_ms,
+            phase
+        );
     }
     return decode_port_tunnel_frame(bytes);
 }
@@ -214,10 +221,8 @@ PortTunnelFrame read_tunnel_frame(SOCKET socket) {
     return read_tunnel_frame_for_phase(socket, "read_tunnel_frame", kTunnelFrameReadTimeoutMs);
 }
 
-PortTunnelFrame expect_tunnel_frame(SOCKET socket,
-                                    PortTunnelFrameType expected_type,
-                                    const char* phase,
-                                    unsigned long timeout_ms) {
+PortTunnelFrame
+expect_tunnel_frame(SOCKET socket, PortTunnelFrameType expected_type, const char* phase, unsigned long timeout_ms) {
     const PortTunnelFrame frame = read_tunnel_frame_for_phase(socket, phase, timeout_ms);
     if (frame.type != expected_type) {
         std::ostringstream out;
@@ -309,7 +314,8 @@ static std::thread start_server_thread(TestDaemonState& state, UniqueSocket* ser
             UniqueSocket owned_socket(socket);
             handle_client(make_test_http_connection_context(state), std::move(owned_socket));
         },
-        server_socket->release());
+        server_socket->release()
+    );
 }
 
 void open_tunnel(TestDaemonState& state, UniqueSocket* client_socket, std::thread* server_thread) {
@@ -318,13 +324,15 @@ void open_tunnel(TestDaemonState& state, UniqueSocket* client_socket, std::threa
     client_socket->reset(sockets.second.release());
     *server_thread = start_server_thread(state, &server_socket);
 
-    send_all(client_socket->get(),
-             "POST /v1/port/tunnel HTTP/1.1\r\n"
-             "Connection: Upgrade\r\n"
-             "Upgrade: remote-exec-port-tunnel\r\n"
-             "X-Remote-Exec-Port-Tunnel-Version: 4\r\n"
-             "X-Request-Id: cpp-tunnel-req\r\n"
-             "\r\n");
+    send_all(
+        client_socket->get(),
+        "POST /v1/port/tunnel HTTP/1.1\r\n"
+        "Connection: Upgrade\r\n"
+        "Upgrade: remote-exec-port-tunnel\r\n"
+        "X-Remote-Exec-Port-Tunnel-Version: 4\r\n"
+        "X-Request-Id: cpp-tunnel-req\r\n"
+        "\r\n"
+    );
     const std::string response = read_http_head_from_socket(client_socket->get());
     TEST_ASSERT(response.find("HTTP/1.1 101 Switching Protocols\r\n") == 0);
     TEST_ASSERT(response.find("Connection: Upgrade\r\n") != std::string::npos);
@@ -359,33 +367,39 @@ PortTunnelFrame empty_frame(PortTunnelFrameType type, uint32_t stream_id) {
     return frame;
 }
 
-Json tunnel_open_meta(const std::string& role,
-                      const std::string& protocol,
-                      uint64_t generation,
-                      const std::string& resume_session_id) {
-    Json meta{{"forward_id", "fwd_cpp_test"},
-              {"role", role},
-              {"side", "cpp-test"},
-              {"generation", generation},
-              {"protocol", protocol}};
+Json tunnel_open_meta(
+    const std::string& role,
+    const std::string& protocol,
+    uint64_t generation,
+    const std::string& resume_session_id
+) {
+    Json meta{
+        {"forward_id", "fwd_cpp_test"},
+        {"role", role},
+        {"side", "cpp-test"},
+        {"generation", generation},
+        {"protocol", protocol}
+    };
     if (!resume_session_id.empty()) {
         meta["resume_session_id"] = resume_session_id;
     }
     return meta;
 }
 
-PortTunnelFrame open_v4_tunnel(TestDaemonState& state,
-                               UniqueSocket* client_socket,
-                               std::thread* server_thread,
-                               const std::string& role,
-                               const std::string& protocol,
-                               uint64_t generation,
-                               const std::string& resume_session_id) {
+PortTunnelFrame open_v4_tunnel(
+    TestDaemonState& state,
+    UniqueSocket* client_socket,
+    std::thread* server_thread,
+    const std::string& role,
+    const std::string& protocol,
+    uint64_t generation,
+    const std::string& resume_session_id
+) {
     open_tunnel(state, client_socket, server_thread);
-    send_tunnel_frame(client_socket->get(),
-                      json_frame(PortTunnelFrameType::TunnelOpen,
-                                 0U,
-                                 tunnel_open_meta(role, protocol, generation, resume_session_id)));
+    send_tunnel_frame(
+        client_socket->get(),
+        json_frame(PortTunnelFrameType::TunnelOpen, 0U, tunnel_open_meta(role, protocol, generation, resume_session_id))
+    );
     return expect_tunnel_frame(client_socket->get(), PortTunnelFrameType::TunnelReady, "open_v4_tunnel ready");
 }
 

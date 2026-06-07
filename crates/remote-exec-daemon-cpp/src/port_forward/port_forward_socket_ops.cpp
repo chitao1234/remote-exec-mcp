@@ -58,10 +58,11 @@ resolve_endpoint(const std::string& endpoint, const std::string& protocol, bool 
     const ParsedPortForwardEndpoint parsed = endpoint_to_host_port(endpoint);
 #ifdef REMOTE_EXEC_CPP_WINSOCK1
     if (parsed.host.find(':') != std::string::npos) {
-        throw PortForwardError(400,
-                               error_code,
-                               "IPv6 endpoint `" + endpoint +
-                                   "` is not supported by the Winsock 1 Windows build; use an IPv4 endpoint");
+        throw PortForwardError(
+            400,
+            error_code,
+            "IPv6 endpoint `" + endpoint + "` is not supported by the Winsock 1 Windows build; use an IPv4 endpoint"
+        );
     }
 #endif
 
@@ -151,12 +152,22 @@ SOCKET accept_port_forward_peer(SOCKET listener, sockaddr* peer_address, socklen
 }
 
 int recv_port_forward_datagram(
-    SOCKET socket, char* data, std::size_t size, sockaddr* peer_address, socklen_t* peer_len) {
+    SOCKET socket,
+    char* data,
+    std::size_t size,
+    sockaddr* peer_address,
+    socklen_t* peer_len
+) {
     return recvfrom_bounded(socket, data, size, peer_address, peer_len);
 }
 
 int send_port_forward_datagram(
-    SOCKET socket, const char* data, std::size_t size, const sockaddr* peer_address, socklen_t peer_len) {
+    SOCKET socket,
+    const char* data,
+    std::size_t size,
+    const sockaddr* peer_address,
+    socklen_t peer_len
+) {
     return sendto_bounded(socket, data, size, peer_address, peer_len);
 }
 

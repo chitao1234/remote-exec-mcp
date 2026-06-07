@@ -77,9 +77,11 @@ bool TransferStreamArchiveReader::read_next_data_frame_or_terminal() {
 
     for (;;) {
         unsigned char header[12];
-        read_transport_exact(reinterpret_cast<char*>(header),
-                             server_contract::TRANSFER_STREAM_FRAME_HEADER_LEN,
-                             "transfer stream frame header");
+        read_transport_exact(
+            reinterpret_cast<char*>(header),
+            server_contract::TRANSFER_STREAM_FRAME_HEADER_LEN,
+            "transfer stream frame header"
+        );
         const unsigned char frame_type = header[0];
         if (header[1] != 0U) {
             throw TransferFailure(TransferRpcCode::BadRequest, "transfer stream frame flags must be zero");
@@ -142,7 +144,8 @@ ChunkedTransferStreamArchiveSink::ChunkedTransferStreamArchiveSink(TransferStrea
 
 void ChunkedTransferStreamArchiveSink::send_preface() {
     chunks_->write_chunk(
-        std::string(server_contract::TRANSFER_STREAM_PREFACE, server_contract::TRANSFER_STREAM_PREFACE_LEN));
+        std::string(server_contract::TRANSFER_STREAM_PREFACE, server_contract::TRANSFER_STREAM_PREFACE_LEN)
+    );
 }
 
 void ChunkedTransferStreamArchiveSink::write(const char* data, std::size_t size) {

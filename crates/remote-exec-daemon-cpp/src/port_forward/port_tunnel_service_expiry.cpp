@@ -18,12 +18,14 @@ bool PortTunnelService::schedule_session_expiry(const std::shared_ptr<PortTunnel
     }
     expiry_sessions_.push_back(std::weak_ptr<PortTunnelSession>(session));
     expiry_cond_.signal();
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("session expiry scheduled")
-                    .quoted_field("session_id", session->session_id)
-                    .field("scheduled_sessions", expiry_sessions_.size())
-                    .str());
+    log_message(
+        LOG_DEBUG,
+        "port_tunnel",
+        LogMessageBuilder("session expiry scheduled")
+            .quoted_field("session_id", session->session_id)
+            .field("scheduled_sessions", expiry_sessions_.size())
+            .str()
+    );
     return true;
 }
 

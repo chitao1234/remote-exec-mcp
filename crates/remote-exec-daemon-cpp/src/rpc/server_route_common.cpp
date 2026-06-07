@@ -62,17 +62,23 @@ HttpResponse handle_image_rpc_route(const std::string& route_name, const RpcRout
         HttpResponse response;
         response.status = image_error_status(failure.code);
         write_rpc_error(
-            response, image_error_status(failure.code), image_error_code_name(failure.code), failure.message);
+            response,
+            image_error_status(failure.code),
+            image_error_code_name(failure.code),
+            failure.message
+        );
         return response;
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", route_name + " failed: " + message);
         HttpResponse response;
         response.status = image_error_status(ImageRpcCode::Internal);
-        write_rpc_error(response,
-                        image_error_status(ImageRpcCode::Internal),
-                        image_error_code_name(ImageRpcCode::Internal),
-                        message);
+        write_rpc_error(
+            response,
+            image_error_status(ImageRpcCode::Internal),
+            image_error_code_name(ImageRpcCode::Internal),
+            message
+        );
         return response;
     }
 }
@@ -154,12 +160,14 @@ HttpResponse make_rpc_error_response(int status, const std::string& code, const 
 
 HttpResponse handle_health(const HealthRouteContext& context) {
     HttpResponse response;
-    write_json(response,
-               Json{
-                   {"status", "ok"},
-                   {"daemon_version", REMOTE_EXEC_CPP_VERSION},
-                   {"daemon_instance_id", context.daemon_instance_id},
-               });
+    write_json(
+        response,
+        Json{
+            {"status", "ok"},
+            {"daemon_version", REMOTE_EXEC_CPP_VERSION},
+            {"daemon_instance_id", context.daemon_instance_id},
+        }
+    );
     return response;
 }
 
@@ -187,12 +195,14 @@ HttpResponse handle_patch_apply(const PatchRouteContext& context, const HttpRequ
         LogMessageBuilder summary("patch/apply");
         summary.field("patch_len", patch_text.size());
         log_message(LOG_INFO, "server", summary.str());
-        write_json(response,
-                   Json{
-                       {"output", result.output},
-                       {"daemon_instance_id", context.daemon_instance_id},
-                       {"updated_paths", result.updated_paths},
-                   });
+        write_json(
+            response,
+            Json{
+                {"output", result.output},
+                {"daemon_instance_id", context.daemon_instance_id},
+                {"updated_paths", result.updated_paths},
+            }
+        );
     });
 }
 

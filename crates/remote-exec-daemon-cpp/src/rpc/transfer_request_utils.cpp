@@ -61,8 +61,8 @@ TransferExportRequestSpec prepare_transfer_export_request(const TransferRouteCon
     return request;
 }
 
-TransferImportRequestSpec prepare_transfer_import_request(const TransferRouteContext& context,
-                                                          const HttpRequest& request) {
+TransferImportRequestSpec
+prepare_transfer_import_request(const TransferRouteContext& context, const HttpRequest& request) {
     TransferImportRequestSpec import_request;
     import_request.metadata = parse_transfer_import_metadata(request);
     require_uncompressed_transfer(import_request.metadata.compression);
@@ -79,12 +79,18 @@ void write_transfer_error_response(HttpResponse& response, const SandboxError& e
 
 void write_transfer_error_response(HttpResponse& response, const TransferFailure& failure) {
     write_rpc_error(
-        response, transfer_error_status(failure.code), transfer_error_code_name(failure.code), failure.message);
+        response,
+        transfer_error_status(failure.code),
+        transfer_error_code_name(failure.code),
+        failure.message
+    );
 }
 
 void write_transfer_internal_error_response(HttpResponse& response, const std::string& message) {
-    write_rpc_error(response,
-                    transfer_error_status(TransferRpcCode::Internal),
-                    transfer_error_code_name(TransferRpcCode::Internal),
-                    message);
+    write_rpc_error(
+        response,
+        transfer_error_status(TransferRpcCode::Internal),
+        transfer_error_code_name(TransferRpcCode::Internal),
+        message
+    );
 }

@@ -100,9 +100,10 @@ inline std::wstring wide_from_utf8(const std::string& value) {
             if ((first == 0xF0U && second < 0x90U) || (first == 0xF4U && second > 0x8FU)) {
                 throw std::runtime_error("invalid UTF-8");
             }
-            append_wide_code_point(&wide,
-                                   ((first & 0x07U) << 18U) | ((second & 0x3FU) << 12U) | ((third & 0x3FU) << 6U) |
-                                       (fourth & 0x3FU));
+            append_wide_code_point(
+                &wide,
+                ((first & 0x07U) << 18U) | ((second & 0x3FU) << 12U) | ((third & 0x3FU) << 6U) | (fourth & 0x3FU)
+            );
             index += 4U;
             continue;
         }

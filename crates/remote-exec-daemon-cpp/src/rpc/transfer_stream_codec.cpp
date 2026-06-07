@@ -108,8 +108,10 @@ void parse_complete_payload(const std::string& payload) {
     } catch (const TransferFailure&) {
         throw;
     } catch (const std::exception& ex) {
-        throw TransferFailure(TransferRpcCode::BadRequest,
-                              std::string("malformed transfer stream complete frame: ") + ex.what());
+        throw TransferFailure(
+            TransferRpcCode::BadRequest,
+            std::string("malformed transfer stream complete frame: ") + ex.what()
+        );
     }
 }
 
@@ -122,8 +124,10 @@ void throw_error_payload(const std::string& payload) {
     } catch (const TransferFailure&) {
         throw;
     } catch (const std::exception& ex) {
-        throw TransferFailure(TransferRpcCode::BadRequest,
-                              std::string("malformed transfer stream error frame: ") + ex.what());
+        throw TransferFailure(
+            TransferRpcCode::BadRequest,
+            std::string("malformed transfer stream error frame: ") + ex.what()
+        );
     }
 }
 

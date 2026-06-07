@@ -41,15 +41,21 @@ struct YieldTimeOperationConfig {
 
 struct YieldTimeConfig {
     YieldTimeConfig()
-        : exec_command(DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS,
-                       DEFAULT_YIELD_TIME_EXEC_COMMAND_MAX_MS,
-                       DEFAULT_YIELD_TIME_EXEC_COMMAND_MIN_MS),
-          write_stdin_poll(DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_DEFAULT_MS,
-                           DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MAX_MS,
-                           DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MIN_MS),
-          write_stdin_input(DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_DEFAULT_MS,
-                            DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MAX_MS,
-                            DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MIN_MS) {}
+        : exec_command(
+              DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS,
+              DEFAULT_YIELD_TIME_EXEC_COMMAND_MAX_MS,
+              DEFAULT_YIELD_TIME_EXEC_COMMAND_MIN_MS
+          ),
+          write_stdin_poll(
+              DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_DEFAULT_MS,
+              DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MAX_MS,
+              DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MIN_MS
+          ),
+          write_stdin_input(
+              DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_DEFAULT_MS,
+              DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MAX_MS,
+              DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MIN_MS
+          ) {}
 
     YieldTimeOperationConfig exec_command;
     YieldTimeOperationConfig write_stdin_poll;

@@ -42,9 +42,11 @@ struct PortTunnelSessionTeardown {
 };
 
 struct PortTunnelSession {
-    PortTunnelSession(const std::string& session_id_value,
-                      const std::shared_ptr<PortTunnelService>& service_value,
-                      PortTunnelBudgetLease retained_budget)
+    PortTunnelSession(
+        const std::string& session_id_value,
+        const std::shared_ptr<PortTunnelService>& service_value,
+        PortTunnelBudgetLease retained_budget
+    )
         : session_id(session_id_value), service(service_value), state(PortTunnelSessionState::New),
           resume_deadline_ms(0ULL), generation(0ULL), retained_session_budget(std::move(retained_budget)),
           next_daemon_stream_id(2U) {}
@@ -55,9 +57,11 @@ struct PortTunnelSession {
     // workers without holding the session mutex. Remaining helper close paths in
     // port_tunnel_session.cpp only delegate to resource-owned close() methods.
     bool attach_new(const std::shared_ptr<PortTunnelConnection>& connection, std::uint64_t generation_value);
-    PortTunnelSessionResumeResult attach_resumed(const std::shared_ptr<PortTunnelConnection>& connection,
-                                                 std::uint64_t generation_value,
-                                                 std::uint64_t now_ms);
+    PortTunnelSessionResumeResult attach_resumed(
+        const std::shared_ptr<PortTunnelConnection>& connection,
+        std::uint64_t generation_value,
+        std::uint64_t now_ms
+    );
     std::shared_ptr<PortTunnelSessionAttachment> detach_until(std::uint64_t deadline_ms, bool* detached);
     PortTunnelSessionTeardown close_terminal(bool mark_expired);
     PortTunnelSessionTeardown expire_if_due(std::uint64_t now_ms);
@@ -65,13 +69,15 @@ struct PortTunnelSession {
     std::shared_ptr<PortTunnelSessionAttachment> current_attachment();
     std::shared_ptr<PortTunnelConnection>
     connection_for_attachment(const std::shared_ptr<PortTunnelSessionAttachment>& expected_attachment);
-    bool insert_tcp_stream_if_attached(const std::shared_ptr<PortTunnelSessionAttachment>& expected_attachment,
-                                       const std::shared_ptr<TunnelTcpStream>& stream,
-                                       std::uint32_t* stream_id);
-    SessionRetainedInstallResult install_tcp_listener(uint32_t stream_id,
-                                                      const std::shared_ptr<RetainedTcpListener>& listener);
-    SessionRetainedInstallResult install_udp_bind(uint32_t stream_id,
-                                                  const std::shared_ptr<TunnelUdpSocket>& socket_value);
+    bool insert_tcp_stream_if_attached(
+        const std::shared_ptr<PortTunnelSessionAttachment>& expected_attachment,
+        const std::shared_ptr<TunnelTcpStream>& stream,
+        std::uint32_t* stream_id
+    );
+    SessionRetainedInstallResult
+    install_tcp_listener(uint32_t stream_id, const std::shared_ptr<RetainedTcpListener>& listener);
+    SessionRetainedInstallResult
+    install_udp_bind(uint32_t stream_id, const std::shared_ptr<TunnelUdpSocket>& socket_value);
     std::shared_ptr<TunnelUdpSocket> udp_bind_for(uint32_t stream_id);
     PortTunnelRetainedResource remove_retained_resource(uint32_t stream_id, bool* removed);
     std::shared_ptr<PortTunnelSessionAttachment> wait_for_attachment(unsigned long wait_ms);

@@ -217,7 +217,10 @@ bool wait_posix_child_exit(pid_t pid, int* status) {
         }
         g_registered.erase(pid);
         log_message(
-            LOG_WARN, "posix_child_reaper", "lost child status during blocking wait; assuming zero exit status");
+            LOG_WARN,
+            "posix_child_reaper",
+            "lost child status during blocking wait; assuming zero exit status"
+        );
         *status = 0;
         return true;
     }

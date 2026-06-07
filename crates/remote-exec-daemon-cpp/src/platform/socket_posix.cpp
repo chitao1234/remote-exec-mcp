@@ -149,11 +149,13 @@ NetworkSession::NetworkSession() {
 NetworkSession::~NetworkSession() {
 }
 
-bool resolve_socket_addresses(const char* node,
-                              const char* service,
-                              const SocketAddressQuery& query,
-                              std::vector<SocketAddress>* addresses,
-                              std::string* error) {
+bool resolve_socket_addresses(
+    const char* node,
+    const char* service,
+    const SocketAddressQuery& query,
+    std::vector<SocketAddress>* addresses,
+    std::string* error
+) {
     addresses->clear();
 
     addrinfo hints;
@@ -199,13 +201,15 @@ std::string numeric_socket_address(const sockaddr* address, socklen_t address_le
     char host[NI_MAXHOST];
     char service[NI_MAXSERV];
     const int result = posix_eintr::retry_eai_system([&]() {
-        return getnameinfo(address,
-                           address_len,
-                           host,
-                           static_cast<socklen_t>(sizeof(host)),
-                           service,
-                           static_cast<socklen_t>(sizeof(service)),
-                           NI_NUMERICHOST | NI_NUMERICSERV);
+        return getnameinfo(
+            address,
+            address_len,
+            host,
+            static_cast<socklen_t>(sizeof(host)),
+            service,
+            static_cast<socklen_t>(sizeof(service)),
+            NI_NUMERICHOST | NI_NUMERICSERV
+        );
     });
     if (result != 0) {
         return "unknown:0";
@@ -269,8 +273,9 @@ int wait_socket_writable(SOCKET socket, unsigned long timeout_ms) {
 
 int socket_error_option(SOCKET socket, int* socket_error) {
     socklen_t socket_error_len = static_cast<socklen_t>(sizeof(*socket_error));
-    return posix_eintr::retry<int>(
-        [&]() { return getsockopt(socket, SOL_SOCKET, SO_ERROR, socket_error, &socket_error_len); });
+    return posix_eintr::retry<int>([&]() {
+        return getsockopt(socket, SOL_SOCKET, SO_ERROR, socket_error, &socket_error_len);
+    });
 }
 
 int set_socket_reuseaddr(SOCKET socket) {

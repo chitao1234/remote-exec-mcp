@@ -29,8 +29,8 @@ std::string
 resolve_authorized_transfer_path(const PathResolutionContext& context, const std::string& path, SandboxAccess access);
 TransferPathAuthorizer make_transfer_read_authorizer(const PathResolutionContext& context);
 TransferExportRequestSpec prepare_transfer_export_request(const TransferRouteContext& context, const Json& body);
-TransferImportRequestSpec prepare_transfer_import_request(const TransferRouteContext& context,
-                                                          const HttpRequest& request);
+TransferImportRequestSpec
+prepare_transfer_import_request(const TransferRouteContext& context, const HttpRequest& request);
 void write_transfer_error_response(HttpResponse& response, const SandboxError& ex);
 void write_transfer_error_response(HttpResponse& response, const TransferFailure& failure);
 void write_transfer_internal_error_response(HttpResponse& response, const std::string& message);

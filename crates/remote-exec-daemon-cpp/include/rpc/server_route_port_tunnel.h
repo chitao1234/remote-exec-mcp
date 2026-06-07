@@ -16,7 +16,9 @@ struct PortTunnelUpgradeRoute {
     std::map<std::string, std::string> response_headers;
 };
 
-HttpResponse prepare_port_tunnel_route_upgrade(const PortTunnelRouteContext& context,
-                                               const HttpRequest& request,
-                                               PortTunnelUpgradeRoute* upgrade);
+HttpResponse prepare_port_tunnel_route_upgrade(
+    const PortTunnelRouteContext& context,
+    const HttpRequest& request,
+    PortTunnelUpgradeRoute* upgrade
+);
 void run_port_tunnel_route_upgrade(const PortTunnelUpgradeRoute& upgrade, SOCKET client);

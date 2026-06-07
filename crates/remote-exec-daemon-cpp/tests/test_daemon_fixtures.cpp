@@ -65,9 +65,11 @@ DaemonConfig make_test_daemon_config(const test_fs::path& root) {
     return config;
 }
 
-void initialize_test_daemon_state_with_port_forward_limits(TestDaemonState& state,
-                                                           const test_fs::path& root,
-                                                           const PortForwardLimitConfig& limits) {
+void initialize_test_daemon_state_with_port_forward_limits(
+    TestDaemonState& state,
+    const test_fs::path& root,
+    const PortForwardLimitConfig& limits
+) {
     state.config = make_test_daemon_config(root);
     state.config.port_forward_limits = limits;
     state.metadata.daemon_instance_id = "test-instance";
@@ -77,9 +79,11 @@ void initialize_test_daemon_state_with_port_forward_limits(TestDaemonState& stat
     state.services.port_tunnel = create_port_tunnel_service(limits);
 }
 
-void initialize_test_daemon_state_with_worker_limit(TestDaemonState& state,
-                                                    const test_fs::path& root,
-                                                    unsigned long max_workers) {
+void initialize_test_daemon_state_with_worker_limit(
+    TestDaemonState& state,
+    const test_fs::path& root,
+    unsigned long max_workers
+) {
     PortForwardLimitConfig limits;
     limits.max_worker_threads = max_workers;
     initialize_test_daemon_state_with_port_forward_limits(state, root, limits);

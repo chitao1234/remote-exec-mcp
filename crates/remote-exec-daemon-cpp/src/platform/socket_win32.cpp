@@ -55,7 +55,12 @@ bool looks_like_ipv6_literal(const char* node) {
 }
 
 bool append_ipv4_address(
-    unsigned long ipv4, unsigned short port, int socktype, int protocol, std::vector<SocketAddress>* addresses) {
+    unsigned long ipv4,
+    unsigned short port,
+    int socktype,
+    int protocol,
+    std::vector<SocketAddress>* addresses
+) {
     SocketAddress address;
     address.family = AF_INET;
     address.socktype = socktype;
@@ -73,23 +78,27 @@ std::string numeric_ipv4_socket_address(const sockaddr* address) {
     const sockaddr_in* ipv4 = reinterpret_cast<const sockaddr_in*>(address);
     const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&ipv4->sin_addr.s_addr);
     char buffer[64];
-    std::snprintf(buffer,
-                  sizeof(buffer),
-                  "%u.%u.%u.%u:%u",
-                  static_cast<unsigned int>(bytes[0]),
-                  static_cast<unsigned int>(bytes[1]),
-                  static_cast<unsigned int>(bytes[2]),
-                  static_cast<unsigned int>(bytes[3]),
-                  static_cast<unsigned int>(ntohs(ipv4->sin_port)));
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "%u.%u.%u.%u:%u",
+        static_cast<unsigned int>(bytes[0]),
+        static_cast<unsigned int>(bytes[1]),
+        static_cast<unsigned int>(bytes[2]),
+        static_cast<unsigned int>(bytes[3]),
+        static_cast<unsigned int>(ntohs(ipv4->sin_port))
+    );
     return buffer;
 }
 
-bool resolve_legacy_ipv4_addresses(const char* backend_name,
-                                   const char* node,
-                                   unsigned short port,
-                                   const SocketAddressQuery& query,
-                                   std::vector<SocketAddress>* addresses,
-                                   std::string* error) {
+bool resolve_legacy_ipv4_addresses(
+    const char* backend_name,
+    const char* node,
+    unsigned short port,
+    const SocketAddressQuery& query,
+    std::vector<SocketAddress>* addresses,
+    std::string* error
+) {
     if (query.family != AF_UNSPEC && query.family != AF_INET) {
         if (error != nullptr) {
             *error = std::string(backend_name) + " only supports IPv4 addresses";
@@ -173,12 +182,14 @@ Winsock2AddressApi load_winsock2_address_api() {
     return api;
 }
 
-bool resolve_winsock2_addresses(const char* node,
-                                const char* service,
-                                unsigned short port,
-                                const SocketAddressQuery& query,
-                                std::vector<SocketAddress>* addresses,
-                                std::string* error) {
+bool resolve_winsock2_addresses(
+    const char* node,
+    const char* service,
+    unsigned short port,
+    const SocketAddressQuery& query,
+    std::vector<SocketAddress>* addresses,
+    std::string* error
+) {
     const Winsock2AddressApi api = load_winsock2_address_api();
     if (api.getaddrinfo == nullptr || api.freeaddrinfo == nullptr) {
         return resolve_legacy_ipv4_addresses("Winsock 2 legacy resolver", node, port, query, addresses, error);
@@ -296,11 +307,13 @@ NetworkSession::~NetworkSession() {
     WSACleanup();
 }
 
-bool resolve_socket_addresses(const char* node,
-                              const char* service,
-                              const SocketAddressQuery& query,
-                              std::vector<SocketAddress>* addresses,
-                              std::string* error) {
+bool resolve_socket_addresses(
+    const char* node,
+    const char* service,
+    const SocketAddressQuery& query,
+    std::vector<SocketAddress>* addresses,
+    std::string* error
+) {
     addresses->clear();
 
     unsigned short port = 0;
@@ -336,13 +349,15 @@ std::string numeric_socket_address(const sockaddr* address, socklen_t address_le
 
     char host[NI_MAXHOST];
     char service[NI_MAXSERV];
-    const int result = api.getnameinfo(address,
-                                       address_len,
-                                       host,
-                                       static_cast<DWORD>(sizeof(host)),
-                                       service,
-                                       static_cast<DWORD>(sizeof(service)),
-                                       NI_NUMERICHOST | NI_NUMERICSERV);
+    const int result = api.getnameinfo(
+        address,
+        address_len,
+        host,
+        static_cast<DWORD>(sizeof(host)),
+        service,
+        static_cast<DWORD>(sizeof(service)),
+        NI_NUMERICHOST | NI_NUMERICSERV
+    );
     if (result != 0) {
         return "unknown:0";
     }

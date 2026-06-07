@@ -31,8 +31,8 @@ bool is_utf8_continuation_byte(unsigned char byte) {
 
 std::size_t floor_char_boundary(const std::string& output, std::size_t max_bytes) {
     std::size_t index = std::min(max_bytes, output.size());
-    while (index > 0U && index < output.size() &&
-           is_utf8_continuation_byte(static_cast<unsigned char>(output[index]))) {
+    while (index > 0U && index < output.size() && is_utf8_continuation_byte(static_cast<unsigned char>(output[index]))
+    ) {
         --index;
     }
     return index;

@@ -18,7 +18,8 @@ static std::size_t response_content_length(const std::string& header_block) {
     const std::size_t value_end = header_block.find("\r\n", value_start);
     TEST_ASSERT(value_end != std::string::npos);
     return static_cast<std::size_t>(
-        std::strtoull(header_block.substr(value_start, value_end - value_start).c_str(), NULL, 10));
+        std::strtoull(header_block.substr(value_start, value_end - value_start).c_str(), NULL, 10)
+    );
 }
 
 static std::string read_content_length_response_from_socket(SOCKET socket) {
@@ -81,9 +82,8 @@ static std::string response_body(const std::string& response) {
     return response.substr(header_end + 4);
 }
 
-static void assert_json_response_code(const std::string& response,
-                                      const std::string& status_line,
-                                      const std::string& code) {
+static void
+assert_json_response_code(const std::string& response, const std::string& status_line, const std::string& code) {
     TEST_ASSERT(response.find(status_line) == 0);
     TEST_ASSERT(Json::parse(response_body(response)).at("code").get<std::string>() == code);
 }
@@ -114,7 +114,12 @@ static std::string decode_chunked_response_body(const std::string& response) {
 static std::string octal_field(std::size_t width, std::uint64_t value) {
     char buffer[64];
     std::snprintf(
-        buffer, sizeof(buffer), "%0*llo", static_cast<int>(width - 1), static_cast<unsigned long long>(value));
+        buffer,
+        sizeof(buffer),
+        "%0*llo",
+        static_cast<int>(width - 1),
+        static_cast<unsigned long long>(value)
+    );
     std::string field(width, '\0');
     const std::string digits(buffer);
     const std::size_t used = std::min(width - 1, digits.size());
@@ -325,7 +330,8 @@ static void assert_persistent_json_requests_reuse_socket(TestHttpConnectionHarne
             UniqueSocket owned_socket(socket);
             handle_client(harness, std::move(owned_socket));
         },
-        server_socket.release());
+        server_socket.release()
+    );
 
     send_all(client_socket.get(), json_post_request("/v1/health", Json::object()));
     const std::string first_response = read_content_length_response_from_socket(client_socket.get());
@@ -333,8 +339,10 @@ static void assert_persistent_json_requests_reuse_socket(TestHttpConnectionHarne
     TEST_ASSERT(first_response.find("Connection: close\r\n") == std::string::npos);
     TEST_ASSERT(Json::parse(response_body(first_response)).at("status").get<std::string>() == "ok");
 
-    send_all(client_socket.get(),
-             json_post_request_with_extra_headers("/v1/target-info", Json::object(), "Connection: close\r\n"));
+    send_all(
+        client_socket.get(),
+        json_post_request_with_extra_headers("/v1/target-info", Json::object(), "Connection: close\r\n")
+    );
     const std::string second_response = read_content_length_response_from_socket(client_socket.get());
     TEST_ASSERT(second_response.find("HTTP/1.1 200 OK\r\n") == 0);
     TEST_ASSERT(second_response.find("Connection: close\r\n") == std::string::npos);
@@ -351,16 +359,16 @@ static void assert_http_auth_and_rejection_paths(TestHttpConnectionHarness& harn
     assert_json_response_code(missing_auth_response, "HTTP/1.1 401 Unauthorized\r\n", "unauthorized");
     TEST_ASSERT(missing_auth_response.find("WWW-Authenticate: Bearer\r\n") != std::string::npos);
 
-    const std::string wrong_auth_response =
-        run_single_request(harness,
-                           json_post_request_with_extra_headers(
-                               "/v1/health", Json::object(), "Authorization: Bearer wrong-secret\r\n"));
+    const std::string wrong_auth_response = run_single_request(
+        harness,
+        json_post_request_with_extra_headers("/v1/health", Json::object(), "Authorization: Bearer wrong-secret\r\n")
+    );
     assert_json_response_code(wrong_auth_response, "HTTP/1.1 401 Unauthorized\r\n", "unauthorized");
 
-    const std::string ok_response =
-        run_single_request(harness,
-                           json_post_request_with_extra_headers(
-                               "/v1/health", Json::object(), "Authorization: Bearer shared-secret\r\n"));
+    const std::string ok_response = run_single_request(
+        harness,
+        json_post_request_with_extra_headers("/v1/health", Json::object(), "Authorization: Bearer shared-secret\r\n")
+    );
     TEST_ASSERT(ok_response.find("HTTP/1.1 200 OK\r\n") == 0);
     TEST_ASSERT(Json::parse(response_body(ok_response)).at("status").get<std::string>() == "ok");
 
@@ -370,7 +378,8 @@ static void assert_http_auth_and_rejection_paths(TestHttpConnectionHarness& harn
         unauthenticated,
         "GET /v1/health HTTP/1.1\r\n"
         "Content-Length: 0\r\n"
-        "\r\n");
+        "\r\n"
+    );
     assert_json_response_code(get_response, "HTTP/1.1 405 Method Not Allowed\r\n", "method_not_allowed");
 
     const std::string not_found_response =
@@ -400,7 +409,8 @@ static void assert_http_request_limits_through_connection_path(const fs::path& r
         "POST /v1/health HTTP/1.1\r\n"
         "Content-Length: 5\r\n"
         "\r\n"
-        "12345");
+        "12345"
+    );
     assert_json_response_code(content_length_limit_response, "HTTP/1.1 400 Bad Request\r\n", "bad_request");
     TEST_ASSERT(response_body(content_length_limit_response).find("http request body too large") != std::string::npos);
 
@@ -416,7 +426,8 @@ static void assert_http_request_limits_through_connection_path(const fs::path& r
         "5\r\n"
         "12345\r\n"
         "0\r\n"
-        "\r\n");
+        "\r\n"
+    );
     assert_json_response_code(chunked_limit_response, "HTTP/1.1 400 Bad Request\r\n", "bad_request");
     TEST_ASSERT(response_body(chunked_limit_response).find("http request body too large") != std::string::npos);
 }
@@ -482,7 +493,8 @@ static void assert_streaming_import_failure_closes_connection_with_unread_body(c
             UniqueSocket owned_socket(socket);
             handle_client(harness, std::move(owned_socket));
         },
-        server_socket.release());
+        server_socket.release()
+    );
 
     send_all(client_socket.get(), request_head.str());
 
@@ -546,8 +558,10 @@ void assert_http_streaming_routes(TestHttpConnectionHarness& harness, const fs::
     TEST_ASSERT(export_response.find("Connection: close\r\n") == std::string::npos);
     TEST_ASSERT(export_response.find("Content-Length:") == std::string::npos);
     TEST_ASSERT(export_response.find("x-remote-exec-source-type: file\r\n") != std::string::npos);
-    TEST_ASSERT(single_file_tar_body(decode_framed_transfer_archive(decode_chunked_response_body(export_response))) ==
-                "streamed export");
+    TEST_ASSERT(
+        single_file_tar_body(decode_framed_transfer_archive(decode_chunked_response_body(export_response))) ==
+        "streamed export"
+    );
 
     const fs::path sandbox_root = root / "sandbox";
     const fs::path read_allowed = sandbox_root / "read";
@@ -599,9 +613,11 @@ void assert_http_streaming_routes(TestHttpConnectionHarness& harness, const fs::
     const std::string recursive_deny_response = run_single_request(recursive_deny, recursive_deny_request.str());
     TEST_ASSERT(recursive_deny_response.find("HTTP/1.1 200 OK\r\n") == 0);
     TEST_ASSERT(recursive_deny_response.find("Transfer-Encoding: chunked\r\n") != std::string::npos);
-    TEST_ASSERT(decode_framed_transfer_error(decode_chunked_response_body(recursive_deny_response))
-                    .at("code")
-                    .get<std::string>() == "sandbox_denied");
+    TEST_ASSERT(
+        decode_framed_transfer_error(decode_chunked_response_body(recursive_deny_response))
+            .at("code")
+            .get<std::string>() == "sandbox_denied"
+    );
 
     std::ostringstream denied_import_request;
     denied_import_request << "POST /v1/transfer/import HTTP/1.1\r\n"

@@ -163,8 +163,10 @@ std::shared_ptr<TunnelUdpSocket> ConnectionLocalStreams::remove_udp(uint32_t str
     return socket_value;
 }
 
-void ConnectionLocalStreams::drain(std::vector<std::shared_ptr<TunnelTcpStream>>* tcp_streams,
-                                   std::vector<std::shared_ptr<TunnelUdpSocket>>* udp_sockets) {
+void ConnectionLocalStreams::drain(
+    std::vector<std::shared_ptr<TunnelTcpStream>>* tcp_streams,
+    std::vector<std::shared_ptr<TunnelUdpSocket>>* udp_sockets
+) {
     BasicLockGuard lock(mutex_);
     for (std::map<uint32_t, std::shared_ptr<TunnelTcpStream>>::iterator it = tcp_streams_.begin();
          it != tcp_streams_.end();

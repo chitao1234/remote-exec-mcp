@@ -62,19 +62,23 @@ public:
     // after process launch succeeds; write_stdin() may retire and remove a
     // completed session. Destruction retires all remaining sessions, terminates
     // their processes, and joins output pump threads outside the store mutex.
-    ExecSessionResult start_command(const std::string& target,
-                                    const ExecStartRequestSpec& request,
-                                    const YieldTimeConfig& yield_time,
-                                    unsigned long max_open_sessions);
-    ExecSessionResult write_stdin(const std::string& daemon_session_id,
-                                  const std::string& chars,
-                                  bool has_yield_time_ms,
-                                  unsigned long yield_time_ms,
-                                  unsigned long max_output_tokens,
-                                  const YieldTimeConfig& yield_time,
-                                  bool has_pty_size,
-                                  unsigned short pty_rows,
-                                  unsigned short pty_cols);
+    ExecSessionResult start_command(
+        const std::string& target,
+        const ExecStartRequestSpec& request,
+        const YieldTimeConfig& yield_time,
+        unsigned long max_open_sessions
+    );
+    ExecSessionResult write_stdin(
+        const std::string& daemon_session_id,
+        const std::string& chars,
+        bool has_yield_time_ms,
+        unsigned long yield_time_ms,
+        unsigned long max_output_tokens,
+        const YieldTimeConfig& yield_time,
+        bool has_pty_size,
+        unsigned short pty_rows,
+        unsigned short pty_cols
+    );
 
 private:
     bool reserve_pending_start(unsigned long max_open_sessions);

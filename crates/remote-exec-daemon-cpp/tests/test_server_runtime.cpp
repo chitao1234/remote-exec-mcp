@@ -115,11 +115,13 @@ static void assert_health_request(ServerRuntime& runtime, unsigned short port) {
     UniqueSocket client(connect_client(port));
     TEST_ASSERT(wait_for_active_connections(runtime.connection_manager(), 1UL, TEST_TIMEOUT_MS));
 
-    send_all(client.get(),
-             "POST /v1/health HTTP/1.1\r\n"
-             "Connection: close\r\n"
-             "Content-Length: 0\r\n"
-             "\r\n");
+    send_all(
+        client.get(),
+        "POST /v1/health HTTP/1.1\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n"
+    );
 
     const std::string response = read_all_from_socket(client.get());
     TEST_ASSERT(response.find("HTTP/1.1 200 OK\r\n") == 0);
@@ -151,11 +153,13 @@ static void assert_runtime_shutdown_with_blocked_request_body(const DaemonConfig
     UniqueSocket client(connect_client(port));
     TEST_ASSERT(wait_for_active_connections(runtime->connection_manager(), 1UL, TEST_TIMEOUT_MS));
 
-    send_all(client.get(),
-             "POST /v1/health HTTP/1.1\r\n"
-             "Content-Length: 100\r\n"
-             "\r\n"
-             "partial-body");
+    send_all(
+        client.get(),
+        "POST /v1/health HTTP/1.1\r\n"
+        "Content-Length: 100\r\n"
+        "\r\n"
+        "partial-body"
+    );
 
     request_shutdown_and_join_quickly(*runtime);
     TEST_ASSERT(runtime->connection_manager().active_count() == 0UL);
@@ -167,13 +171,15 @@ static void assert_runtime_shutdown_with_upgraded_tunnel_connection(const Daemon
     UniqueSocket client(connect_client(port));
     TEST_ASSERT(wait_for_active_connections(runtime->connection_manager(), 1UL, TEST_TIMEOUT_MS));
 
-    send_all(client.get(),
-             "POST /v1/port/tunnel HTTP/1.1\r\n"
-             "Connection: Upgrade\r\n"
-             "Upgrade: remote-exec-port-tunnel\r\n"
-             "X-Remote-Exec-Port-Tunnel-Version: 4\r\n"
-             "Content-Length: 0\r\n"
-             "\r\n");
+    send_all(
+        client.get(),
+        "POST /v1/port/tunnel HTTP/1.1\r\n"
+        "Connection: Upgrade\r\n"
+        "Upgrade: remote-exec-port-tunnel\r\n"
+        "X-Remote-Exec-Port-Tunnel-Version: 4\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n"
+    );
     const std::string response = read_http_head_from_socket(client.get());
     TEST_ASSERT(response.find("HTTP/1.1 101 Switching Protocols\r\n") == 0);
 

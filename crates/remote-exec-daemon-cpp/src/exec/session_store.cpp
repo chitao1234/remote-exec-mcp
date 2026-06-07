@@ -14,10 +14,12 @@
 #include "rpc/exec_request_utils.h"
 #include "session_pump_internal.h"
 
-void erase_session_if_current(BasicMutex& mutex,
-                              std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
-                              const std::string& daemon_session_id,
-                              const std::shared_ptr<LiveSession>& session);
+void erase_session_if_current(
+    BasicMutex& mutex,
+    std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
+    const std::string& daemon_session_id,
+    const std::shared_ptr<LiveSession>& session
+);
 
 namespace {
 
@@ -71,19 +73,22 @@ void add_drain_stop_reason(LogMessageBuilder* message, SessionOutputDrainStopRea
 
 std::vector<ExecSessionWarning> session_limit_warning(const std::string& target, unsigned long open_sessions) {
     std::vector<ExecSessionWarning> warnings;
-    warnings.push_back(ExecSessionWarning("exec_session_limit_approaching",
-                                          "Target `" + target + "` now has " + std::to_string(open_sessions) +
-                                              " open exec sessions."));
+    warnings.push_back(ExecSessionWarning(
+        "exec_session_limit_approaching",
+        "Target `" + target + "` now has " + std::to_string(open_sessions) + " open exec sessions."
+    ));
     return warnings;
 }
 
-ExecSessionResult make_exec_session_result(const char* daemon_session_id,
-                                           bool running,
-                                           std::uint64_t started_at_ms,
-                                           bool has_exit_code,
-                                           int exit_code,
-                                           const std::string& output,
-                                           const std::vector<ExecSessionWarning>& warnings) {
+ExecSessionResult make_exec_session_result(
+    const char* daemon_session_id,
+    bool running,
+    std::uint64_t started_at_ms,
+    bool has_exit_code,
+    int exit_code,
+    const std::string& output,
+    const std::vector<ExecSessionWarning>& warnings
+) {
     ExecSessionResult result;
     if (daemon_session_id != nullptr) {
         result.daemon_session_id = daemon_session_id;
@@ -116,7 +121,12 @@ std::size_t protected_recent_count(std::size_t open_sessions) {
 }
 
 std::shared_ptr<LiveSession> launch_live_session(
-    const std::string& command, const std::string& workdir, const std::string& shell, bool login, bool tty) {
+    const std::string& command,
+    const std::string& workdir,
+    const std::string& shell,
+    bool login,
+    bool tty
+) {
     std::shared_ptr<LiveSession> session(new LiveSession());
     session->id = make_exec_session_id();
     session->process = ProcessSession::launch(command, workdir, shell, login, tty);
@@ -139,9 +149,11 @@ SessionSnapshot session_snapshot_locked(const LiveSession& session) {
     return snapshot;
 }
 
-PollResult wait_for_session_activity(const std::shared_ptr<LiveSession>& session,
-                                     unsigned long timeout_ms,
-                                     unsigned long max_output_tokens) {
+PollResult wait_for_session_activity(
+    const std::shared_ptr<LiveSession>& session,
+    unsigned long timeout_ms,
+    unsigned long max_output_tokens
+) {
     platform::MonotonicDeadline deadline(timeout_ms);
     BasicLockGuard session_lock(session->mutex_);
     std::string output;
@@ -170,7 +182,11 @@ PollResult wait_for_session_activity(const std::shared_ptr<LiveSession>& session
         }
 
         wait_for_generation_change_locked(
-            session.get(), seen_generation, deadline.deadline_ms(), EXIT_POLL_INTERVAL_MS);
+            session.get(),
+            seen_generation,
+            deadline.deadline_ms(),
+            EXIT_POLL_INTERVAL_MS
+        );
     }
 }
 
@@ -189,20 +205,24 @@ void retire_and_join_session(const std::shared_ptr<LiveSession>& session) {
     join_session_pump(session.get());
 }
 
-void retire_remove_and_join_session(BasicMutex& mutex,
-                                    std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
-                                    const std::string& daemon_session_id,
-                                    const std::shared_ptr<LiveSession>& session) {
+void retire_remove_and_join_session(
+    BasicMutex& mutex,
+    std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
+    const std::string& daemon_session_id,
+    const std::shared_ptr<LiveSession>& session
+) {
     retire_session(session);
     erase_session_if_current(mutex, sessions, daemon_session_id, session);
     join_session_pump(session.get());
 }
 
-void apply_write_stdin_request_locked(LiveSession* session,
-                                      const std::string& chars,
-                                      bool has_pty_size,
-                                      unsigned short pty_rows,
-                                      unsigned short pty_cols) {
+void apply_write_stdin_request_locked(
+    LiveSession* session,
+    const std::string& chars,
+    bool has_pty_size,
+    unsigned short pty_rows,
+    unsigned short pty_cols
+) {
     if (has_pty_size) {
         if (pty_rows == 0U || pty_cols == 0U) {
             throw ProcessPtyResizeUnsupportedError("PTY rows and cols must be greater than zero");
@@ -224,15 +244,24 @@ void apply_write_stdin_request_locked(LiveSession* session,
     }
 }
 
-ExecSessionResult finalize_completed_write_stdin(BasicMutex& mutex,
-                                                 std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
-                                                 unsigned long* pending_starts,
-                                                 const std::string& daemon_session_id,
-                                                 const std::shared_ptr<LiveSession>& session,
-                                                 const PollResult& poll_result) {
+ExecSessionResult finalize_completed_write_stdin(
+    BasicMutex& mutex,
+    std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
+    unsigned long* pending_starts,
+    const std::string& daemon_session_id,
+    const std::shared_ptr<LiveSession>& session,
+    const PollResult& poll_result
+) {
     retire_remove_and_join_session(mutex, sessions, daemon_session_id, session);
     ExecSessionResult result = make_exec_session_result(
-        nullptr, false, session->started_at_ms, true, poll_result.exit_code, poll_result.output, empty_exec_warnings());
+        nullptr,
+        false,
+        session->started_at_ms,
+        true,
+        poll_result.exit_code,
+        poll_result.output,
+        empty_exec_warnings()
+    );
     unsigned long open_sessions = 0UL;
     {
         BasicLockGuard lock(mutex);
@@ -317,10 +346,12 @@ private:
     PendingStartReservation& operator=(const PendingStartReservation&);
 };
 
-void erase_session_if_current(BasicMutex& mutex,
-                              std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
-                              const std::string& daemon_session_id,
-                              const std::shared_ptr<LiveSession>& session) {
+void erase_session_if_current(
+    BasicMutex& mutex,
+    std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
+    const std::string& daemon_session_id,
+    const std::shared_ptr<LiveSession>& session
+) {
     BasicLockGuard lock(mutex);
     std::map<std::string, std::shared_ptr<LiveSession>>::iterator it = sessions.find(daemon_session_id);
     if (it != sessions.end() && it->second == session) {
@@ -328,11 +359,13 @@ void erase_session_if_current(BasicMutex& mutex,
     }
 }
 
-bool remove_session_if_current(BasicMutex& mutex,
-                               std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
-                               const std::string& daemon_session_id,
-                               const std::shared_ptr<LiveSession>& session,
-                               std::shared_ptr<LiveSession>* removed) {
+bool remove_session_if_current(
+    BasicMutex& mutex,
+    std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
+    const std::string& daemon_session_id,
+    const std::shared_ptr<LiveSession>& session,
+    std::shared_ptr<LiveSession>* removed
+) {
     BasicLockGuard lock(mutex);
     std::map<std::string, std::shared_ptr<LiveSession>>::iterator it = sessions.find(daemon_session_id);
     if (it == sessions.end() || it->second != session) {
@@ -430,10 +463,12 @@ bool SessionStore::prune_one_session_for_start(unsigned long max_open_sessions) 
     }
 }
 
-ExecSessionResult SessionStore::start_command(const std::string& target,
-                                              const ExecStartRequestSpec& request,
-                                              const YieldTimeConfig& yield_time,
-                                              unsigned long max_open_sessions) {
+ExecSessionResult SessionStore::start_command(
+    const std::string& target,
+    const ExecStartRequestSpec& request,
+    const YieldTimeConfig& yield_time,
+    unsigned long max_open_sessions
+) {
     if (!reserve_pending_start(max_open_sessions)) {
         throw SessionLimitError("too many open exec sessions");
     }
@@ -449,7 +484,12 @@ ExecSessionResult SessionStore::start_command(const std::string& target,
         log_message(LOG_INFO, "session_store", message.str());
     }
     std::shared_ptr<LiveSession> session = launch_live_session(
-        request.cmd, request.workdir, request.shell, request.login_requested, request.tty_requested);
+        request.cmd,
+        request.workdir,
+        request.shell,
+        request.login_requested,
+        request.tty_requested
+    );
     start_session_pump(session);
 
     PollResult poll_result;
@@ -483,13 +523,15 @@ ExecSessionResult SessionStore::start_command(const std::string& target,
 
     if (poll_result.completed) {
         retire_and_join_session(session);
-        ExecSessionResult result = make_exec_session_result(nullptr,
-                                                            false,
-                                                            session->started_at_ms,
-                                                            true,
-                                                            poll_result.exit_code,
-                                                            poll_result.output,
-                                                            empty_exec_warnings());
+        ExecSessionResult result = make_exec_session_result(
+            nullptr,
+            false,
+            session->started_at_ms,
+            true,
+            poll_result.exit_code,
+            poll_result.output,
+            empty_exec_warnings()
+        );
         {
             LogMessageBuilder message("command completed before session handoff");
             message.field("exit_code", poll_result.exit_code).field("output_chars", poll_result.output.size());
@@ -500,18 +542,27 @@ ExecSessionResult SessionStore::start_command(const std::string& target,
     }
 
     return make_exec_session_result(
-        session->id.c_str(), true, session->started_at_ms, false, 0, poll_result.output, warnings);
+        session->id.c_str(),
+        true,
+        session->started_at_ms,
+        false,
+        0,
+        poll_result.output,
+        warnings
+    );
 }
 
-ExecSessionResult SessionStore::write_stdin(const std::string& daemon_session_id,
-                                            const std::string& chars,
-                                            bool has_yield_time_ms,
-                                            unsigned long yield_time_ms,
-                                            unsigned long max_output_tokens,
-                                            const YieldTimeConfig& yield_time,
-                                            bool has_pty_size,
-                                            unsigned short pty_rows,
-                                            unsigned short pty_cols) {
+ExecSessionResult SessionStore::write_stdin(
+    const std::string& daemon_session_id,
+    const std::string& chars,
+    bool has_yield_time_ms,
+    unsigned long yield_time_ms,
+    unsigned long max_output_tokens,
+    const YieldTimeConfig& yield_time,
+    bool has_pty_size,
+    unsigned short pty_rows,
+    unsigned short pty_cols
+) {
     std::shared_ptr<LiveSession> session;
     {
         BasicLockGuard lock(mutex_);
@@ -549,7 +600,13 @@ ExecSessionResult SessionStore::write_stdin(const std::string& daemon_session_id
 
     if (poll_result.completed) {
         return finalize_completed_write_stdin(
-            mutex_, sessions_, &pending_starts_, daemon_session_id, session, poll_result);
+            mutex_,
+            sessions_,
+            &pending_starts_,
+            daemon_session_id,
+            session,
+            poll_result
+        );
     }
 
     {
@@ -559,5 +616,12 @@ ExecSessionResult SessionStore::write_stdin(const std::string& daemon_session_id
         log_message(LOG_INFO, "session_store", message.str());
     }
     return make_exec_session_result(
-        session->id.c_str(), true, session->started_at_ms, false, 0, poll_result.output, empty_exec_warnings());
+        session->id.c_str(),
+        true,
+        session->started_at_ms,
+        false,
+        0,
+        poll_result.output,
+        empty_exec_warnings()
+    );
 }

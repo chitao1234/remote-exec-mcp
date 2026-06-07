@@ -163,10 +163,12 @@ HttpResponse execute_buffered_rpc_route(const ServerRouteContext& context, const
     return response;
 }
 
-RpcRouteExecution execute_rpc_route(const ServerRouteContext& routes,
-                                    const PortTunnelRouteContext& port_tunnel,
-                                    const HttpRequest& request,
-                                    HttpRequestBodyStream* body) {
+RpcRouteExecution execute_rpc_route(
+    const ServerRouteContext& routes,
+    const PortTunnelRouteContext& port_tunnel,
+    const HttpRequest& request,
+    HttpRequestBodyStream* body
+) {
     const RouteExecutionMode mode = route_execution_mode(request);
     if (mode == ROUTE_EXECUTION_STREAMING_EXPORT) {
         StreamingTransferExport transfer;

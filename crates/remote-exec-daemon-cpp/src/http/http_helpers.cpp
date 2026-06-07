@@ -152,8 +152,8 @@ std::string render_http_response(const HttpResponse& res) {
     return rendered;
 }
 
-std::string render_http_upgrade_response(const std::string& upgrade_token,
-                                         const std::map<std::string, std::string>& headers) {
+std::string
+render_http_upgrade_response(const std::string& upgrade_token, const std::map<std::string, std::string>& headers) {
     std::ostringstream out;
     out << "HTTP/1.1 101 Switching Protocols\r\n";
     out << "Connection: Upgrade\r\n";

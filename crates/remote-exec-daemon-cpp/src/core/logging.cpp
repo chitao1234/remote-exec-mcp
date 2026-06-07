@@ -170,18 +170,20 @@ void log_message(LogLevel level, const std::string& component, const std::string
     const int millisecond = static_cast<int>(tv.tv_usec / 1000);
 #endif
 
-    std::fprintf(stderr,
-                 "%04d-%02d-%02d %02d:%02d:%02d.%03d %-5s %s %s\n",
-                 year,
-                 month,
-                 day,
-                 hour,
-                 minute,
-                 second,
-                 millisecond,
-                 level_name(level),
-                 component.c_str(),
-                 message.c_str());
+    std::fprintf(
+        stderr,
+        "%04d-%02d-%02d %02d:%02d:%02d.%03d %-5s %s %s\n",
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        millisecond,
+        level_name(level),
+        component.c_str(),
+        message.c_str()
+    );
     std::fflush(stderr);
 }
 

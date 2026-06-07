@@ -161,7 +161,8 @@ public:
                 const DWORD error = GetLastError();
                 if (is_stdin_closed_error(error)) {
                     throw ProcessStdinClosedError(
-                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
+                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+                    );
                 }
                 throw std::runtime_error(last_error_message("WriteFile"));
             }
@@ -249,7 +250,8 @@ DWORD process_id_from_process_handle(HANDLE process) {
         return 0U;
     }
     const NtQueryInformationProcessFn query = remote_exec_win32::proc_address_as<NtQueryInformationProcessFn>(
-        GetProcAddress(ntdll, "NtQueryInformationProcess"));
+        GetProcAddress(ntdll, "NtQueryInformationProcess")
+    );
     if (query == nullptr) {
         return 0U;
     }
@@ -460,19 +462,25 @@ struct SpawnedWinptyProcess {
 };
 
 SpawnedWinptyProcess spawn_winpty_process(
-    winpty_t* winpty, const std::string& command, const std::string& workdir, const std::string& shell, bool login) {
+    winpty_t* winpty,
+    const std::string& command,
+    const std::string& workdir,
+    const std::string& shell,
+    bool login
+) {
     const std::string command_line = windows_process_command_line(command, shell, login);
     std::wstring wide_command_line = wide_from_utf8(command_line);
     std::wstring wide_workdir = workdir.empty() ? std::wstring() : wide_from_utf8(workdir);
 
     WinptyErrorHandle error;
-    UniqueWinptySpawnConfig spawn_config(
-        winpty_spawn_config_new(WINPTY_SPAWN_FLAG_AUTO_SHUTDOWN | WINPTY_SPAWN_FLAG_EXIT_AFTER_SHUTDOWN,
-                                nullptr,
-                                wide_command_line.c_str(),
-                                workdir.empty() ? nullptr : wide_workdir.c_str(),
-                                nullptr,
-                                error.out_ptr()));
+    UniqueWinptySpawnConfig spawn_config(winpty_spawn_config_new(
+        WINPTY_SPAWN_FLAG_AUTO_SHUTDOWN | WINPTY_SPAWN_FLAG_EXIT_AFTER_SHUTDOWN,
+        nullptr,
+        wide_command_line.c_str(),
+        workdir.empty() ? nullptr : wide_workdir.c_str(),
+        nullptr,
+        error.out_ptr()
+    ));
     if (!spawn_config.valid()) {
         throw std::runtime_error(winpty_error_message("winpty_spawn_config_new", &error));
     }
@@ -481,8 +489,13 @@ SpawnedWinptyProcess spawn_winpty_process(
     HANDLE thread_handle = nullptr;
     DWORD create_process_error = 0;
     if (winpty_spawn(
-            winpty, spawn_config.get(), &process_handle, &thread_handle, &create_process_error, error.out_ptr()) ==
-        FALSE) {
+            winpty,
+            spawn_config.get(),
+            &process_handle,
+            &thread_handle,
+            &create_process_error,
+            error.out_ptr()
+        ) == FALSE) {
         if (error.get() != nullptr) {
             throw std::runtime_error(winpty_error_message("winpty_spawn", &error));
         }
@@ -537,11 +550,13 @@ std::string read_winpty_available_raw(HANDLE pipe, bool* eof) {
 
 class WinptyProcessSession : public ProcessSession {
 public:
-    WinptyProcessSession(UniqueWinpty winpty,
-                         UniqueHandle process_handle,
-                         DWORD process_id,
-                         UniqueHandle stdin_write,
-                         UniqueHandle stdout_read)
+    WinptyProcessSession(
+        UniqueWinpty winpty,
+        UniqueHandle process_handle,
+        DWORD process_id,
+        UniqueHandle stdin_write,
+        UniqueHandle stdout_read
+    )
         : winpty_(std::move(winpty)), process_handle_(std::move(process_handle)), process_id_(process_id),
           stdin_write_(std::move(stdin_write)), stdout_read_(std::move(stdout_read)), console_closed_(false),
           output_filter_(WINPTY_TRANSCRIPT_DEBOUNCE_MS, WINPTY_TRANSCRIPT_MAX_HOLD_MS),
@@ -558,7 +573,8 @@ public:
                 const DWORD error = GetLastError();
                 if (is_stdin_closed_error(error)) {
                     throw ProcessStdinClosedError(
-                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
+                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+                    );
                 }
                 throw std::runtime_error(last_error_message("WriteFile"));
             }
@@ -691,27 +707,36 @@ private:
     WinptyTranscriptNormalizer transcript_normalizer_;
 };
 
-std::unique_ptr<ProcessSession> launch_winpty_process_session(const std::string& command,
-                                                              const std::string& workdir,
-                                                              const std::string& shell,
-                                                              bool login) {
+std::unique_ptr<ProcessSession> launch_winpty_process_session(
+    const std::string& command,
+    const std::string& workdir,
+    const std::string& shell,
+    bool login
+) {
     UniqueWinpty winpty = open_winpty_session();
     UniqueHandle stdin_write(open_winpty_pipe(winpty_conin_name(winpty.get()), GENERIC_WRITE));
     UniqueHandle stdout_read(open_winpty_pipe(winpty_conout_name(winpty.get()), GENERIC_READ));
     SpawnedWinptyProcess process = spawn_winpty_process(winpty.get(), command, workdir, shell, login);
 
-    return std::unique_ptr<ProcessSession>(new WinptyProcessSession(std::move(winpty),
-                                                                    std::move(process.process_handle),
-                                                                    process.process_id,
-                                                                    std::move(stdin_write),
-                                                                    std::move(stdout_read)));
+    return std::unique_ptr<ProcessSession>(new WinptyProcessSession(
+        std::move(winpty),
+        std::move(process.process_handle),
+        process.process_id,
+        std::move(stdin_write),
+        std::move(stdout_read)
+    ));
 }
 #endif
 
 } // namespace
 
 std::unique_ptr<ProcessSession> ProcessSession::launch(
-    const std::string& command, const std::string& workdir, const std::string& shell, bool login, bool tty) {
+    const std::string& command,
+    const std::string& workdir,
+    const std::string& shell,
+    bool login,
+    bool tty
+) {
     if (tty) {
 #ifdef REMOTE_EXEC_CPP_HAS_WINPTY
         if (!process_session_supports_pty()) {
@@ -745,16 +770,18 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     mutable_command_line.push_back(L'\0');
     const std::wstring wide_workdir = workdir.empty() ? std::wstring() : wide_from_utf8(workdir);
 
-    const BOOL created = CreateProcessW(nullptr,
-                                        &mutable_command_line[0],
-                                        nullptr,
-                                        nullptr,
-                                        TRUE,
-                                        0,
-                                        nullptr,
-                                        workdir.empty() ? nullptr : wide_workdir.c_str(),
-                                        &startup_info,
-                                        &process_info);
+    const BOOL created = CreateProcessW(
+        nullptr,
+        &mutable_command_line[0],
+        nullptr,
+        nullptr,
+        TRUE,
+        0,
+        nullptr,
+        workdir.empty() ? nullptr : wide_workdir.c_str(),
+        &startup_info,
+        &process_info
+    );
 
     stdin_pipe.read_end.reset();
     stdout_pipe.write_end.reset();
@@ -768,7 +795,10 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     thread_handle.reset();
 
     return std::unique_ptr<ProcessSession>(new Win32ProcessSession(
-        std::move(process_handle), std::move(stdin_pipe.write_end), std::move(stdout_pipe.read_end)));
+        std::move(process_handle),
+        std::move(stdin_pipe.write_end),
+        std::move(stdout_pipe.read_end)
+    ));
 }
 
 bool process_session_supports_pty() {
@@ -782,7 +812,10 @@ bool process_session_supports_pty() {
             return probe.valid();
         } catch (const std::exception& ex) {
             log_message(
-                LOG_WARN, "process_session", std::string("WinPTY probe failed; tty support disabled: ") + ex.what());
+                LOG_WARN,
+                "process_session",
+                std::string("WinPTY probe failed; tty support disabled: ") + ex.what()
+            );
             return false;
         }
     }();

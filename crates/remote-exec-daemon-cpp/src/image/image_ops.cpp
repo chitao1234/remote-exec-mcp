@@ -41,8 +41,9 @@ std::string read_binary_file_bytes(const std::string& path) {
     if (!input.valid()) {
         const int error_code = errno;
         if (error_code != 0) {
-            throw internal_image_failure("unable to read image at `" + path +
-                                         "`: " + errno_error::message_from_errno(error_code));
+            throw internal_image_failure(
+                "unable to read image at `" + path + "`: " + errno_error::message_from_errno(error_code)
+            );
         }
         throw internal_image_failure("unable to read image at `" + path + "`");
     }
@@ -80,8 +81,9 @@ void require_regular_image_file(const std::string& path) {
         throw missing_image_failure(path);
     }
 
-    throw internal_image_failure("unable to access image at `" + path +
-                                 "`: " + errno_error::message_from_errno(error_code));
+    throw internal_image_failure(
+        "unable to access image at `" + path + "`: " + errno_error::message_from_errno(error_code)
+    );
 }
 
 std::string image_mime_type(const std::string& path, const std::string& bytes) {

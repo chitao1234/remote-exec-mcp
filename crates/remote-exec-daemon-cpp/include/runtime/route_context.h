@@ -20,8 +20,10 @@ struct HttpGateContext {
 };
 
 struct PathResolutionContext {
-    PathResolutionContext(const std::string& default_workdir_value,
-                          const CompiledFilesystemSandbox* active_sandbox_value)
+    PathResolutionContext(
+        const std::string& default_workdir_value,
+        const CompiledFilesystemSandbox* active_sandbox_value
+    )
         : default_workdir(default_workdir_value), active_sandbox(active_sandbox_value) {}
 
     const std::string& default_workdir;
@@ -36,10 +38,12 @@ struct HealthRouteContext {
 };
 
 struct TargetInfoRouteContext {
-    TargetInfoRouteContext(const std::string& target_value,
-                           const std::string& daemon_instance_id_value,
-                           const std::string& hostname_value,
-                           const DaemonCapabilities& capabilities_value)
+    TargetInfoRouteContext(
+        const std::string& target_value,
+        const std::string& daemon_instance_id_value,
+        const std::string& hostname_value,
+        const DaemonCapabilities& capabilities_value
+    )
         : target(target_value), daemon_instance_id(daemon_instance_id_value), hostname(hostname_value),
           capabilities(capabilities_value) {}
 
@@ -50,10 +54,12 @@ struct TargetInfoRouteContext {
 };
 
 struct ExecRequestContext {
-    ExecRequestContext(const PathResolutionContext& paths_value,
-                       const DaemonCapabilities& capabilities_value,
-                       const std::string& default_shell_value,
-                       bool allow_login_shell_value)
+    ExecRequestContext(
+        const PathResolutionContext& paths_value,
+        const DaemonCapabilities& capabilities_value,
+        const std::string& default_shell_value,
+        bool allow_login_shell_value
+    )
         : paths(paths_value), capabilities(capabilities_value), default_shell(default_shell_value),
           allow_login_shell(allow_login_shell_value) {}
 
@@ -64,12 +70,14 @@ struct ExecRequestContext {
 };
 
 struct ExecRouteContext {
-    ExecRouteContext(const ExecRequestContext& request_value,
-                     const std::string& target_value,
-                     SessionStore& sessions_value,
-                     const YieldTimeConfig& yield_time_value,
-                     unsigned long max_open_sessions_value,
-                     const std::string& daemon_instance_id_value)
+    ExecRouteContext(
+        const ExecRequestContext& request_value,
+        const std::string& target_value,
+        SessionStore& sessions_value,
+        const YieldTimeConfig& yield_time_value,
+        unsigned long max_open_sessions_value,
+        const std::string& daemon_instance_id_value
+    )
         : request(request_value), target(target_value), sessions(sessions_value), yield_time(yield_time_value),
           max_open_sessions(max_open_sessions_value), daemon_instance_id(daemon_instance_id_value) {}
 
@@ -96,9 +104,11 @@ struct ImageRouteContext {
 };
 
 struct TransferRouteContext {
-    TransferRouteContext(const HttpGateContext& gate_value,
-                         const PathResolutionContext& paths_value,
-                         const TransferLimitConfig& limits_value)
+    TransferRouteContext(
+        const HttpGateContext& gate_value,
+        const PathResolutionContext& paths_value,
+        const TransferLimitConfig& limits_value
+    )
         : gate(gate_value), paths(paths_value), limits(limits_value) {}
 
     HttpGateContext gate;
@@ -107,9 +117,11 @@ struct TransferRouteContext {
 };
 
 struct PortTunnelRouteContext {
-    PortTunnelRouteContext(const HttpGateContext& gate_value,
-                           const PortForwardLimitConfig& limits_value,
-                           std::shared_ptr<PortTunnelService>& service_value)
+    PortTunnelRouteContext(
+        const HttpGateContext& gate_value,
+        const PortForwardLimitConfig& limits_value,
+        std::shared_ptr<PortTunnelService>& service_value
+    )
         : gate(gate_value), limits(limits_value), service(service_value) {}
 
     HttpGateContext gate;
@@ -118,13 +130,15 @@ struct PortTunnelRouteContext {
 };
 
 struct ServerRouteContext {
-    ServerRouteContext(const HttpGateContext& gate_value,
-                       const HealthRouteContext& health_value,
-                       const TargetInfoRouteContext& target_info_value,
-                       const ExecRouteContext& exec_value,
-                       const PatchRouteContext& patch_value,
-                       const ImageRouteContext& image_value,
-                       const TransferRouteContext& transfer_value)
+    ServerRouteContext(
+        const HttpGateContext& gate_value,
+        const HealthRouteContext& health_value,
+        const TargetInfoRouteContext& target_info_value,
+        const ExecRouteContext& exec_value,
+        const PatchRouteContext& patch_value,
+        const ImageRouteContext& image_value,
+        const TransferRouteContext& transfer_value
+    )
         : gate(gate_value), health(health_value), target_info(target_info_value), exec(exec_value), patch(patch_value),
           image(image_value), transfer(transfer_value) {}
 
@@ -138,12 +152,14 @@ struct ServerRouteContext {
 };
 
 struct HttpConnectionContext {
-    HttpConnectionContext(const ServerRouteContext& routes_value,
-                          const PortTunnelRouteContext& port_tunnel_value,
-                          std::size_t max_request_header_bytes_value,
-                          std::size_t max_request_body_bytes_value,
-                          unsigned long http_connection_idle_timeout_ms_value,
-                          const std::atomic<bool>& shutdown_requested_value)
+    HttpConnectionContext(
+        const ServerRouteContext& routes_value,
+        const PortTunnelRouteContext& port_tunnel_value,
+        std::size_t max_request_header_bytes_value,
+        std::size_t max_request_body_bytes_value,
+        unsigned long http_connection_idle_timeout_ms_value,
+        const std::atomic<bool>& shutdown_requested_value
+    )
         : routes(routes_value), port_tunnel(port_tunnel_value),
           max_request_header_bytes(max_request_header_bytes_value),
           max_request_body_bytes(max_request_body_bytes_value),

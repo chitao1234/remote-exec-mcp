@@ -41,10 +41,12 @@ void validate_pattern(const std::string& pattern) {
     }
 }
 
-bool matches_character_class(const std::string& pattern,
-                             std::size_t open_index,
-                             char candidate,
-                             std::size_t* next_index) {
+bool matches_character_class(
+    const std::string& pattern,
+    std::size_t open_index,
+    char candidate,
+    std::size_t* next_index
+) {
     const std::size_t close_index = character_class_end(pattern, open_index);
     std::size_t index = open_index + 1U;
     bool negated = false;
@@ -74,10 +76,12 @@ bool matches_character_class(const std::string& pattern,
     return negated ? !matched : matched;
 }
 
-bool match_pattern(const std::string& pattern,
-                   std::size_t pattern_index,
-                   const std::string& text,
-                   std::size_t text_index) {
+bool match_pattern(
+    const std::string& pattern,
+    std::size_t pattern_index,
+    const std::string& text,
+    std::size_t text_index
+) {
     while (true) {
         if (pattern_index == pattern.size()) {
             return text_index == text.size();

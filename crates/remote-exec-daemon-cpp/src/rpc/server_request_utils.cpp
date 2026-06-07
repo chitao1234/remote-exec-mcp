@@ -53,10 +53,12 @@ std::string resolve_input_path(const PathResolutionContext& context, const Json&
     return resolve_path_from_base(resolve_workdir(context, body), raw);
 }
 
-std::string resolve_authorized_input_path(const PathResolutionContext& context,
-                                          const Json& body,
-                                          const std::string& key,
-                                          SandboxAccess access) {
+std::string resolve_authorized_input_path(
+    const PathResolutionContext& context,
+    const Json& body,
+    const std::string& key,
+    SandboxAccess access
+) {
     const std::string path = resolve_input_path(context, body, key);
     authorize_sandbox_path(context, access, path);
     return path;

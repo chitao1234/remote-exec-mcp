@@ -7,9 +7,11 @@
 
 class PortTunnelService;
 
-void run_port_tunnel_connection(SOCKET client,
-                                std::shared_ptr<PortTunnelService>& service,
-                                const PortForwardLimitConfig& limits);
+void run_port_tunnel_connection(
+    SOCKET client,
+    std::shared_ptr<PortTunnelService>& service,
+    const PortForwardLimitConfig& limits
+);
 std::shared_ptr<PortTunnelService>
 create_port_tunnel_service(const PortForwardLimitConfig& limits = PortForwardLimitConfig());
 

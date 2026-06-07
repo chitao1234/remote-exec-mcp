@@ -1,17 +1,17 @@
 #pragma once
 
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #ifdef _WIN32
+#include "platform/win32_error.h"
+#include "platform/win32_utf8.h"
 #include <direct.h>
 #include <wchar.h>
 #include <windows.h>
-#include "platform/win32_error.h"
-#include "platform/win32_utf8.h"
 #else
 #include <cerrno>
 #include <dirent.h>
@@ -212,8 +212,10 @@ inline bool is_directory(const path& target) {
 }
 
 inline void throw_last_error(const std::string& operation, const path& target) {
-    throw std::runtime_error(operation + " failed for `" + target.string() + "`: " +
-                             error_message_from_code(operation.c_str(), GetLastError()));
+    throw std::runtime_error(
+        operation + " failed for `" + target.string() +
+        "`: " + error_message_from_code(operation.c_str(), GetLastError())
+    );
 }
 
 inline void create_directory_if_missing(const path& target) {
@@ -285,8 +287,9 @@ inline void remove_all(const path& target) {
 #else
 
 inline void throw_errno(const std::string& operation, const path& target, int error) {
-    throw std::runtime_error(operation + " failed for `" + target.string() + "`: " +
-                             errno_error::message_from_errno(error));
+    throw std::runtime_error(
+        operation + " failed for `" + target.string() + "`: " + errno_error::message_from_errno(error)
+    );
 }
 
 inline path temp_directory_path() {
@@ -466,13 +469,9 @@ public:
         return *this;
     }
 
-    bool operator==(const directory_iterator& other) const {
-        return dir_ == NULL && other.dir_ == NULL;
-    }
+    bool operator==(const directory_iterator& other) const { return dir_ == NULL && other.dir_ == NULL; }
 
-    bool operator!=(const directory_iterator& other) const {
-        return !(*this == other);
-    }
+    bool operator!=(const directory_iterator& other) const { return !(*this == other); }
 
 private:
     directory_iterator(const directory_iterator&);

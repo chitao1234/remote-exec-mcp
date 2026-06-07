@@ -12,9 +12,11 @@ bool reject_before_route(const HttpGateContext& context, const HttpRequest& requ
 std::string resolve_workdir(const PathResolutionContext& context, const Json& body);
 std::string resolve_authorized_workdir(const PathResolutionContext& context, const Json& body, SandboxAccess access);
 std::string resolve_input_path(const PathResolutionContext& context, const Json& body, const std::string& key);
-std::string resolve_authorized_input_path(const PathResolutionContext& context,
-                                          const Json& body,
-                                          const std::string& key,
-                                          SandboxAccess access);
+std::string resolve_authorized_input_path(
+    const PathResolutionContext& context,
+    const Json& body,
+    const std::string& key,
+    SandboxAccess access
+);
 void authorize_sandbox_path(const PathResolutionContext& context, SandboxAccess access, const std::string& path);
 PatchPathAuthorizer make_patch_path_authorizer(const PathResolutionContext& context);

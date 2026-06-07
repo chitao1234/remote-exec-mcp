@@ -1,7 +1,7 @@
 #include "port_forward/port_tunnel_frame.h"
 
-#include "test_contract_fixtures.h"
 #include "test_assert.h"
+#include "test_contract_fixtures.h"
 #include <string>
 #include <vector>
 
@@ -50,8 +50,10 @@ frame_header(unsigned char frame_type, uint32_t stream_id, uint32_t meta_len, ui
 }
 
 void assert_frame_type_matches_contract(const char* name, PortTunnelFrameType type) {
-    TEST_ASSERT(test_contract::port_tunnel_contract().at("frame_types").at(name).get<unsigned int>() ==
-                static_cast<unsigned int>(type));
+    TEST_ASSERT(
+        test_contract::port_tunnel_contract().at("frame_types").at(name).get<unsigned int>() ==
+        static_cast<unsigned int>(type)
+    );
 }
 
 } // namespace
@@ -133,14 +135,18 @@ int main() {
     assert_control_frame_round_trips(PortTunnelFrameType::ForwardDrop);
 
     assert_decode_rejects(frame_header(99U, 1U, 0U, 0U));
-    assert_decode_rejects(frame_header(static_cast<unsigned char>(PortTunnelFrameType::Error),
-                                       1U,
-                                       static_cast<uint32_t>(PORT_TUNNEL_MAX_META_LEN + 1U),
-                                       0U));
-    assert_decode_rejects(frame_header(static_cast<unsigned char>(PortTunnelFrameType::TcpData),
-                                       1U,
-                                       0U,
-                                       static_cast<uint32_t>(PORT_TUNNEL_MAX_DATA_LEN + 1U)));
+    assert_decode_rejects(frame_header(
+        static_cast<unsigned char>(PortTunnelFrameType::Error),
+        1U,
+        static_cast<uint32_t>(PORT_TUNNEL_MAX_META_LEN + 1U),
+        0U
+    ));
+    assert_decode_rejects(frame_header(
+        static_cast<unsigned char>(PortTunnelFrameType::TcpData),
+        1U,
+        0U,
+        static_cast<uint32_t>(PORT_TUNNEL_MAX_DATA_LEN + 1U)
+    ));
 
     return 0;
 }

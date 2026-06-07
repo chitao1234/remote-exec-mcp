@@ -1,6 +1,6 @@
+#include "test_assert.h"
 #include <atomic>
 #include <iostream>
-#include "test_assert.h"
 #include <sstream>
 #include <stdexcept>
 #include <string>

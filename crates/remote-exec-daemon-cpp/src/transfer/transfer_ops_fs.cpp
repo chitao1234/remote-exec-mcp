@@ -32,15 +32,18 @@ void authorize_path_if_present(const TransferPathAuthorizer& authorizer, const s
     }
 }
 
-void authorize_existing_path_recursive(const std::string& path,
-                                       const TransferPathAuthorizer& authorizer,
-                                       std::size_t depth) {
+void authorize_existing_path_recursive(
+    const std::string& path,
+    const TransferPathAuthorizer& authorizer,
+    std::size_t depth
+) {
     if (!authorizer || !path_exists(path)) {
         return;
     }
     if (depth > MAX_REMOVE_DEPTH) {
-        throw std::runtime_error("authorize_existing_path exceeded maximum depth of " +
-                                 std::to_string(MAX_REMOVE_DEPTH));
+        throw std::runtime_error(
+            "authorize_existing_path exceeded maximum depth of " + std::to_string(MAX_REMOVE_DEPTH)
+        );
     }
 
     authorizer(path);
@@ -187,11 +190,13 @@ void replace_existing_path(const std::string& path, const TransferPathAuthorizer
     remove_existing_path(path);
 }
 
-bool prepare_destination_path(const std::string& absolute_path,
-                              TransferSourceType source_type,
-                              TransferOverwrite overwrite,
-                              bool create_parent,
-                              const TransferPathAuthorizer& authorizer) {
+bool prepare_destination_path(
+    const std::string& absolute_path,
+    TransferSourceType source_type,
+    TransferOverwrite overwrite,
+    bool create_parent,
+    const TransferPathAuthorizer& authorizer
+) {
     authorize_path_if_present(authorizer, absolute_path);
     const bool existed = path_exists(absolute_path);
     if (existed && overwrite == TransferOverwrite::Fail) {
@@ -207,8 +212,10 @@ bool prepare_destination_path(const std::string& absolute_path,
                 throw TransferFailure(TransferRpcCode::DestinationUnsupported, "destination path is a directory");
             }
             if (!is_regular_file(absolute_path)) {
-                throw TransferFailure(TransferRpcCode::DestinationUnsupported,
-                                      "destination path is not a regular file");
+                throw TransferFailure(
+                    TransferRpcCode::DestinationUnsupported,
+                    "destination path is not a regular file"
+                );
             }
         } else if (source_type == TransferSourceType::Directory || source_type == TransferSourceType::Multiple) {
             if (!is_directory(absolute_path)) {

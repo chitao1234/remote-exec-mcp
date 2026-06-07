@@ -29,9 +29,11 @@ void log_console_decode_fallback_once(const char* fallback, const std::exception
     if (flag->exchange(true)) {
         return;
     }
-    log_message(LOG_WARN,
-                "console_output",
-                std::string("console output decode failed; falling back to ") + fallback + ": " + ex.what());
+    log_message(
+        LOG_WARN,
+        "console_output",
+        std::string("console output decode failed; falling back to ") + fallback + ": " + ex.what()
+    );
 }
 
 std::string utf8_from_wide(const std::wstring& wide) {
@@ -79,7 +81,12 @@ void carry_incomplete_dbcs_suffix(UINT code_page, std::string* raw, std::string*
 }
 
 std::string decode_console_output_with_code_pages(
-    UINT primary_code_page, UINT fallback_code_page, std::string* carry, const std::string& raw_chunk, bool flush) {
+    UINT primary_code_page,
+    UINT fallback_code_page,
+    std::string* carry,
+    const std::string& raw_chunk,
+    bool flush
+) {
     std::string raw = *carry;
     raw += raw_chunk;
     carry->clear();
@@ -1028,9 +1035,11 @@ void WinptyTranscriptNormalizer::process_physical_line(const std::string& raw_li
     process_physical_line_with_mode(raw_line, output, TrailingFragmentMode::Buffer);
 }
 
-void WinptyTranscriptNormalizer::process_physical_line_with_mode(const std::string& raw_line,
-                                                                 std::string* output,
-                                                                 TrailingFragmentMode trailing_fragment_mode) {
+void WinptyTranscriptNormalizer::process_physical_line_with_mode(
+    const std::string& raw_line,
+    std::string* output,
+    TrailingFragmentMode trailing_fragment_mode
+) {
     if (output == nullptr) {
         return;
     }
@@ -1072,9 +1081,11 @@ void WinptyTranscriptNormalizer::emit_repaint_prefix(const std::string& left, st
     }
 }
 
-void WinptyTranscriptNormalizer::emit_line_with_pending_fragment(const std::string& line,
-                                                                 std::string* output,
-                                                                 bool terminated) {
+void WinptyTranscriptNormalizer::emit_line_with_pending_fragment(
+    const std::string& line,
+    std::string* output,
+    bool terminated
+) {
     if (output == nullptr) {
         return;
     }
@@ -1102,9 +1113,11 @@ void WinptyTranscriptNormalizer::emit_logical_text(const std::string& line, std:
     }
 }
 
-bool WinptyTranscriptNormalizer::split_winpty_repaint_line(const std::string& line,
-                                                           std::string* left,
-                                                           std::string* right) const {
+bool WinptyTranscriptNormalizer::split_winpty_repaint_line(
+    const std::string& line,
+    std::string* left,
+    std::string* right
+) const {
     // WinPTY screen-scrapes console rows. When a wrapped/repainted logical line
     // is read back as one physical row, the right-edge fragment is positioned
     // by padding through the configured row width. Use that known width rather
@@ -1181,13 +1194,20 @@ std::string utf8_from_windows_code_page_for_test(unsigned int code_page, const s
     return utf8_from_code_page(static_cast<UINT>(code_page), raw);
 }
 
-std::string decode_console_output_for_test(unsigned int primary_code_page,
-                                           unsigned int fallback_code_page,
-                                           std::string* carry,
-                                           const std::string& raw_chunk,
-                                           bool flush) {
+std::string decode_console_output_for_test(
+    unsigned int primary_code_page,
+    unsigned int fallback_code_page,
+    std::string* carry,
+    const std::string& raw_chunk,
+    bool flush
+) {
     return decode_console_output_with_code_pages(
-        static_cast<UINT>(primary_code_page), static_cast<UINT>(fallback_code_page), carry, raw_chunk, flush);
+        static_cast<UINT>(primary_code_page),
+        static_cast<UINT>(fallback_code_page),
+        carry,
+        raw_chunk,
+        flush
+    );
 }
 
 std::string decode_utf8_stream_for_test(std::string* carry, const std::string& raw_chunk, bool flush) {
@@ -1211,8 +1231,8 @@ std::string drain_terminal_output_for_test(TerminalOutputFilter* filter) {
     return filter->drain_pending();
 }
 
-std::string normalize_winpty_transcript_chunk_for_test(WinptyTranscriptNormalizer* normalizer,
-                                                       const std::string& chunk) {
+std::string
+normalize_winpty_transcript_chunk_for_test(WinptyTranscriptNormalizer* normalizer, const std::string& chunk) {
     return normalizer->filter_chunk(chunk);
 }
 

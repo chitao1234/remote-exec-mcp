@@ -31,10 +31,12 @@ void StringArchiveSink::write(const char* data, std::size_t size) {
     output_->append(data, size);
 }
 
-void read_exact_or_throw(TransferArchiveReader& reader,
-                         char* data,
-                         std::size_t size,
-                         const std::string& error_message) {
+void read_exact_or_throw(
+    TransferArchiveReader& reader,
+    char* data,
+    std::size_t size,
+    const std::string& error_message
+) {
     if (!reader.read_exact_or_eof(data, size)) {
         throw TransferFailure(TransferRpcCode::TransferFailed, error_message);
     }

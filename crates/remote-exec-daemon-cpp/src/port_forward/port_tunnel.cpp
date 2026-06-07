@@ -99,8 +99,8 @@ PortTunnelBudgetLease::~PortTunnelBudgetLease() {
     reset();
 }
 
-PortTunnelBudgetLease PortTunnelBudgetLease::adopt(const std::shared_ptr<PortTunnelBudgetState>& budget_state,
-                                                   PortTunnelBudgetKind kind) {
+PortTunnelBudgetLease
+PortTunnelBudgetLease::adopt(const std::shared_ptr<PortTunnelBudgetState>& budget_state, PortTunnelBudgetKind kind) {
     PortTunnelBudgetLease lease;
     lease.budget_state_ = budget_state;
     lease.kind_ = kind;

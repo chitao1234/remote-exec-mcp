@@ -1,8 +1,8 @@
 #pragma once
 
 #include <cctype>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -24,8 +24,8 @@ inline std::string compact_pty_size_output(const std::string& input) {
     bool previous_space = true;
     for (std::string::const_iterator it = input.begin(); it != input.end(); ++it) {
         const unsigned char ch = static_cast<unsigned char>(*it);
-        const bool separator = ch == '\0' || ch == '\r' || ch == '\n' || ch == '\t' || ch == ';' || ch == '=' ||
-                               ch == ',';
+        const bool separator =
+            ch == '\0' || ch == '\r' || ch == '\n' || ch == '\t' || ch == ';' || ch == '=' || ch == ',';
         if (separator || std::isspace(ch)) {
             if (!previous_space) {
                 output.push_back(' ');
@@ -132,19 +132,24 @@ inline std::string windows_ping_sleep_command(unsigned long seconds) {
 }
 
 inline std::string windows_stdin_echo_helper_command(const std::string& helper_arg, const std::string& label) {
-    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " stdin-echo " + windows_quote_arg(label);
+    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " stdin-echo " +
+           windows_quote_arg(label);
 }
 
-inline std::string windows_stdin_echo_sleep_helper_command(const std::string& helper_arg,
-                                                           const std::string& label,
-                                                           unsigned long sleep_seconds) {
+inline std::string windows_stdin_echo_sleep_helper_command(
+    const std::string& helper_arg,
+    const std::string& label,
+    unsigned long sleep_seconds
+) {
     return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " stdin-echo-sleep " +
            windows_quote_arg(label) + " " + std::to_string(sleep_seconds);
 }
 
-inline std::string windows_stdin_file_helper_command(const std::string& helper_arg,
-                                                     const std::string& file_name,
-                                                     unsigned long sleep_seconds) {
+inline std::string windows_stdin_file_helper_command(
+    const std::string& helper_arg,
+    const std::string& file_name,
+    unsigned long sleep_seconds
+) {
     return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " stdin-file " +
            windows_quote_arg(file_name) + " " + std::to_string(sleep_seconds);
 }

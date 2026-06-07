@@ -198,9 +198,16 @@ void ServerRuntime::accept_loop() {
 
             if (!connections_.try_start(std::move(client), [this](SOCKET socket) {
                     UniqueSocket client(socket);
-                    handle_client(make_http_connection_context(
-                                      this->config_, this->metadata_, this->sandbox_, this->services_, this->shutdown_),
-                                  std::move(client));
+                    handle_client(
+                        make_http_connection_context(
+                            this->config_,
+                            this->metadata_,
+                            this->sandbox_,
+                            this->services_,
+                            this->shutdown_
+                        ),
+                        std::move(client)
+                    );
                 })) {
                 log_message(LOG_WARN, "server", "dropping client connection during shutdown");
             }

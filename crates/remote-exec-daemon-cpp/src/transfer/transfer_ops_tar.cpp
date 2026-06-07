@@ -35,7 +35,12 @@ void write_string_field(std::string* header, std::size_t offset, std::size_t wid
 void write_octal_field(std::string* header, std::size_t offset, std::size_t width, std::uint64_t value) {
     char buffer[64];
     std::snprintf(
-        buffer, sizeof(buffer), "%0*llo", static_cast<int>(width - 1), static_cast<unsigned long long>(value));
+        buffer,
+        sizeof(buffer),
+        "%0*llo",
+        static_cast<int>(width - 1),
+        static_cast<unsigned long long>(value)
+    );
     const std::string digits(buffer);
     if (digits.size() > width - 1) {
         throw std::runtime_error("tar numeric field overflow");
@@ -85,13 +90,15 @@ void append_padded_body(TransferArchiveSink* archive, const std::string& body) {
     append_padding(archive, body.size());
 }
 
-void append_tar_header(TransferArchiveSink* archive,
-                       const std::string& path,
-                       char typeflag,
-                       std::uint64_t size,
-                       std::uint64_t mode,
-                       const std::string& link_name = std::string(),
-                       bool long_name_emitted = false) {
+void append_tar_header(
+    TransferArchiveSink* archive,
+    const std::string& path,
+    char typeflag,
+    std::uint64_t size,
+    std::uint64_t mode,
+    const std::string& link_name = std::string(),
+    bool long_name_emitted = false
+) {
     std::string header(TAR_BLOCK_SIZE, '\0');
     write_string_field(&header, 0, 100, path_for_header_name(path, long_name_emitted));
     write_octal_field(&header, 100, 8, mode);
@@ -186,9 +193,11 @@ void append_file_entry(TransferArchiveSink* archive, const std::string& rel_path
     append_padded_body(archive, body);
 }
 
-void append_file_entry_from_path(TransferArchiveSink* archive,
-                                 const std::string& rel_path,
-                                 const std::string& source_path) {
+void append_file_entry_from_path(
+    TransferArchiveSink* archive,
+    const std::string& rel_path,
+    const std::string& source_path
+) {
     path_utils::PathMetadata metadata;
     if (!path_utils::path_metadata(source_path, &metadata)) {
         throw TransferFailure(TransferRpcCode::SourceMissing, "transfer source missing");
@@ -273,9 +282,11 @@ void ensure_u64_fits_size_t(std::uint64_t value, const std::string& label) {
     }
 }
 
-void ensure_transfer_entry_within_limits(std::uint64_t entry_size,
-                                         std::uint64_t copied_so_far,
-                                         const TransferLimitConfig& limits) {
+void ensure_transfer_entry_within_limits(
+    std::uint64_t entry_size,
+    std::uint64_t copied_so_far,
+    const TransferLimitConfig& limits
+) {
     if (entry_size > limits.max_entry_bytes) {
         std::ostringstream message;
         message << "archive entry size " << entry_size << " exceeds transfer entry limit " << limits.max_entry_bytes;
@@ -318,10 +329,12 @@ void skip_entry_padding(TransferArchiveReader& reader, std::uint64_t size) {
     transfer_archive::skip_exact(reader, entry_padding(size), "truncated tar entry body");
 }
 
-std::string read_limited_metadata_string(TransferArchiveReader& reader,
-                                         std::uint64_t size,
-                                         const TransferLimitConfig& limits,
-                                         const std::string& error_message) {
+std::string read_limited_metadata_string(
+    TransferArchiveReader& reader,
+    std::uint64_t size,
+    const TransferLimitConfig& limits,
+    const std::string& error_message
+) {
     ensure_transfer_entry_within_limits(size, 0U, limits);
     return transfer_archive::read_exact_string(reader, size, error_message);
 }

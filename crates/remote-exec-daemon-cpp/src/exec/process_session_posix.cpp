@@ -246,10 +246,12 @@ std::vector<char*> build_exec_argv(const std::vector<std::string>& argv) {
     return exec_argv;
 }
 
-void exec_shell_child(const std::vector<char*>& exec_argv,
-                      const std::string& executable_path,
-                      const ExecEnvironment& environment,
-                      const std::string& workdir) {
+void exec_shell_child(
+    const std::vector<char*>& exec_argv,
+    const std::string& executable_path,
+    const ExecEnvironment& environment,
+    const std::string& workdir
+) {
     if (posix_signal::restore_default(SIGPIPE) != 0) {
         _exit(126);
     }
@@ -257,9 +259,11 @@ void exec_shell_child(const std::vector<char*>& exec_argv,
         _exit(126);
     }
 
-    posix_process::execve_process(executable_path.c_str(),
-                                  const_cast<char* const*>(&exec_argv[0]),
-                                  const_cast<char* const*>(&environment.pointers[0]));
+    posix_process::execve_process(
+        executable_path.c_str(),
+        const_cast<char* const*>(&exec_argv[0]),
+        const_cast<char* const*>(&environment.pointers[0])
+    );
     _exit(127);
 }
 
@@ -286,7 +290,8 @@ public:
     void write_stdin(const std::string& chars) override {
         if (!input_write_.valid()) {
             throw std::runtime_error(
-                "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
+                "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+            );
         }
 
         const char* data = chars.data();
@@ -296,7 +301,8 @@ public:
             if (written < 0) {
                 if (errno == EPIPE || errno == EIO) {
                     throw ProcessStdinClosedError(
-                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
+                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+                    );
                 }
                 if (tty_ && (errno == EAGAIN || errno == EWOULDBLOCK)) {
                     if (posix_fd::wait_until_writable_or_hangup(input_write_.get()) != 0) {
@@ -474,7 +480,10 @@ bool process_session_supports_pty() {
             return pair.master.valid() && !pair.slave_path.empty();
         } catch (const std::exception& ex) {
             log_message(
-                LOG_WARN, "process_session", std::string("POSIX PTY probe failed; tty support disabled: ") + ex.what());
+                LOG_WARN,
+                "process_session",
+                std::string("POSIX PTY probe failed; tty support disabled: ") + ex.what()
+            );
             return false;
         }
     }();
@@ -482,7 +491,12 @@ bool process_session_supports_pty() {
 }
 
 std::unique_ptr<ProcessSession> ProcessSession::launch(
-    const std::string& command, const std::string& workdir, const std::string& shell, bool login, bool tty) {
+    const std::string& command,
+    const std::string& workdir,
+    const std::string& shell,
+    bool login,
+    bool tty
+) {
     const std::vector<std::string> argv = platform::shell_argv(shell, login, command);
     ExecEnvironment exec_environment = build_exec_environment_values(tty);
     exec_environment.refresh_pointers();
@@ -552,7 +566,8 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     stdout_pipe.write_end.reset();
 
     return std::unique_ptr<ProcessSession>(
-        new PosixProcessSession(pid, false, UniqueFd(), std::move(stdout_pipe.read_end)));
+        new PosixProcessSession(pid, false, UniqueFd(), std::move(stdout_pipe.read_end))
+    );
 }
 
 #ifdef REMOTE_EXEC_CPP_TESTING

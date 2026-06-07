@@ -35,9 +35,11 @@ bool connection_header_has_upgrade(const HttpRequest& request) {
 
 } // namespace
 
-HttpResponse prepare_port_tunnel_route_upgrade(const PortTunnelRouteContext& context,
-                                               const HttpRequest& request,
-                                               PortTunnelUpgradeRoute* upgrade) {
+HttpResponse prepare_port_tunnel_route_upgrade(
+    const PortTunnelRouteContext& context,
+    const HttpRequest& request,
+    PortTunnelUpgradeRoute* upgrade
+) {
     HttpResponse response;
     if (!context.gate.http_auth_bearer_token.empty() &&
         !request_has_bearer_auth(request, context.gate.http_auth_bearer_token)) {
