@@ -629,6 +629,25 @@ static void assert_windows_cmd_command_line_preserves_command_quotes(const std::
     );
 }
 
+static void assert_windows_command_com_command_line_omits_cmd_only_flags() {
+    TEST_ASSERT(
+        windows_process_command_line_for_test("echo \"A & B\"", "COMMAND.COM", false)
+        == "COMMAND.COM /C echo \"A & B\""
+    );
+    TEST_ASSERT(
+        windows_process_command_line_for_test("echo ok", "C:\\WINDOWS\\COMMAND.COM", false)
+        == "C:\\WINDOWS\\COMMAND.COM /C echo ok"
+    );
+    TEST_ASSERT(
+        windows_process_command_line_for_test("echo ok", "C:\\Program Files\\COMMAND.COM", false)
+        == "\"C:\\Program Files\\COMMAND.COM\" /C echo ok"
+    );
+    TEST_ASSERT(
+        windows_process_command_line_for_test("echo ok", "COMMAND.COM", true)
+        == "COMMAND.COM /C echo ok"
+    );
+}
+
 static std::string run_windows_quote_sensitive_command(
     SessionStore& store,
     const fs::path& root,
@@ -2261,6 +2280,7 @@ int main(int argc, char** argv) {
 
 #ifdef _WIN32
     assert_windows_cmd_command_line_preserves_command_quotes(shell);
+    assert_windows_command_com_command_line_omits_cmd_only_flags();
     assert_win32_process_tree_terminates_descendants(root);
 #endif
     assert_explicit_drain_stop_reasons();

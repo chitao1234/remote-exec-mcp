@@ -92,19 +92,23 @@ bool is_windows_cmd_family(const std::string& lower) {
     return lower == "cmd.exe" || lower == "cmd";
 }
 
+bool is_windows_command_family(const std::string& lower) {
+    return lower == "command.com" || lower == "command";
+}
+
 std::string windows_process_command_line(
     const std::string& command,
     const std::string& shell,
     bool login
 ) {
     const std::string lower = shell_basename_lower(shell);
-    if (!is_windows_cmd_family(lower)) {
+    if (!is_windows_cmd_family(lower) && !is_windows_command_family(lower)) {
         return command_line_from_argv(platform::shell_argv(shell, login, command));
     }
 
     std::ostringstream out;
     out << windows_quote_arg(shell);
-    if (!login) {
+    if (!login && is_windows_cmd_family(lower)) {
         out << " /D";
     }
     out << " /C";

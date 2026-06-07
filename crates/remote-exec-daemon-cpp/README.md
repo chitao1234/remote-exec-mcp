@@ -464,6 +464,9 @@ default_workdir = /work
 # Windows XP example.
 # default_workdir = C:\work
 # default_shell = cmd.exe
+# Windows 9x/Me ANSI builds should normally use the COMSPEC-provided
+# COMMAND.COM path, or configure it explicitly.
+# default_shell = C:\WINDOWS\COMMAND.COM
 
 # Login shells default to enabled.
 # allow_login_shell = true
@@ -545,8 +548,10 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
   `default_shell`, then `SHELL`, passwd shell, `bash`, and `/bin/sh`.
 - POSIX exec uses `shell -c <cmd>` or `shell -l -c <cmd>` for login shells.
 - POSIX child processes currently force `LC_ALL=C.UTF-8` and `LANG=C.UTF-8`.
-- Windows C++ exec supports `cmd.exe`; `login=false` adds `/D` before `/C`,
-  while `login=true` omits `/D`.
+- Windows C++ exec supports `cmd.exe` and `command.com`. `cmd.exe` uses `/C`
+  and adds `/D` when `login=false`; `command.com` uses `/C` without `/D`
+  because `/D` is a `cmd.exe`-specific flag. The default shell is configured
+  `default_shell`, then supported `COMSPEC`, then `cmd.exe`.
 
 ## Limitations
 

@@ -39,6 +39,10 @@ bool is_windows_cmd_family(const std::string& lower) {
     return lower == "cmd.exe" || lower == "cmd";
 }
 
+bool is_windows_command_family(const std::string& lower) {
+    return lower == "command.com" || lower == "command";
+}
+
 bool is_windows_powershell_family(const std::string& lower) {
     return lower == "powershell.exe" || lower == "powershell" || lower == "pwsh.exe"
            || lower == "pwsh";
@@ -137,7 +141,8 @@ namespace platform {
 
 bool shell_supported(const std::string& shell) {
 #ifdef _WIN32
-    return is_windows_cmd_family(shell_basename_lower(shell));
+    const std::string lower = shell_basename_lower(shell);
+    return is_windows_cmd_family(lower) || is_windows_command_family(lower);
 #else
     (void)shell;
     return true;
@@ -148,7 +153,9 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
 #ifdef _WIN32
     if (!configured_default_shell.empty()) {
         if (!shell_supported(configured_default_shell)) {
-            throw std::runtime_error("only cmd.exe is supported on this Windows C++ daemon build");
+            throw std::runtime_error(
+                "only cmd.exe and command.com are supported on this Windows C++ daemon build"
+            );
         }
         return configured_default_shell;
     }
@@ -224,6 +231,11 @@ std::vector<std::string> shell_argv(
         if (!login) {
             argv.push_back("/D");
         }
+        argv.push_back("/C");
+        argv.push_back(command);
+        return argv;
+    }
+    if (is_windows_command_family(lower)) {
         argv.push_back("/C");
         argv.push_back(command);
         return argv;
