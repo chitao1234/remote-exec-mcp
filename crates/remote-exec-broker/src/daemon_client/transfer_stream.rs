@@ -62,8 +62,9 @@ fn status_for_terminal_error(code: Option<RpcErrorCode>) -> StatusCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::pin_mut;
     use remote_exec_proto::rpc::{
-        TRANSFER_STREAM_PREFACE, TransferStreamComplete, TransferStreamFrameType,
+        RpcErrorBody, TRANSFER_STREAM_PREFACE, TransferStreamComplete, TransferStreamFrameType,
         encode_transfer_stream_frame,
     };
 
@@ -136,8 +137,9 @@ mod tests {
         chunks: Vec<Result<Bytes, std::io::Error>>,
     ) -> Result<Vec<u8>, DaemonClientError> {
         let mut output = Vec::new();
-        let mut stream = decode_transfer_stream_body(futures_util::stream::iter(chunks))
+        let stream = decode_transfer_stream_body(futures_util::stream::iter(chunks))
             .map_err(decode_error_to_client_error);
+        pin_mut!(stream);
         while let Some(chunk) = stream.try_next().await? {
             output.extend_from_slice(&chunk);
         }

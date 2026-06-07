@@ -243,6 +243,7 @@ mod tool_router_contract_tests {
             tools: Default::default(),
             port_forward_limits: Default::default(),
             host_sandbox: None,
+            host_filesystem: Default::default(),
             sessions: Default::default(),
             port_forwards: Default::default(),
             targets: Default::default(),

@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -27,9 +28,27 @@ pub(crate) struct BrokerStateInit {
     pub(crate) tools: crate::config::BrokerToolsConfig,
     pub(crate) port_forward_limits: port_forward::BrokerPortForwardLimits,
     pub(crate) host_sandbox: Option<CompiledFilesystemSandbox>,
+    pub(crate) host_filesystem: BrokerHostFilesystemConfig,
     pub(crate) sessions: SessionStore,
     pub(crate) port_forwards: port_forward::PortForwardStore,
     pub(crate) targets: BTreeMap<String, TargetHandle>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct BrokerHostFilesystemConfig {
+    windows_posix_root: Option<PathBuf>,
+}
+
+impl BrokerHostFilesystemConfig {
+    pub(crate) fn from_local_config(local: Option<&crate::config::LocalTargetConfig>) -> Self {
+        Self {
+            windows_posix_root: local.and_then(|config| config.windows_posix_root.clone()),
+        }
+    }
+
+    pub(crate) fn windows_posix_root(&self) -> Option<&Path> {
+        self.windows_posix_root.as_deref()
+    }
 }
 
 #[derive(Clone)]
@@ -41,6 +60,7 @@ pub struct BrokerState {
     pub(crate) tools: crate::config::BrokerToolsConfig,
     pub(crate) port_forward_limits: port_forward::BrokerPortForwardLimits,
     pub(crate) host_sandbox: Option<CompiledFilesystemSandbox>,
+    pub(crate) host_filesystem: BrokerHostFilesystemConfig,
     pub(crate) sessions: SessionStore,
     pub(crate) port_forwards: port_forward::PortForwardStore,
     targets: BTreeMap<String, TargetHandle>,
@@ -71,6 +91,7 @@ impl BrokerState {
             tools: init.tools,
             port_forward_limits: init.port_forward_limits,
             host_sandbox: init.host_sandbox,
+            host_filesystem: init.host_filesystem,
             sessions: init.sessions,
             port_forwards: init.port_forwards,
             targets: init.targets,

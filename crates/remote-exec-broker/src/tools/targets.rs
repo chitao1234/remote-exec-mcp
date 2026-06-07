@@ -98,6 +98,7 @@ mod tests {
             tools: crate::config::BrokerToolsConfig::default(),
             port_forward_limits: crate::port_forward::BrokerPortForwardLimits::default(),
             host_sandbox: None,
+            host_filesystem: Default::default(),
             sessions: SessionStore::default(),
             port_forwards: crate::port_forward::PortForwardStore::default(),
             targets: Default::default(),

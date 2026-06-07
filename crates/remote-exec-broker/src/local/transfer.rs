@@ -28,6 +28,7 @@ pub async fn export_path_to_archive(
     archive_path: &Path,
     request: &remote_exec_proto::rpc::TransferExportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<ExportedArchive> {
     let exported = remote_exec_host::transfer::archive::export_path_to_file(
         path,
@@ -36,7 +37,7 @@ pub async fn export_path_to_archive(
         request.symlink_mode.clone(),
         &request.exclude,
         sandbox,
-        None,
+        windows_posix_root,
     )
     .await?;
     Ok(ExportedArchive {
@@ -48,6 +49,7 @@ pub async fn export_path_to_byte_stream(
     path: &str,
     request: &remote_exec_proto::rpc::TransferExportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<ExportedArchiveByteStream> {
     remote_exec_host::transfer::archive::export_path_to_byte_stream(
         path,
@@ -55,7 +57,7 @@ pub async fn export_path_to_byte_stream(
         request.symlink_mode.clone(),
         &request.exclude,
         sandbox,
-        None,
+        windows_posix_root,
     )
     .await
     .map_err(Into::into)
@@ -119,13 +121,14 @@ pub async fn import_archive_from_file(
     archive_path: &Path,
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
     limits: TransferLimits,
 ) -> anyhow::Result<TransferImportResponse> {
     remote_exec_host::transfer::archive::import_archive_from_file(
         archive_path,
         request,
         sandbox,
-        None,
+        windows_posix_root,
         limits,
     )
     .await
@@ -136,13 +139,18 @@ pub async fn import_archive_from_async_reader<R>(
     reader: R,
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
     limits: TransferLimits,
 ) -> anyhow::Result<TransferImportResponse>
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
     remote_exec_host::transfer::archive::import_archive_from_async_reader(
-        reader, request, sandbox, None, limits,
+        reader,
+        request,
+        sandbox,
+        windows_posix_root,
+        limits,
     )
     .await
     .map_err(Into::into)
@@ -151,8 +159,9 @@ where
 pub fn path_info(
     path: &str,
     sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
 ) -> Result<TransferPathInfoResponse, DaemonClientError> {
-    remote_exec_host::transfer::path_info_for_path(path, sandbox, None)
+    remote_exec_host::transfer::path_info_for_path(path, sandbox, windows_posix_root)
         .map_err(crate::local::backend::map_local_transfer_error)
 }
 

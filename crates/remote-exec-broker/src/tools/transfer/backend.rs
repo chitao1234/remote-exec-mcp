@@ -130,12 +130,14 @@ pub(super) async fn backend_for_planned_endpoint<'a>(
 fn broker_host_backend(state: &crate::BrokerState) -> TransferEndpointBackend<'_> {
     TransferEndpointBackend::BrokerHost(BrokerHostTransferBackend {
         sandbox: state.host_sandbox.as_ref(),
+        windows_posix_root: state.host_filesystem.windows_posix_root(),
         limits: state.transfer_limits,
     })
 }
 
 pub(super) struct BrokerHostTransferBackend<'a> {
     sandbox: Option<&'a CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&'a Path>,
     limits: TransferLimits,
 }
 
@@ -203,7 +205,9 @@ impl TransferBackend for BrokerHostTransferBackend<'_> {
         &'a self,
         request: &'a TransferPathInfoRequest,
     ) -> BoxFuture<'a, Result<TransferPathInfoResponse, DaemonClientError>> {
-        Box::pin(async move { crate::local::transfer::path_info(&request.path, self.sandbox) })
+        Box::pin(async move {
+            crate::local::transfer::path_info(&request.path, self.sandbox, self.windows_posix_root)
+        })
     }
 
     fn export_to_file<'a>(
@@ -217,6 +221,7 @@ impl TransferBackend for BrokerHostTransferBackend<'_> {
                 archive_path,
                 request,
                 self.sandbox,
+                self.windows_posix_root,
             )
             .await?;
             Ok(ExportedArchive {
@@ -234,6 +239,7 @@ impl TransferBackend for BrokerHostTransferBackend<'_> {
                 &request.path,
                 request,
                 self.sandbox,
+                self.windows_posix_root,
             )
             .await?;
             let reader = crate::local::transfer::export_byte_stream_reader(exported.receiver);
@@ -251,6 +257,7 @@ impl TransferBackend for BrokerHostTransferBackend<'_> {
                 archive_path,
                 request,
                 self.sandbox,
+                self.windows_posix_root,
                 self.limits,
             )
             .await
@@ -267,6 +274,7 @@ impl TransferBackend for BrokerHostTransferBackend<'_> {
                 archive.into_async_read(),
                 request,
                 self.sandbox,
+                self.windows_posix_root,
                 self.limits,
             )
             .await

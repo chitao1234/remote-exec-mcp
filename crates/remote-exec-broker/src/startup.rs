@@ -64,6 +64,9 @@ pub async fn build_state(config: config::ValidatedBrokerConfig) -> anyhow::Resul
         tools: config.tools,
         port_forward_limits: config.port_forward_limits,
         host_sandbox,
+        host_filesystem: crate::state::BrokerHostFilesystemConfig::from_local_config(
+            config.local.as_ref(),
+        ),
         sessions: SessionStore::default(),
         port_forwards: port_forward::PortForwardStore::default(),
         targets,
@@ -461,6 +464,47 @@ mod tests {
         for snapshot in state.target_status_snapshots().await {
             assert_eq!(snapshot.daemon_info, None);
         }
+    }
+
+    #[tokio::test]
+    async fn build_state_uses_local_windows_posix_root_for_broker_host_filesystem() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let windows_posix_root = tempdir.path().join("msys64");
+        std::fs::create_dir(&windows_posix_root).unwrap();
+
+        let state = build_state(
+            BrokerConfig {
+                mcp: Default::default(),
+                host_sandbox: None,
+                enable_transfer_compression: true,
+                transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
+                disable_structured_content: false,
+                tools: Default::default(),
+                port_forward_limits: Default::default(),
+                health_refresh: Default::default(),
+                targets: BTreeMap::new(),
+                local: Some(LocalTargetConfig {
+                    default_workdir: tempdir.path().to_path_buf(),
+                    windows_posix_root: Some(windows_posix_root.clone()),
+                    allow_login_shell: true,
+                    pty: remote_exec_host::PtyMode::Auto,
+                    default_shell: None,
+                    yield_time: remote_exec_host::YieldTimeConfig::default(),
+                    transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
+                    port_forward_limits: remote_exec_host::HostPortForwardLimits::default(),
+                    experimental_apply_patch_target_encoding_autodetect: false,
+                }),
+            }
+            .into_validated()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            state.host_filesystem.windows_posix_root(),
+            Some(windows_posix_root.as_path())
+        );
     }
 
     #[tokio::test]
