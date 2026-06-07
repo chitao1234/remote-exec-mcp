@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(test)]
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
@@ -41,9 +42,11 @@ struct QueuedFrame {
 struct PortTunnelBackpressureError;
 
 impl PortTunnel {
+    #[cfg(test)]
     pub const DEFAULT_MAX_QUEUED_BYTES: usize =
         remote_exec_proto::port_forward::DEFAULT_TUNNEL_QUEUE_BYTES as usize;
 
+    #[cfg(test)]
     pub fn from_stream<S>(stream: S) -> Result<Self, DaemonClientError>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -178,6 +181,7 @@ impl PortTunnel {
         abort_tunnel_task(&mut *self.heartbeat_task.lock().await);
     }
 
+    #[cfg(test)]
     pub async fn wait_closed(&self, timeout: Duration) -> anyhow::Result<()> {
         let reader_task = self.reader_task.lock().await.take();
         let writer_task = self.writer_task.lock().await.take();
@@ -199,6 +203,7 @@ impl PortTunnel {
     }
 }
 
+#[cfg(test)]
 async fn wait_for_tunnel_task(
     name: &'static str,
     task: Option<JoinHandle<()>>,

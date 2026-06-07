@@ -48,6 +48,7 @@ impl DaemonRpcCode {
 }
 
 impl DaemonClientError {
+    #[cfg(test)]
     pub fn rpc_code(&self) -> Option<&str> {
         match self {
             Self::Rpc { code, .. } => code.as_ref().map(DaemonRpcCode::as_wire_value),
