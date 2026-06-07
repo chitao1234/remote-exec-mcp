@@ -21,8 +21,9 @@ pub async fn tunnel(
     request: axum::extract::Request,
 ) -> Result<Response, RpcError> {
     validate_upgrade_headers(&headers)?;
-    let connection_permit = remote_exec_host::port_forward::reserve_tunnel_connection(&state)
-        .map_err(crate::rpc_error::host_rpc_error_response)?;
+    let connection_permit = crate::rpc_error::host_response(
+        remote_exec_host::port_forward::reserve_tunnel_connection(&state),
+    )?;
     let on_upgrade = upgrade::on(request);
 
     let shutdown = state.shutdown_token();

@@ -21,15 +21,15 @@ use remote_exec_proto::rpc::{
 
 use crate::AppState;
 use crate::rpc_error::RpcError;
-use crate::rpc_error::domain_error_response;
 
 pub async fn path_info(
     State(state): State<Arc<AppState>>,
     Json(req): Json<TransferPathInfoRequest>,
 ) -> Result<Json<TransferPathInfoResponse>, RpcError> {
-    remote_exec_host::transfer::path_info_for_request(state.as_ref(), &req)
-        .map(Json)
-        .map_err(domain_error_response)
+    crate::rpc_error::domain_json_response(remote_exec_host::transfer::path_info_for_request(
+        state.as_ref(),
+        &req,
+    ))
 }
 
 pub async fn export_path(
@@ -46,9 +46,8 @@ pub async fn export_path(
         "transfer export received"
     );
 
-    let exported = remote_exec_host::transfer::export_path_byte_stream_local(state, req)
-        .await
-        .map_err(domain_error_response)?;
+    let exported = remote_exec_host::transfer::export_path_byte_stream_local(state, req).await;
+    let exported = crate::rpc_error::domain_response(exported)?;
     let metadata =
         codec::export_metadata(exported.source_type.clone(), exported.compression.clone());
     let body = Body::from_stream(framed_export_stream(exported.receiver));
@@ -60,7 +59,7 @@ pub async fn export_path(
 
     codec::apply_export_headers(Response::builder(), &metadata)
         .body(body)
-        .map_err(|err| crate::exec::internal_error(err.into()))
+        .map_err(|err| crate::rpc_error::internal_response(err.into()))
 }
 
 pub async fn import_archive(
@@ -82,9 +81,8 @@ pub async fn import_archive(
     );
     let request = metadata.clone();
     let reader = tokio_util::io::StreamReader::new(framed_import_data_stream(body).boxed());
-    let summary = remote_exec_host::transfer::import_archive_local(state, request, reader)
-        .await
-        .map_err(domain_error_response)?;
+    let summary = remote_exec_host::transfer::import_archive_local(state, request, reader).await;
+    let summary = crate::rpc_error::domain_response(summary)?;
     tracing::info!(
         destination_path = %metadata.destination_path,
         bytes_copied = summary.bytes_copied,

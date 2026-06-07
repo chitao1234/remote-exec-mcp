@@ -6,7 +6,7 @@ use remote_exec_proto::rpc::{RpcErrorBody, RpcErrorCode};
 pub(crate) type RpcError = (StatusCode, Json<RpcErrorBody>);
 
 pub(crate) fn bad_request(message: impl Into<String>) -> RpcError {
-    crate::exec::rpc_error(RpcErrorCode::BadRequest, message)
+    host_rpc_error_response(HostRpcError::new(400, RpcErrorCode::BadRequest, message))
 }
 
 pub(crate) fn host_rpc_error_response(err: HostRpcError) -> RpcError {
@@ -22,6 +22,32 @@ where
     E: Into<HostRpcError>,
 {
     host_rpc_error_response(err.into())
+}
+
+pub(crate) fn host_response<T>(result: Result<T, HostRpcError>) -> Result<T, RpcError> {
+    result.map_err(host_rpc_error_response)
+}
+
+pub(crate) fn domain_response<T, E>(result: Result<T, E>) -> Result<T, RpcError>
+where
+    E: Into<HostRpcError>,
+{
+    result.map_err(domain_error_response)
+}
+
+pub(crate) fn host_json_response<T>(result: Result<T, HostRpcError>) -> Result<Json<T>, RpcError> {
+    host_response(result).map(Json)
+}
+
+pub(crate) fn domain_json_response<T, E>(result: Result<T, E>) -> Result<Json<T>, RpcError>
+where
+    E: Into<HostRpcError>,
+{
+    domain_response(result).map(Json)
+}
+
+pub(crate) fn internal_response(err: anyhow::Error) -> RpcError {
+    host_rpc_error_response(remote_exec_host::exec::internal_error(err))
 }
 
 #[cfg(test)]

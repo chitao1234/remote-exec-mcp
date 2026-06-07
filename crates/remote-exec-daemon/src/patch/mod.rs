@@ -10,8 +10,7 @@ pub async fn apply_patch(
     State(state): State<Arc<crate::AppState>>,
     Json(req): Json<PatchApplyRequest>,
 ) -> Result<Json<PatchApplyResponse>, RpcError> {
-    remote_exec_host::patch::apply_patch_local(state, req)
-        .await
-        .map(Json)
-        .map_err(crate::rpc_error::host_rpc_error_response)
+    crate::rpc_error::host_json_response(
+        remote_exec_host::patch::apply_patch_local(state, req).await,
+    )
 }
