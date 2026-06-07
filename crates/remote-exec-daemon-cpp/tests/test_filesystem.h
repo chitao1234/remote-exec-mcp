@@ -8,9 +8,8 @@
 
 #ifdef _WIN32
 #include "platform/win32_error.h"
-#include "platform/win32_utf8.h"
+#include "platform/win32_native_string.h"
 #include <direct.h>
-#include <wchar.h>
 #include <windows.h>
 #else
 #include <cerrno>
@@ -88,35 +87,32 @@ inline path operator/(const path& base, const path& child) {
 }
 
 #ifdef _WIN32
-inline std::wstring wide_from_utf8(const std::string& value) {
+inline remote_exec_win32::NativeString native_from_utf8(const std::string& value) {
     try {
-        return win32_utf8::wide_from_utf8(value);
+        return remote_exec_win32::native_from_utf8(value, "test filesystem");
     } catch (const std::exception&) {
-        throw std::runtime_error("unable to decode UTF-8 path");
+        throw std::runtime_error("unable to convert UTF-8 path");
     }
 }
 
-inline std::string utf8_from_wide(const std::wstring& value) {
+inline std::string utf8_from_native(const remote_exec_win32::NativeString& value) {
     try {
-        return win32_utf8::utf8_from_wide(value);
+        return remote_exec_win32::utf8_from_native(value, "test filesystem");
     } catch (const std::exception&) {
-        throw std::runtime_error("unable to encode UTF-8 path");
+        throw std::runtime_error("unable to convert native path to UTF-8");
     }
-}
-
-inline std::wstring wide_mode_from_ascii(const char* mode) {
-    std::wstring wide;
-    while (mode != NULL && *mode != '\0') {
-        wide.push_back(static_cast<unsigned char>(*mode));
-        ++mode;
-    }
-    return wide;
 }
 #endif
 
 inline FILE* open_file(const path& target, const char* mode) {
 #ifdef _WIN32
-    return _wfopen(wide_from_utf8(target.string()).c_str(), wide_mode_from_ascii(mode).c_str());
+    const remote_exec_win32::NativeString native = native_from_utf8(target.string());
+#ifdef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
+    return std::fopen(native.c_str(), mode);
+#else
+    const remote_exec_win32::NativeString native_mode = remote_exec_win32::native_from_ascii(mode);
+    return _wfopen(native.c_str(), native_mode.c_str());
+#endif
 #else
     return std::fopen(target.c_str(), mode);
 #endif
@@ -204,11 +200,13 @@ inline unsigned long current_process_id() {
 }
 
 inline bool exists(const path& target) {
-    return GetFileAttributesW(wide_from_utf8(target.string()).c_str()) != INVALID_FILE_ATTRIBUTES;
+    const remote_exec_win32::NativeString native = native_from_utf8(target.string());
+    return remote_exec_win32::get_file_attributes_native(native.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
 inline bool is_directory(const path& target) {
-    const DWORD attributes = GetFileAttributesW(wide_from_utf8(target.string()).c_str());
+    const remote_exec_win32::NativeString native = native_from_utf8(target.string());
+    const DWORD attributes = remote_exec_win32::get_file_attributes_native(native.c_str());
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
@@ -223,9 +221,10 @@ inline void create_directory_if_missing(const path& target) {
     if (target.string().empty() || exists(target)) {
         return;
     }
-    if (!CreateDirectoryW(wide_from_utf8(target.string()).c_str(), NULL)
+    const remote_exec_win32::NativeString native = native_from_utf8(target.string());
+    if (!remote_exec_win32::create_directory_native(native.c_str())
         && GetLastError() != ERROR_ALREADY_EXISTS) {
-        throw_last_error("CreateDirectoryW", target);
+        throw_last_error(remote_exec_win32::native_api_name("CreateDirectory"), target);
     }
 }
 
@@ -255,34 +254,37 @@ inline void create_directories(const path& target) {
 }
 
 inline void remove_all(const path& target) {
-    const DWORD attributes = GetFileAttributesW(wide_from_utf8(target.string()).c_str());
+    const remote_exec_win32::NativeString native = native_from_utf8(target.string());
+    const DWORD attributes = remote_exec_win32::get_file_attributes_native(native.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES) {
         return;
     }
 
     if ((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
-        if (!DeleteFileW(wide_from_utf8(target.string()).c_str())) {
-            throw_last_error("DeleteFileW", target);
+        if (!remote_exec_win32::delete_file_native(native.c_str())) {
+            throw_last_error(remote_exec_win32::native_api_name("DeleteFile"), target);
         }
         return;
     }
 
     const path search = target / "*";
-    WIN32_FIND_DATAW data;
-    HANDLE handle = FindFirstFileW(wide_from_utf8(search.string()).c_str(), &data);
+    remote_exec_win32::NativeFindData data;
+    const remote_exec_win32::NativeString native_search = native_from_utf8(search.string());
+    HANDLE handle = remote_exec_win32::find_first_file_native(native_search.c_str(), &data);
     if (handle != INVALID_HANDLE_VALUE) {
         do {
-            const std::string name = utf8_from_wide(data.cFileName);
+            const std::string name =
+                remote_exec_win32::utf8_from_native(data.cFileName, "FindFirstFile");
             if (name == "." || name == "..") {
                 continue;
             }
             remove_all(target / name);
-        } while (FindNextFileW(handle, &data));
+        } while (remote_exec_win32::find_next_file_native(handle, &data));
         FindClose(handle);
     }
 
-    if (!RemoveDirectoryW(wide_from_utf8(target.string()).c_str())) {
-        throw_last_error("RemoveDirectoryW", target);
+    if (!remote_exec_win32::remove_directory_native(native.c_str())) {
+        throw_last_error(remote_exec_win32::native_api_name("RemoveDirectory"), target);
     }
 }
 

@@ -29,7 +29,7 @@ bool code_page_available(unsigned int code_page) {
 }
 
 bool is_wine_runtime() {
-    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    const HMODULE ntdll = GetModuleHandleA("ntdll.dll");
     return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
 }
 

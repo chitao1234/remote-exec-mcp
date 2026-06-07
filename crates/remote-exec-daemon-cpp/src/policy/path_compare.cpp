@@ -5,7 +5,7 @@
 
 #ifdef _WIN32
 #include "platform/win32_dynamic.h"
-#include "platform/win32_utf8.h"
+#include "platform/win32_native_string.h"
 #include <windows.h>
 #endif
 
@@ -73,6 +73,7 @@ ParsedPath parse_host_path(const std::string& raw) {
 }
 
 #ifdef _WIN32
+#ifndef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
 typedef int(WINAPI* CompareStringOrdinalFn)(const WCHAR*, int, const WCHAR*, int, BOOL);
 
 std::wstring wide_from_utf8(const std::string& value) {
@@ -87,7 +88,7 @@ CompareStringOrdinalFn compare_string_ordinal_fn() {
     static CompareStringOrdinalFn fn = nullptr;
     static bool initialized = false;
     if (!initialized) {
-        HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+        HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
         if (kernel32 != nullptr) {
             fn = remote_exec_win32::proc_address_as<CompareStringOrdinalFn>(
                 GetProcAddress(kernel32, "CompareStringOrdinal")
@@ -97,6 +98,7 @@ CompareStringOrdinalFn compare_string_ordinal_fn() {
     }
     return fn;
 }
+#endif
 
 bool ascii_case_equal(const std::string& left, const std::string& right) {
     if (left.size() != right.size()) {
@@ -116,6 +118,21 @@ bool ascii_case_equal(const std::string& left, const std::string& right) {
 
 bool component_equal(const std::string& left, const std::string& right) {
     try {
+#ifdef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
+        const remote_exec_win32::NativeString left_native =
+            remote_exec_win32::native_from_utf8(left, "CompareStringA");
+        const remote_exec_win32::NativeString right_native =
+            remote_exec_win32::native_from_utf8(right, "CompareStringA");
+        return CompareStringA(
+                   LOCALE_USER_DEFAULT,
+                   NORM_IGNORECASE,
+                   left_native.empty() ? nullptr : left_native.data(),
+                   static_cast<int>(left_native.size()),
+                   right_native.empty() ? nullptr : right_native.data(),
+                   static_cast<int>(right_native.size())
+               )
+               == CSTR_EQUAL;
+#else
         const std::wstring left_wide = wide_from_utf8(left);
         const std::wstring right_wide = wide_from_utf8(right);
         const CompareStringOrdinalFn ordinal = compare_string_ordinal_fn();
@@ -138,6 +155,7 @@ bool component_equal(const std::string& left, const std::string& right) {
                    static_cast<int>(right_wide.size())
                )
                == CSTR_EQUAL;
+#endif
     } catch (const std::exception& ex) {
         LogMessageBuilder message("Windows path comparison fallback to ASCII case folding");
         message.quoted_field("left", preview_text(left, 120))

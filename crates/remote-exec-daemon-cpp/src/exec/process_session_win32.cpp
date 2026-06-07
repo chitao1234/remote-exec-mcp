@@ -20,21 +20,12 @@
 #include "platform/platform.h"
 #include "platform/win32_dynamic.h"
 #include "platform/win32_error.h"
+#include "platform/win32_native_string.h"
 #include "platform/win32_process_tree.h"
 #include "platform/win32_scoped.h"
 #include "platform/win32_utf8.h"
 
 namespace {
-
-std::wstring wide_from_utf8(const std::string& value) {
-    try {
-        return win32_utf8::wide_from_utf8(value);
-    } catch (const std::exception& ex) {
-        throw std::runtime_error(
-            std::string("unable to decode UTF-8 for CreateProcessW: ") + ex.what()
-        );
-    }
-}
 
 std::string windows_quote_arg(const std::string& arg) {
     if (arg.empty()) {
@@ -246,7 +237,7 @@ bool is_output_closed_error(DWORD error) {
 }
 
 bool is_wine_runtime() {
-    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    const HMODULE ntdll = GetModuleHandleA("ntdll.dll");
     return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
 }
 
@@ -265,7 +256,7 @@ DWORD process_id_from_process_handle(HANDLE process) {
         return 0U;
     }
 
-    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    const HMODULE ntdll = GetModuleHandleA("ntdll.dll");
     if (ntdll == nullptr) {
         return 0U;
     }
@@ -500,8 +491,9 @@ SpawnedWinptyProcess spawn_winpty_process(
     bool login
 ) {
     const std::string command_line = windows_process_command_line(command, shell, login);
-    std::wstring wide_command_line = wide_from_utf8(command_line);
-    std::wstring wide_workdir = workdir.empty() ? std::wstring() : wide_from_utf8(workdir);
+    std::wstring wide_command_line = win32_utf8::wide_from_utf8(command_line);
+    std::wstring wide_workdir =
+        workdir.empty() ? std::wstring() : win32_utf8::wide_from_utf8(workdir);
 
     WinptyErrorHandle error;
     UniqueWinptySpawnConfig spawn_config(winpty_spawn_config_new(
@@ -797,7 +789,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     SetHandleInformation(stdout_pipe.read_end.get(), HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(stdin_pipe.write_end.get(), HANDLE_FLAG_INHERIT, 0);
 
-    STARTUPINFOW startup_info;
+    remote_exec_win32::NativeStartupInfo startup_info;
     ZeroMemory(&startup_info, sizeof(startup_info));
     startup_info.cb = sizeof(startup_info);
     startup_info.dwFlags = STARTF_USESTDHANDLES;
@@ -809,12 +801,18 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     ZeroMemory(&process_info, sizeof(process_info));
 
     const std::string command_line = windows_process_command_line(command, shell, login);
-    std::wstring wide_command_line = wide_from_utf8(command_line);
-    std::vector<wchar_t> mutable_command_line(wide_command_line.begin(), wide_command_line.end());
-    mutable_command_line.push_back(L'\0');
-    const std::wstring wide_workdir = workdir.empty() ? std::wstring() : wide_from_utf8(workdir);
+    remote_exec_win32::NativeString native_command_line =
+        remote_exec_win32::native_from_utf8(command_line, "CreateProcess");
+    std::vector<remote_exec_win32::NativeChar> mutable_command_line(
+        native_command_line.begin(),
+        native_command_line.end()
+    );
+    mutable_command_line.push_back(remote_exec_win32::native_char('\0'));
+    const remote_exec_win32::NativeString native_workdir =
+        workdir.empty() ? remote_exec_win32::NativeString()
+                        : remote_exec_win32::native_from_utf8(workdir, "CreateProcess");
 
-    const BOOL created = CreateProcessW(
+    const BOOL created = remote_exec_win32::create_process_native(
         nullptr,
         &mutable_command_line[0],
         nullptr,
@@ -822,7 +820,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         TRUE,
         0,
         nullptr,
-        workdir.empty() ? nullptr : wide_workdir.c_str(),
+        workdir.empty() ? nullptr : native_workdir.c_str(),
         &startup_info,
         &process_info
     );
@@ -831,7 +829,9 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     stdout_pipe.write_end.reset();
 
     if (created == 0) {
-        throw std::runtime_error(last_error_message("CreateProcessW"));
+        throw std::runtime_error(
+            last_error_message(remote_exec_win32::native_api_name("CreateProcess").c_str())
+        );
     }
 
     UniqueHandle process_handle(process_info.hProcess);

@@ -359,15 +359,16 @@ static void assert_win32_process_tree_terminates_descendants(const fs::path& roo
         "cmd.exe /D /C start \"remote-exec-tree-test\" /B cmd.exe /D /C "
         + windows_quote_arg_for_test(child_command) + " & ping -n 31 127.0.0.1>nul";
 
-    std::wstring wide_parent_command = test_fs::wide_from_utf8(parent_command);
-    std::vector<wchar_t> mutable_command_line(
-        wide_parent_command.begin(),
-        wide_parent_command.end()
+    remote_exec_win32::NativeString native_parent_command =
+        test_fs::native_from_utf8(parent_command);
+    std::vector<remote_exec_win32::NativeChar> mutable_command_line(
+        native_parent_command.begin(),
+        native_parent_command.end()
     );
-    mutable_command_line.push_back(L'\0');
-    const std::wstring wide_workdir = test_fs::wide_from_utf8(root.string());
+    mutable_command_line.push_back(remote_exec_win32::native_char('\0'));
+    const remote_exec_win32::NativeString native_workdir = test_fs::native_from_utf8(root.string());
 
-    STARTUPINFOW startup_info;
+    remote_exec_win32::NativeStartupInfo startup_info;
     ZeroMemory(&startup_info, sizeof(startup_info));
     startup_info.cb = sizeof(startup_info);
     startup_info.dwFlags = STARTF_USESHOWWINDOW;
@@ -376,7 +377,7 @@ static void assert_win32_process_tree_terminates_descendants(const fs::path& roo
     PROCESS_INFORMATION process_info;
     ZeroMemory(&process_info, sizeof(process_info));
     TEST_ASSERT(
-        CreateProcessW(
+        remote_exec_win32::create_process_native(
             nullptr,
             &mutable_command_line[0],
             nullptr,
@@ -384,7 +385,7 @@ static void assert_win32_process_tree_terminates_descendants(const fs::path& roo
             FALSE,
             CREATE_NO_WINDOW,
             nullptr,
-            wide_workdir.c_str(),
+            native_workdir.c_str(),
             &startup_info,
             &process_info
         )

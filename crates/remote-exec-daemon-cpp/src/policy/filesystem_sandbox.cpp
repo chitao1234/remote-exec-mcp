@@ -10,7 +10,7 @@
 #include <windows.h>
 
 #include "platform/win32_error.h"
-#include "platform/win32_utf8.h"
+#include "platform/win32_native_string.h"
 #else
 #include <unistd.h>
 
@@ -164,19 +164,19 @@ std::string lexical_normalize_for_policy(PathPolicy policy, const std::string& r
 }
 
 #ifdef _WIN32
-std::wstring wide_from_utf8_path(const std::string& value) {
+remote_exec_win32::NativeString native_from_utf8_path(const std::string& value) {
     try {
-        return win32_utf8::wide_from_utf8(value);
+        return remote_exec_win32::native_from_utf8(value, "sandbox path");
     } catch (const std::exception& ex) {
-        throw SandboxError(std::string("unable to decode path as UTF-8: ") + ex.what());
+        throw SandboxError(std::string("unable to convert path for Win32: ") + ex.what());
     }
 }
 
-std::string utf8_from_wide_path(const std::wstring& value) {
+std::string utf8_from_native_path(const remote_exec_win32::NativeString& value) {
     try {
-        return win32_utf8::utf8_from_wide(value);
+        return remote_exec_win32::utf8_from_native(value, "sandbox path");
     } catch (const std::exception& ex) {
-        throw SandboxError(std::string("unable to encode path as UTF-8: ") + ex.what());
+        throw SandboxError(std::string("unable to convert Win32 path to UTF-8: ") + ex.what());
     }
 }
 
@@ -212,44 +212,60 @@ std::string parent_for_windows_path(std::string path) {
 }
 
 std::string full_windows_path_for_existing_path(const std::string& path) {
-    const std::wstring wide = wide_from_utf8_path(path);
-    DWORD length = GetFullPathNameW(wide.c_str(), 0, nullptr, nullptr);
+    const remote_exec_win32::NativeString native = native_from_utf8_path(path);
+    DWORD length =
+        remote_exec_win32::get_full_path_name_native(native.c_str(), 0, nullptr, nullptr);
     if (length == 0U) {
         throw SandboxError(
-            "unable to canonicalize `" + path
-            + "`: " + error_message_from_code("GetFullPathNameW", GetLastError())
+            "unable to canonicalize `" + path + "`: "
+            + error_message_from_code(
+                remote_exec_win32::native_api_name("GetFullPathName").c_str(),
+                GetLastError()
+            )
         );
     }
 
-    std::vector<wchar_t> buffer(length + 1U);
-    length = GetFullPathNameW(wide.c_str(), static_cast<DWORD>(buffer.size()), &buffer[0], nullptr);
+    std::vector<remote_exec_win32::NativeChar> buffer(length + 1U);
+    length = remote_exec_win32::get_full_path_name_native(
+        native.c_str(),
+        static_cast<DWORD>(buffer.size()),
+        &buffer[0],
+        nullptr
+    );
     if (length == 0U || length >= buffer.size()) {
         throw SandboxError(
-            "unable to canonicalize `" + path
-            + "`: " + error_message_from_code("GetFullPathNameW", GetLastError())
+            "unable to canonicalize `" + path + "`: "
+            + error_message_from_code(
+                remote_exec_win32::native_api_name("GetFullPathName").c_str(),
+                GetLastError()
+            )
         );
     }
     return lexical_normalize_for_policy(
         windows_path_policy(),
-        utf8_from_wide_path(std::wstring(&buffer[0], length))
+        utf8_from_native_path(remote_exec_win32::NativeString(&buffer[0], length))
     );
 }
 
 std::string long_windows_leaf_for_existing_path(const std::string& path) {
     const std::string full = full_windows_path_for_existing_path(path);
-    WIN32_FIND_DATAW data;
-    const std::wstring wide = wide_from_utf8_path(full);
-    HANDLE find = FindFirstFileW(wide.c_str(), &data);
+    remote_exec_win32::NativeFindData data;
+    const remote_exec_win32::NativeString native = native_from_utf8_path(full);
+    HANDLE find = remote_exec_win32::find_first_file_native(native.c_str(), &data);
     if (find == INVALID_HANDLE_VALUE) {
         throw SandboxError(
-            "unable to canonicalize `" + path
-            + "`: " + error_message_from_code("FindFirstFileW", GetLastError())
+            "unable to canonicalize `" + path + "`: "
+            + error_message_from_code(
+                remote_exec_win32::native_api_name("FindFirstFile").c_str(),
+                GetLastError()
+            )
         );
     }
     FindClose(find);
 
     const std::string parent = parent_for_windows_path(full);
-    const std::string long_name = utf8_from_wide_path(data.cFileName);
+    const std::string long_name =
+        remote_exec_win32::utf8_from_native(data.cFileName, "FindFirstFile");
     if (parent.empty() || long_name.empty()) {
         return full;
     }
@@ -306,7 +322,9 @@ std::string canonicalize_windows_for_sandbox(const std::string& path) {
     std::vector<std::string> missing_components;
 
     for (;;) {
-        if (GetFileAttributesW(wide_from_utf8_path(probe).c_str()) != INVALID_FILE_ATTRIBUTES) {
+        const remote_exec_win32::NativeString native_probe = native_from_utf8_path(probe);
+        if (remote_exec_win32::get_file_attributes_native(native_probe.c_str())
+            != INVALID_FILE_ATTRIBUTES) {
             std::string rebuilt = canonicalize_existing_windows_path(probe);
             for (std::vector<std::string>::const_reverse_iterator it = missing_components.rbegin();
                  it != missing_components.rend();
@@ -319,8 +337,11 @@ std::string canonicalize_windows_for_sandbox(const std::string& path) {
         const DWORD error = GetLastError();
         if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
             throw SandboxError(
-                "unable to canonicalize `" + normalized
-                + "`: " + error_message_from_code("GetFileAttributesW", error)
+                "unable to canonicalize `" + normalized + "`: "
+                + error_message_from_code(
+                    remote_exec_win32::native_api_name("GetFileAttributes").c_str(),
+                    error
+                )
             );
         }
 

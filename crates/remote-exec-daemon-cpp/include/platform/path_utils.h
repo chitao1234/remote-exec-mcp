@@ -54,9 +54,4 @@ bool read_symlink_target(const std::string& path, std::string* target);
 bool create_symlink(const std::string& target, const std::string& path);
 std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path);
 
-#ifdef _WIN32
-std::wstring wide_from_utf8(const std::string& value);
-std::string utf8_from_wide(const std::wstring& value);
-#endif
-
 } // namespace path_utils

@@ -123,14 +123,25 @@ inline std::string windows_quote_arg(const std::string& arg) {
 }
 
 inline std::string test_executable_path() {
-    std::vector<wchar_t> buffer(MAX_PATH);
-    DWORD length = GetModuleFileNameW(nullptr, &buffer[0], static_cast<DWORD>(buffer.size()));
+    std::vector<remote_exec_win32::NativeChar> buffer(MAX_PATH);
+    DWORD length = remote_exec_win32::get_module_file_name_native(
+        nullptr,
+        &buffer[0],
+        static_cast<DWORD>(buffer.size())
+    );
     while (length == buffer.size()) {
         buffer.resize(buffer.size() * 2U);
-        length = GetModuleFileNameW(nullptr, &buffer[0], static_cast<DWORD>(buffer.size()));
+        length = remote_exec_win32::get_module_file_name_native(
+            nullptr,
+            &buffer[0],
+            static_cast<DWORD>(buffer.size())
+        );
     }
     TEST_ASSERT(length != 0U);
-    return test_fs::utf8_from_wide(std::wstring(buffer.begin(), buffer.begin() + length));
+    return remote_exec_win32::utf8_from_native(
+        remote_exec_win32::NativeString(buffer.begin(), buffer.begin() + length),
+        "GetModuleFileName"
+    );
 }
 
 inline std::string quoted_test_executable_path() {
@@ -262,7 +273,7 @@ inline int run_windows_stdin_helper(int argc, char** argv, int mode_index) {
 }
 
 inline bool is_wine_runtime() {
-    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    const HMODULE ntdll = GetModuleHandleA("ntdll.dll");
     return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
 }
 

@@ -11,27 +11,38 @@
 #include "core/logging.h"
 #include "platform/win32_dynamic.h"
 #include "platform/win32_error.h"
+#include "platform/win32_native_string.h"
 #include "platform/win32_scoped.h"
 
 namespace {
 
 typedef HANDLE(WINAPI* CreateToolhelp32SnapshotFn)(DWORD, DWORD);
+#ifdef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
+typedef BOOL(WINAPI* Process32FirstFn)(HANDLE, LPPROCESSENTRY32);
+typedef BOOL(WINAPI* Process32NextFn)(HANDLE, LPPROCESSENTRY32);
+#else
 typedef BOOL(WINAPI* Process32FirstWFn)(HANDLE, LPPROCESSENTRY32W);
 typedef BOOL(WINAPI* Process32NextWFn)(HANDLE, LPPROCESSENTRY32W);
+#endif
 
 struct ToolhelpApi {
     ToolhelpApi()
         : create_snapshot(nullptr), process_first(nullptr), process_next(nullptr), loaded(false) {}
 
     CreateToolhelp32SnapshotFn create_snapshot;
+#ifdef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
+    Process32FirstFn process_first;
+    Process32NextFn process_next;
+#else
     Process32FirstWFn process_first;
     Process32NextWFn process_next;
+#endif
     bool loaded;
 };
 
 ToolhelpApi load_toolhelp_api() {
     ToolhelpApi api;
-    HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+    HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
     if (kernel32 == nullptr) {
         return api;
     }
@@ -39,12 +50,31 @@ ToolhelpApi load_toolhelp_api() {
     api.create_snapshot = remote_exec_win32::proc_address_as<CreateToolhelp32SnapshotFn>(
         GetProcAddress(kernel32, "CreateToolhelp32Snapshot")
     );
+#ifdef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
+    api.process_first = remote_exec_win32::proc_address_as<Process32FirstFn>(
+        GetProcAddress(kernel32, "Process32First")
+    );
+    if (api.process_first == nullptr) {
+        api.process_first = remote_exec_win32::proc_address_as<Process32FirstFn>(
+            GetProcAddress(kernel32, "Process32FirstA")
+        );
+    }
+    api.process_next = remote_exec_win32::proc_address_as<Process32NextFn>(
+        GetProcAddress(kernel32, "Process32Next")
+    );
+    if (api.process_next == nullptr) {
+        api.process_next = remote_exec_win32::proc_address_as<Process32NextFn>(
+            GetProcAddress(kernel32, "Process32NextA")
+        );
+    }
+#else
     api.process_first = remote_exec_win32::proc_address_as<Process32FirstWFn>(
         GetProcAddress(kernel32, "Process32FirstW")
     );
     api.process_next = remote_exec_win32::proc_address_as<Process32NextWFn>(
         GetProcAddress(kernel32, "Process32NextW")
     );
+#endif
     api.loaded = api.create_snapshot != nullptr && api.process_first != nullptr
                  && api.process_next != nullptr;
     return api;
@@ -82,7 +112,11 @@ std::vector<ProcessEntry> snapshot_processes(const ToolhelpApi& api, bool* suppo
         return entries;
     }
 
+#ifdef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
+    PROCESSENTRY32 raw_entry;
+#else
     PROCESSENTRY32W raw_entry;
+#endif
     ZeroMemory(&raw_entry, sizeof(raw_entry));
     raw_entry.dwSize = sizeof(raw_entry);
 
@@ -92,8 +126,11 @@ std::vector<ProcessEntry> snapshot_processes(const ToolhelpApi& api, bool* suppo
             log_message(
                 LOG_WARN,
                 "process_tree",
-                std::string("Process32FirstW failed: ")
-                    + error_message_from_code("Process32FirstW", error)
+                std::string("Process32First failed: ")
+                    + error_message_from_code(
+                        remote_exec_win32::native_api_name("Process32First").c_str(),
+                        error
+                    )
             );
         }
         return entries;
@@ -113,8 +150,11 @@ std::vector<ProcessEntry> snapshot_processes(const ToolhelpApi& api, bool* suppo
                 log_message(
                     LOG_WARN,
                     "process_tree",
-                    std::string("Process32NextW failed: ")
-                        + error_message_from_code("Process32NextW", error)
+                    std::string("Process32Next failed: ")
+                        + error_message_from_code(
+                            remote_exec_win32::native_api_name("Process32Next").c_str(),
+                            error
+                        )
                 );
             }
             break;

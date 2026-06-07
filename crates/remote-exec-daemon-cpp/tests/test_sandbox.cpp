@@ -33,17 +33,24 @@ bool denied(
 
 #ifdef _WIN32
 std::string short_path_for_test(const fs::path& path) {
-    const std::wstring wide = test_fs::wide_from_utf8(path.string());
-    DWORD length = GetShortPathNameW(wide.c_str(), NULL, 0);
+    const remote_exec_win32::NativeString native = test_fs::native_from_utf8(path.string());
+    DWORD length = remote_exec_win32::get_short_path_name_native(native.c_str(), NULL, 0);
     if (length == 0U) {
         return "";
     }
-    std::vector<wchar_t> buffer(length + 1U);
-    length = GetShortPathNameW(wide.c_str(), &buffer[0], static_cast<DWORD>(buffer.size()));
+    std::vector<remote_exec_win32::NativeChar> buffer(length + 1U);
+    length = remote_exec_win32::get_short_path_name_native(
+        native.c_str(),
+        &buffer[0],
+        static_cast<DWORD>(buffer.size())
+    );
     if (length == 0U || length >= buffer.size()) {
         return "";
     }
-    return test_fs::utf8_from_wide(std::wstring(&buffer[0], length));
+    return remote_exec_win32::utf8_from_native(
+        remote_exec_win32::NativeString(&buffer[0], length),
+        "GetShortPathName"
+    );
 }
 
 bool distinct_short_path_for_test(const fs::path& path, std::string* short_path) {
