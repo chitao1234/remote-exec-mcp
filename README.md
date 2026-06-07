@@ -496,8 +496,8 @@ Winsock 1.1 variant; that same variant has also been tested on Windows NT 4.0.
 The GNU Windows NT 4.0 API-floor build also supports Winsock 2 when that
 runtime is installed. GNU Windows builds default to the Unicode Win32 API path.
 A GNU ANSI Win32 API path is available for Windows 9x/Me compatibility work
-and has been tested on Windows 98 SE. This path covers daemon-owned Win32
-file/process/path calls.
+and has been tested on Windows 95 and Windows 98 SE. This path covers
+daemon-owned Win32 file/process/path calls.
 
 The Rust and C++ daemons share the `max_open_sessions` default of 64. C++ also
 has daemon-local safety knobs for its handwritten HTTP parser and blocking
@@ -531,7 +531,8 @@ Use `check-windows-9x-ws1-ansi` or `check-windows-9x-ws2-ansi` for the GNU
 9x/Me ANSI paths; they set `WINVER=0x0400`, `_WIN32_WINDOWS=0x0400`, and
 `_CHICAGO_`. ANSI builds use the active Windows ANSI code page for Win32 paths
 and command strings, reject unrepresentable UTF-8 input, and disable GNU winpty
-auto-enable.
+auto-enable. The `9x-ws2-ansi` variant requires Winsock 2 to be installed on
+older 9x systems such as Windows 95.
 
 From an x86 Visual Studio developer prompt:
 
@@ -643,8 +644,9 @@ NT 4.0/Winsock 1 test binaries run under Wine on Linux when available, and the
 32-bit host-native MSVC NMAKE path runs on `windows-latest`. CI also gates
 owned C++ daemon source formatting with `clang-format`. The GNU Winsock 1.1
 Unicode variant has also been manually tested on Windows NT 3.51, and the GNU
-ANSI API path has been tested on Windows 98 SE. The MSVC path now exercises the
-vendored winpty-backed PTY build instead of a PTY-disabled fallback.
+ANSI API path has been tested on Windows 95 and Windows 98 SE. The MSVC path
+now exercises the vendored winpty-backed PTY build instead of a PTY-disabled
+fallback.
 
 A separate periodic/manual GitHub Actions workflow exercises BSD coverage inside
 GitHub-hosted BSD VMs for FreeBSD, OpenBSD, NetBSD, and DragonFly BSD. Each BSD

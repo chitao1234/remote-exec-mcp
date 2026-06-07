@@ -17,9 +17,9 @@ The minimum supported Windows runtime is Windows NT 3.51 through the GNU
 Winsock 1.1 Unicode variant, which has also been tested on Windows NT 4.0. The
 GNU Windows NT 4.0 API-floor build also supports Winsock 2 when that runtime is
 installed. A GNU ANSI Win32 API path is available for Windows 9x/Me
-compatibility work and has been tested on Windows 98 SE. Its 9x aliases keep a
-0x0400 Win32 API floor, define `_WIN32_WINDOWS=0x0400`, support Winsock 1.1
-and Winsock 2, and exclude winpty.
+compatibility work and has been tested on Windows 95 and Windows 98 SE. Its 9x
+aliases keep a 0x0400 Win32 API floor, define `_WIN32_WINDOWS=0x0400`, support
+Winsock 1.1 and Winsock 2, and exclude winpty.
 
 The former `remote-exec-daemon-xp` name referred to the original Windows XP-only
 shape. Current live behavior is documented here and in the repository root
@@ -130,8 +130,8 @@ Windows GNU build matrix:
   calls, converts UTF-8 JSON strings through the active Windows ANSI code page,
   and rejects paths or command strings that cannot be represented without
   default-character substitution. The ANSI path is intended for Windows 9x/Me
-  compatibility work and has been tested on Windows 98 SE through the `9x`
-  aliases.
+  compatibility work and has been tested on Windows 95 and Windows 98 SE
+  through the `9x` aliases.
 - `WINDOWS_WINSOCK_VERSION=2` builds the Winsock 2 path: `ws2_32`, negotiates
   Winsock 2.2, 2.1, or 2.0 at startup, and uses native
   `getaddrinfo`/`getnameinfo` when the runtime exports them. Older stacks
@@ -149,7 +149,8 @@ Windows GNU build matrix:
   Winsock 1.1 path. Use `9x-ws1-ansi` aliases for this variant.
 - `WINDOWS_FAMILY=9x WINDOWS_WINVER=0x0400 WINDOWS_WIN32_WINDOWS=0x0400
   WINDOWS_WINSOCK_VERSION=2 WINDOWS_CHAR_API=ansi` is the GNU 9x/Me ANSI
-  Winsock 2 path. Use `9x-ws2-ansi` aliases for this variant.
+  Winsock 2 path. Use `9x-ws2-ansi` aliases for this variant. Older 9x systems
+  such as Windows 95 require Winsock 2 to be installed.
 - `WINDOWS_WINPTY=auto|on|off` controls whether the GNU build vendors `winpty`.
   `auto` enables `winpty` for Windows NT 4.0, Windows 2000, and XP API-floor
   Unicode builds, independent of the selected Winsock backend. GNU ANSI builds
@@ -597,7 +598,7 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
   on Windows NT 3.51 and Windows NT 4.0. The GNU NT 4.0 API-floor build also
   supports Winsock 2 when that runtime is installed. The GNU ANSI API build
   path exists for Windows 9x/Me compatibility work and has been tested with
-  Winsock 1.1 and Winsock 2 on Windows 98 SE.
+  Winsock 1.1 and Winsock 2 on Windows 95 and Windows 98 SE.
 - `view_image` supports passthrough PNG, JPEG, and WebP only
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - broker-owned `forward_id` values do not persist across broker restart
