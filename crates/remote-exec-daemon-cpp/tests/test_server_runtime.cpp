@@ -62,7 +62,11 @@ static std::string read_http_head_from_socket(SOCKET socket) {
     return response;
 }
 
-static bool wait_for_active_connections(ConnectionManager& manager, unsigned long expected, unsigned long timeout_ms) {
+static bool wait_for_active_connections(
+    ConnectionManager& manager,
+    unsigned long expected,
+    unsigned long timeout_ms
+) {
     const std::uint64_t deadline = platform::monotonic_ms() + timeout_ms;
     while (platform::monotonic_ms() < deadline) {
         if (manager.active_count() == expected) {
@@ -91,7 +95,13 @@ static SOCKET connect_client(unsigned short port) {
 
     std::vector<SocketAddress> addresses;
     std::string resolve_error;
-    TEST_ASSERT(resolve_socket_addresses("127.0.0.1", service.str().c_str(), query, &addresses, &resolve_error));
+    TEST_ASSERT(resolve_socket_addresses(
+        "127.0.0.1",
+        service.str().c_str(),
+        query,
+        &addresses,
+        &resolve_error
+    ));
 
     SOCKET client = INVALID_SOCKET;
     for (std::size_t i = 0; i < addresses.size(); ++i) {
@@ -115,11 +125,13 @@ static void assert_health_request(ServerRuntime& runtime, unsigned short port) {
     UniqueSocket client(connect_client(port));
     TEST_ASSERT(wait_for_active_connections(runtime.connection_manager(), 1UL, TEST_TIMEOUT_MS));
 
-    send_all(client.get(),
-             "POST /v1/health HTTP/1.1\r\n"
-             "Connection: close\r\n"
-             "Content-Length: 0\r\n"
-             "\r\n");
+    send_all(
+        client.get(),
+        "POST /v1/health HTTP/1.1\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n"
+    );
 
     const std::string response = read_all_from_socket(client.get());
     TEST_ASSERT(response.find("HTTP/1.1 200 OK\r\n") == 0);
@@ -127,7 +139,10 @@ static void assert_health_request(ServerRuntime& runtime, unsigned short port) {
     TEST_ASSERT(wait_for_active_connections(runtime.connection_manager(), 0UL, TEST_TIMEOUT_MS));
 }
 
-static std::unique_ptr<ServerRuntime> start_runtime(const DaemonConfig& config, unsigned short* port) {
+static std::unique_ptr<ServerRuntime> start_runtime(
+    const DaemonConfig& config,
+    unsigned short* port
+) {
     std::unique_ptr<ServerRuntime> runtime(new ServerRuntime(config));
     runtime->start_accept_loop();
     *port = runtime->bound_port();
@@ -151,11 +166,13 @@ static void assert_runtime_shutdown_with_blocked_request_body(const DaemonConfig
     UniqueSocket client(connect_client(port));
     TEST_ASSERT(wait_for_active_connections(runtime->connection_manager(), 1UL, TEST_TIMEOUT_MS));
 
-    send_all(client.get(),
-             "POST /v1/health HTTP/1.1\r\n"
-             "Content-Length: 100\r\n"
-             "\r\n"
-             "partial-body");
+    send_all(
+        client.get(),
+        "POST /v1/health HTTP/1.1\r\n"
+        "Content-Length: 100\r\n"
+        "\r\n"
+        "partial-body"
+    );
 
     request_shutdown_and_join_quickly(*runtime);
     TEST_ASSERT(runtime->connection_manager().active_count() == 0UL);
@@ -167,13 +184,15 @@ static void assert_runtime_shutdown_with_upgraded_tunnel_connection(const Daemon
     UniqueSocket client(connect_client(port));
     TEST_ASSERT(wait_for_active_connections(runtime->connection_manager(), 1UL, TEST_TIMEOUT_MS));
 
-    send_all(client.get(),
-             "POST /v1/port/tunnel HTTP/1.1\r\n"
-             "Connection: Upgrade\r\n"
-             "Upgrade: remote-exec-port-tunnel\r\n"
-             "X-Remote-Exec-Port-Tunnel-Version: 4\r\n"
-             "Content-Length: 0\r\n"
-             "\r\n");
+    send_all(
+        client.get(),
+        "POST /v1/port/tunnel HTTP/1.1\r\n"
+        "Connection: Upgrade\r\n"
+        "Upgrade: remote-exec-port-tunnel\r\n"
+        "X-Remote-Exec-Port-Tunnel-Version: 4\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n"
+    );
     const std::string response = read_http_head_from_socket(client.get());
     TEST_ASSERT(response.find("HTTP/1.1 101 Switching Protocols\r\n") == 0);
 

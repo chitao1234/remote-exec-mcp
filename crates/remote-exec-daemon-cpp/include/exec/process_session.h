@@ -11,7 +11,8 @@ public:
 
 class ProcessPtyResizeUnsupportedError : public std::runtime_error {
 public:
-    explicit ProcessPtyResizeUnsupportedError(const std::string& message) : std::runtime_error(message) {}
+    explicit ProcessPtyResizeUnsupportedError(const std::string& message)
+        : std::runtime_error(message) {}
 };
 
 class ProcessSession {
@@ -21,8 +22,13 @@ public:
     ProcessSession(const ProcessSession&) = delete;
     ProcessSession& operator=(const ProcessSession&) = delete;
 
-    static std::unique_ptr<ProcessSession>
-    launch(const std::string& command, const std::string& workdir, const std::string& shell, bool login, bool tty);
+    static std::unique_ptr<ProcessSession> launch(
+        const std::string& command,
+        const std::string& workdir,
+        const std::string& shell,
+        bool login,
+        bool tty
+    );
 
     // Owns OS-specific process handles, stdio/PTY handles, process waiting,
     // and termination mechanics. Callers own daemon session identity and
@@ -46,5 +52,9 @@ void set_process_session_test_exit_poll_delay_ms(unsigned long delay_ms);
 #endif
 
 #if defined(_WIN32) && defined(REMOTE_EXEC_CPP_TESTING)
-std::string windows_process_command_line_for_test(const std::string& command, const std::string& shell, bool login);
+std::string windows_process_command_line_for_test(
+    const std::string& command,
+    const std::string& shell,
+    bool login
+);
 #endif

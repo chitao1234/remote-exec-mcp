@@ -24,7 +24,9 @@ inline int start_winsock(WSADATA* wsa_data) {
 #else
     const WORD requested_versions[] = {MAKEWORD(2, 2), MAKEWORD(2, 1), MAKEWORD(2, 0)};
     int last_status = WSAVERNOTSUPPORTED;
-    for (int i = 0; i < static_cast<int>(sizeof(requested_versions) / sizeof(requested_versions[0])); ++i) {
+    for (int i = 0;
+         i < static_cast<int>(sizeof(requested_versions) / sizeof(requested_versions[0]));
+         ++i) {
         const int status = WSAStartup(requested_versions[i], wsa_data);
         if (status != 0) {
             last_status = status;

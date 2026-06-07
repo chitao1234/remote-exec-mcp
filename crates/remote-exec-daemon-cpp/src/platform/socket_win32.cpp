@@ -55,7 +55,12 @@ bool looks_like_ipv6_literal(const char* node) {
 }
 
 bool append_ipv4_address(
-    unsigned long ipv4, unsigned short port, int socktype, int protocol, std::vector<SocketAddress>* addresses) {
+    unsigned long ipv4,
+    unsigned short port,
+    int socktype,
+    int protocol,
+    std::vector<SocketAddress>* addresses
+) {
     SocketAddress address;
     address.family = AF_INET;
     address.socktype = socktype;
@@ -73,23 +78,27 @@ std::string numeric_ipv4_socket_address(const sockaddr* address) {
     const sockaddr_in* ipv4 = reinterpret_cast<const sockaddr_in*>(address);
     const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&ipv4->sin_addr.s_addr);
     char buffer[64];
-    std::snprintf(buffer,
-                  sizeof(buffer),
-                  "%u.%u.%u.%u:%u",
-                  static_cast<unsigned int>(bytes[0]),
-                  static_cast<unsigned int>(bytes[1]),
-                  static_cast<unsigned int>(bytes[2]),
-                  static_cast<unsigned int>(bytes[3]),
-                  static_cast<unsigned int>(ntohs(ipv4->sin_port)));
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "%u.%u.%u.%u:%u",
+        static_cast<unsigned int>(bytes[0]),
+        static_cast<unsigned int>(bytes[1]),
+        static_cast<unsigned int>(bytes[2]),
+        static_cast<unsigned int>(bytes[3]),
+        static_cast<unsigned int>(ntohs(ipv4->sin_port))
+    );
     return buffer;
 }
 
-bool resolve_legacy_ipv4_addresses(const char* backend_name,
-                                   const char* node,
-                                   unsigned short port,
-                                   const SocketAddressQuery& query,
-                                   std::vector<SocketAddress>* addresses,
-                                   std::string* error) {
+bool resolve_legacy_ipv4_addresses(
+    const char* backend_name,
+    const char* node,
+    unsigned short port,
+    const SocketAddressQuery& query,
+    std::vector<SocketAddress>* addresses,
+    std::string* error
+) {
     if (query.family != AF_UNSPEC && query.family != AF_INET) {
         if (error != nullptr) {
             *error = std::string(backend_name) + " only supports IPv4 addresses";
@@ -105,8 +114,15 @@ bool resolve_legacy_ipv4_addresses(const char* backend_name,
     }
 
     if (node == nullptr || node[0] == '\0') {
-        const unsigned long passive_address = query.passive ? htonl(INADDR_ANY) : htonl(INADDR_LOOPBACK);
-        return append_ipv4_address(passive_address, port, query.socktype, query.protocol, addresses);
+        const unsigned long passive_address =
+            query.passive ? htonl(INADDR_ANY) : htonl(INADDR_LOOPBACK);
+        return append_ipv4_address(
+            passive_address,
+            port,
+            query.socktype,
+            query.protocol,
+            addresses
+        );
     }
 
     const unsigned long numeric = inet_addr(node);
@@ -123,7 +139,8 @@ bool resolve_legacy_ipv4_addresses(const char* backend_name,
     }
     if (host->h_addrtype != AF_INET || host->h_length != static_cast<int>(sizeof(unsigned long))) {
         if (error != nullptr) {
-            *error = std::string("gethostbyname failed: ") + backend_name + " only supports IPv4 addresses";
+            *error = std::string("gethostbyname failed: ") + backend_name
+                     + " only supports IPv4 addresses";
         }
         return false;
     }
@@ -173,15 +190,24 @@ Winsock2AddressApi load_winsock2_address_api() {
     return api;
 }
 
-bool resolve_winsock2_addresses(const char* node,
-                                const char* service,
-                                unsigned short port,
-                                const SocketAddressQuery& query,
-                                std::vector<SocketAddress>* addresses,
-                                std::string* error) {
+bool resolve_winsock2_addresses(
+    const char* node,
+    const char* service,
+    unsigned short port,
+    const SocketAddressQuery& query,
+    std::vector<SocketAddress>* addresses,
+    std::string* error
+) {
     const Winsock2AddressApi api = load_winsock2_address_api();
     if (api.getaddrinfo == nullptr || api.freeaddrinfo == nullptr) {
-        return resolve_legacy_ipv4_addresses("Winsock 2 legacy resolver", node, port, query, addresses, error);
+        return resolve_legacy_ipv4_addresses(
+            "Winsock 2 legacy resolver",
+            node,
+            port,
+            query,
+            addresses,
+            error
+        );
     }
 
     addrinfo hints;
@@ -253,10 +279,24 @@ SOCKET create_socket_cloexec(int family, int type, int protocol) {
 
 void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms) {
     const DWORD value = static_cast<DWORD>(timeout_ms);
-    if (setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&value), sizeof(value)) != 0) {
+    if (setsockopt(
+            socket,
+            SOL_SOCKET,
+            SO_RCVTIMEO,
+            reinterpret_cast<const char*>(&value),
+            sizeof(value)
+        )
+        != 0) {
         throw_socket_option_error("SO_RCVTIMEO", WSAGetLastError());
     }
-    if (setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&value), sizeof(value)) != 0) {
+    if (setsockopt(
+            socket,
+            SOL_SOCKET,
+            SO_SNDTIMEO,
+            reinterpret_cast<const char*>(&value),
+            sizeof(value)
+        )
+        != 0) {
         throw_socket_option_error("SO_SNDTIMEO", WSAGetLastError());
     }
 }
@@ -296,17 +336,20 @@ NetworkSession::~NetworkSession() {
     WSACleanup();
 }
 
-bool resolve_socket_addresses(const char* node,
-                              const char* service,
-                              const SocketAddressQuery& query,
-                              std::vector<SocketAddress>* addresses,
-                              std::string* error) {
+bool resolve_socket_addresses(
+    const char* node,
+    const char* service,
+    const SocketAddressQuery& query,
+    std::vector<SocketAddress>* addresses,
+    std::string* error
+) {
     addresses->clear();
 
     unsigned short port = 0;
     if (!parse_numeric_port(service, &port)) {
         if (error != nullptr) {
-            *error = "invalid numeric port `" + std::string(service == nullptr ? "" : service) + "`";
+            *error =
+                "invalid numeric port `" + std::string(service == nullptr ? "" : service) + "`";
         }
         return false;
     }
@@ -336,13 +379,15 @@ std::string numeric_socket_address(const sockaddr* address, socklen_t address_le
 
     char host[NI_MAXHOST];
     char service[NI_MAXSERV];
-    const int result = api.getnameinfo(address,
-                                       address_len,
-                                       host,
-                                       static_cast<DWORD>(sizeof(host)),
-                                       service,
-                                       static_cast<DWORD>(sizeof(service)),
-                                       NI_NUMERICHOST | NI_NUMERICSERV);
+    const int result = api.getnameinfo(
+        address,
+        address_len,
+        host,
+        static_cast<DWORD>(sizeof(host)),
+        service,
+        static_cast<DWORD>(sizeof(service)),
+        NI_NUMERICHOST | NI_NUMERICSERV
+    );
     if (result != 0) {
         return "unknown:0";
     }
@@ -403,15 +448,33 @@ int socket_error_option(SOCKET socket, int* socket_error) {
     socklen_t socket_error_len = static_cast<socklen_t>(sizeof(*socket_error));
 #ifdef REMOTE_EXEC_CPP_WINSOCK1
     int socket_error_len_int = static_cast<int>(socket_error_len);
-    return getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(socket_error), &socket_error_len_int);
+    return getsockopt(
+        socket,
+        SOL_SOCKET,
+        SO_ERROR,
+        reinterpret_cast<char*>(socket_error),
+        &socket_error_len_int
+    );
 #else
-    return getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(socket_error), &socket_error_len);
+    return getsockopt(
+        socket,
+        SOL_SOCKET,
+        SO_ERROR,
+        reinterpret_cast<char*>(socket_error),
+        &socket_error_len
+    );
 #endif
 }
 
 int set_socket_reuseaddr(SOCKET socket) {
     int yes = 1;
-    return setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+    return setsockopt(
+        socket,
+        SOL_SOCKET,
+        SO_REUSEADDR,
+        reinterpret_cast<const char*>(&yes),
+        sizeof(yes)
+    );
 }
 
 int set_socket_ipv6_only(SOCKET socket) {
@@ -421,7 +484,13 @@ int set_socket_ipv6_only(SOCKET socket) {
     return -1;
 #else
     int yes = 1;
-    return setsockopt(socket, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&yes), sizeof(yes));
+    return setsockopt(
+        socket,
+        IPPROTO_IPV6,
+        IPV6_V6ONLY,
+        reinterpret_cast<const char*>(&yes),
+        sizeof(yes)
+    );
 #endif
 }
 

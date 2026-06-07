@@ -4,7 +4,6 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <sys/stat.h>
 
 #include "core/stdio_retry.h"
 #include "platform/path_utils.h"
@@ -15,7 +14,10 @@
 namespace {
 
 ImageFailure missing_image_failure(const std::string& path) {
-    return ImageFailure(ImageRpcCode::Missing, "unable to locate image at `" + path + "`: No such file or directory");
+    return ImageFailure(
+        ImageRpcCode::Missing,
+        "unable to locate image at `" + path + "`: No such file or directory"
+    );
 }
 
 ImageFailure not_file_image_failure(const std::string& path) {
@@ -31,7 +33,10 @@ ImageFailure internal_image_failure(const std::string& message) {
 }
 
 ImageFailure too_large_image_failure(const std::string& path) {
-    return ImageFailure(ImageRpcCode::Internal, "image at `" + path + "` exceeds maximum supported size");
+    return ImageFailure(
+        ImageRpcCode::Internal,
+        "image at `" + path + "` exceeds maximum supported size"
+    );
 }
 
 const std::size_t MAX_IMAGE_FILE_SIZE = 50U * 1024U * 1024U;
@@ -42,8 +47,10 @@ std::string read_binary_file_bytes(const std::string& path) {
     if (!input.valid()) {
         const int error_code = errno;
         if (error_code != 0) {
-            throw internal_image_failure("unable to read image at `" + path +
-                                         "`: " + errno_error::message_from_errno(error_code));
+            throw internal_image_failure(
+                "unable to read image at `" + path
+                + "`: " + errno_error::message_from_errno(error_code)
+            );
         }
         throw internal_image_failure("unable to read image at `" + path + "`");
     }
@@ -65,12 +72,12 @@ std::string read_binary_file_bytes(const std::string& path) {
 }
 
 void require_regular_image_file(const std::string& path) {
-    struct stat st;
-    if (path_utils::stat_path(path, &st)) {
-        if ((st.st_mode & S_IFMT) != S_IFREG) {
+    path_utils::PathMetadata metadata;
+    if (path_utils::path_metadata(path, &metadata)) {
+        if (!metadata.is_regular_file) {
             throw not_file_image_failure(path);
         }
-        if (st.st_size > 0 && static_cast<std::size_t>(st.st_size) > MAX_IMAGE_FILE_SIZE) {
+        if (metadata.size > static_cast<std::uint64_t>(MAX_IMAGE_FILE_SIZE)) {
             throw too_large_image_failure(path);
         }
         return;
@@ -81,23 +88,27 @@ void require_regular_image_file(const std::string& path) {
         throw missing_image_failure(path);
     }
 
-    throw internal_image_failure("unable to access image at `" + path +
-                                 "`: " + errno_error::message_from_errno(error_code));
+    throw internal_image_failure(
+        "unable to access image at `" + path + "`: " + errno_error::message_from_errno(error_code)
+    );
 }
 
 std::string image_mime_type(const std::string& path, const std::string& bytes) {
     if (bytes.size() >= 8 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1A\n", 8) == 0) {
         return "image/png";
     }
-    if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xFF &&
-        static_cast<unsigned char>(bytes[1]) == 0xD8 && static_cast<unsigned char>(bytes[2]) == 0xFF) {
+    if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xFF
+        && static_cast<unsigned char>(bytes[1]) == 0xD8
+        && static_cast<unsigned char>(bytes[2]) == 0xFF) {
         return "image/jpeg";
     }
-    if (bytes.size() >= 12 && std::memcmp(bytes.data(), "RIFF", 4) == 0 &&
-        std::memcmp(bytes.data() + 8, "WEBP", 4) == 0) {
+    if (bytes.size() >= 12 && std::memcmp(bytes.data(), "RIFF", 4) == 0
+        && std::memcmp(bytes.data() + 8, "WEBP", 4) == 0) {
         return "image/webp";
     }
-    throw decode_failed_image("unable to process image at `" + path + "`: unsupported image format");
+    throw decode_failed_image(
+        "unable to process image at `" + path + "`: unsupported image format"
+    );
 }
 
 } // namespace

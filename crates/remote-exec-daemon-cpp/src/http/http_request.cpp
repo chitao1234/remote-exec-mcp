@@ -44,7 +44,8 @@ void validate_http_version(const std::string& value) {
 
 HttpRequest parse_http_request_head(const std::string& raw_headers) {
     const std::size_t header_end = raw_headers.find("\r\n\r\n");
-    const std::string header_block = header_end == std::string::npos ? raw_headers : raw_headers.substr(0, header_end);
+    const std::string header_block =
+        header_end == std::string::npos ? raw_headers : raw_headers.substr(0, header_end);
     std::istringstream lines(header_block);
     std::string request_line;
     if (!std::getline(lines, request_line)) {
@@ -59,7 +60,8 @@ HttpRequest parse_http_request_head(const std::string& raw_headers) {
     std::string version;
     std::string extra;
     request_line_stream >> request.method >> request.path >> version;
-    if (request.method.empty() || request.path.empty() || version.empty() || (request_line_stream >> extra)) {
+    if (request.method.empty() || request.path.empty() || version.empty()
+        || (request_line_stream >> extra)) {
         throw HttpParseError("invalid request line");
     }
     validate_token(request.method, "invalid request method");

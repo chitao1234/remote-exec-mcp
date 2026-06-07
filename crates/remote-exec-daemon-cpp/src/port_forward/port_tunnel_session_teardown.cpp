@@ -34,9 +34,11 @@ void finish_terminal_session_teardown(const PortTunnelSessionTeardown& state) {
 }
 
 void close_retained_resource(const PortTunnelRetainedResource& resource) {
-    if (resource.kind == PortTunnelRetainedResourceKind::TcpListener && resource.tcp_listener.get() != nullptr) {
+    if (resource.kind == PortTunnelRetainedResourceKind::TcpListener
+        && resource.tcp_listener.get() != nullptr) {
         resource.tcp_listener->close();
-    } else if (resource.kind == PortTunnelRetainedResourceKind::UdpBind && resource.udp_bind.get() != nullptr) {
+    } else if (resource.kind == PortTunnelRetainedResourceKind::UdpBind
+               && resource.udp_bind.get() != nullptr) {
         resource.udp_bind->close();
     }
 }

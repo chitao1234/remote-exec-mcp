@@ -3,14 +3,18 @@
 #include <memory>
 
 #include "core/config.h"
-#include "http/http_helpers.h"
-#include "runtime/server.h"
+#include "platform/socket.h"
 
 class PortTunnelService;
 
-int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest& request);
-std::shared_ptr<PortTunnelService>
-create_port_tunnel_service(const PortForwardLimitConfig& limits = PortForwardLimitConfig());
+void run_port_tunnel_connection(
+    SOCKET client,
+    std::shared_ptr<PortTunnelService>& service,
+    const PortForwardLimitConfig& limits
+);
+std::shared_ptr<PortTunnelService> create_port_tunnel_service(
+    const PortForwardLimitConfig& limits = PortForwardLimitConfig()
+);
 
 #ifdef REMOTE_EXEC_CPP_TESTING
 void set_forced_tcp_read_thread_failures(unsigned long count);

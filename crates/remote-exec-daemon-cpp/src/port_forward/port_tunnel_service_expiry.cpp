@@ -18,12 +18,14 @@ bool PortTunnelService::schedule_session_expiry(const std::shared_ptr<PortTunnel
     }
     expiry_sessions_.push_back(std::weak_ptr<PortTunnelSession>(session));
     expiry_cond_.signal();
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("session expiry scheduled")
-                    .quoted_field("session_id", session->session_id)
-                    .field("scheduled_sessions", expiry_sessions_.size())
-                    .str());
+    log_message(
+        LOG_DEBUG,
+        "port_tunnel",
+        LogMessageBuilder("session expiry scheduled")
+            .quoted_field("session_id", session->session_id)
+            .field("scheduled_sessions", expiry_sessions_.size())
+            .str()
+    );
     return true;
 }
 
@@ -74,7 +76,8 @@ void PortTunnelService::expiry_scheduler_loop() {
 
                 const std::uint64_t now = platform::monotonic_ms();
                 wait_ms = RESUME_TIMEOUT_MS;
-                for (std::vector<std::weak_ptr<PortTunnelSession>>::iterator it = expiry_sessions_.begin();
+                for (std::vector<std::weak_ptr<PortTunnelSession>>::iterator it =
+                         expiry_sessions_.begin();
                      it != expiry_sessions_.end();) {
                     std::shared_ptr<PortTunnelSession> session = it->lock();
                     if (session.get() == nullptr) {
@@ -94,7 +97,8 @@ void PortTunnelService::expiry_scheduler_loop() {
                         continue;
                     }
 
-                    const unsigned long remaining = platform::monotonic_deadline_remaining_ms(deadline);
+                    const unsigned long remaining =
+                        platform::monotonic_deadline_remaining_ms(deadline);
                     if (remaining < wait_ms) {
                         wait_ms = remaining;
                     }
@@ -114,7 +118,8 @@ void PortTunnelService::expiry_scheduler_loop() {
     }
 }
 
-void PortTunnelService::expire_session_if_needed(const std::shared_ptr<PortTunnelSession>& session) {
+void PortTunnelService::expire_session_if_needed(const std::shared_ptr<PortTunnelSession>& session
+) {
     PortTunnelSessionTeardown teardown = session->expire_if_due(platform::monotonic_ms());
     if (teardown.transitioned) {
         BasicLockGuard store_lock(mutex_);

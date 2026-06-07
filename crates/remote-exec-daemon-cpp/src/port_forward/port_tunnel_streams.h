@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <map>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -40,8 +41,10 @@ public:
     PortTunnelBudgetLease();
     ~PortTunnelBudgetLease();
 
-    static PortTunnelBudgetLease adopt(const std::shared_ptr<PortTunnelBudgetState>& budget_state,
-                                       PortTunnelBudgetKind kind);
+    static PortTunnelBudgetLease adopt(
+        const std::shared_ptr<PortTunnelBudgetState>& budget_state,
+        PortTunnelBudgetKind kind
+    );
 
     PortTunnelBudgetLease(PortTunnelBudgetLease&& other);
     PortTunnelBudgetLease& operator=(PortTunnelBudgetLease&& other);
@@ -60,7 +63,8 @@ private:
 struct TunnelTcpStream {
     TunnelTcpStream(SOCKET socket_value, PortTunnelBudgetLease active_stream_budget_value)
         : socket(socket_value), active_stream_budget(std::move(active_stream_budget_value)),
-          resource_state(PortTunnelResourceState::Open), writer_closed(false), writer_shutdown_requested(false) {}
+          resource_state(PortTunnelResourceState::Open), writer_closed(false),
+          writer_shutdown_requested(false) {}
 
     void close();
     bool is_closed();
@@ -95,9 +99,11 @@ struct TunnelUdpSocket {
 };
 
 struct RetainedTcpListener {
-    RetainedTcpListener(uint32_t stream_id_value,
-                        SOCKET listener_socket,
-                        PortTunnelBudgetLease retained_listener_budget_value)
+    RetainedTcpListener(
+        uint32_t stream_id_value,
+        SOCKET listener_socket,
+        PortTunnelBudgetLease retained_listener_budget_value
+    )
         : stream_id(stream_id_value), listener(listener_socket),
           retained_listener_budget(std::move(retained_listener_budget_value)),
           resource_state(PortTunnelResourceState::Open) {}
@@ -125,8 +131,10 @@ public:
     void insert_udp(uint32_t stream_id, const std::shared_ptr<TunnelUdpSocket>& socket_value);
     std::shared_ptr<TunnelUdpSocket> get_udp(uint32_t stream_id);
     std::shared_ptr<TunnelUdpSocket> remove_udp(uint32_t stream_id);
-    void drain(std::vector<std::shared_ptr<TunnelTcpStream>>* tcp_streams,
-               std::vector<std::shared_ptr<TunnelUdpSocket>>* udp_sockets);
+    void drain(
+        std::vector<std::shared_ptr<TunnelTcpStream>>* tcp_streams,
+        std::vector<std::shared_ptr<TunnelUdpSocket>>* udp_sockets
+    );
 
 private:
     ConnectionLocalStreams(const ConnectionLocalStreams&);

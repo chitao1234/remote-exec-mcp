@@ -5,8 +5,8 @@
 
 namespace {
 
-const CompiledFilesystemSandbox* active_sandbox(const AppState& state) {
-    return state.sandbox_enabled ? &state.sandbox : nullptr;
+const CompiledFilesystemSandbox* active_sandbox(const PathResolutionContext& context) {
+    return context.active_sandbox;
 }
 
 std::string resolve_path_from_base(const std::string& base, const std::string& raw) {
@@ -19,9 +19,13 @@ std::string resolve_path_from_base(const std::string& base, const std::string& r
 
 } // namespace
 
-bool reject_before_route(const AppState& state, const HttpRequest& request, HttpResponse* response) {
-    if (!state.config.http_auth_bearer_token.empty() &&
-        !request_has_bearer_auth(request, state.config.http_auth_bearer_token)) {
+bool reject_before_route(
+    const HttpGateContext& context,
+    const HttpRequest& request,
+    HttpResponse* response
+) {
+    if (!context.http_auth_bearer_token.empty()
+        && !request_has_bearer_auth(request, context.http_auth_bearer_token)) {
         write_bearer_auth_challenge(*response);
         return true;
     }
@@ -34,40 +38,58 @@ bool reject_before_route(const AppState& state, const HttpRequest& request, Http
     return false;
 }
 
-std::string resolve_workdir(const AppState& state, const Json& body) {
-    const std::string raw = body.value("workdir", state.config.default_workdir);
+std::string resolve_workdir(const PathResolutionContext& context, const Json& body) {
+    const std::string raw = body.value("workdir", context.default_workdir);
     if (raw.empty()) {
-        return state.config.default_workdir;
+        return context.default_workdir;
     }
 
-    return resolve_path_from_base(state.config.default_workdir, raw);
+    return resolve_path_from_base(context.default_workdir, raw);
 }
 
-std::string resolve_authorized_workdir(const AppState& state, const Json& body, SandboxAccess access) {
-    const std::string path = resolve_workdir(state, body);
-    authorize_sandbox_path(state, access, path);
+std::string resolve_authorized_workdir(
+    const PathResolutionContext& context,
+    const Json& body,
+    SandboxAccess access
+) {
+    const std::string path = resolve_workdir(context, body);
+    authorize_sandbox_path(context, access, path);
     return path;
 }
 
-std::string resolve_input_path(const AppState& state, const Json& body, const std::string& key) {
+std::string resolve_input_path(
+    const PathResolutionContext& context,
+    const Json& body,
+    const std::string& key
+) {
     const std::string raw = body.at(key).get<std::string>();
-    return resolve_path_from_base(resolve_workdir(state, body), raw);
+    return resolve_path_from_base(resolve_workdir(context, body), raw);
 }
 
-std::string
-resolve_authorized_input_path(const AppState& state, const Json& body, const std::string& key, SandboxAccess access) {
-    const std::string path = resolve_input_path(state, body, key);
-    authorize_sandbox_path(state, access, path);
+std::string resolve_authorized_input_path(
+    const PathResolutionContext& context,
+    const Json& body,
+    const std::string& key,
+    SandboxAccess access
+) {
+    const std::string path = resolve_input_path(context, body, key);
+    authorize_sandbox_path(context, access, path);
     return path;
 }
 
-void authorize_sandbox_path(const AppState& state, SandboxAccess access, const std::string& path) {
-    authorize_path(active_sandbox(state), access, path);
+void authorize_sandbox_path(
+    const PathResolutionContext& context,
+    SandboxAccess access,
+    const std::string& path
+) {
+    authorize_path(active_sandbox(context), access, path);
 }
 
-PatchPathAuthorizer make_patch_path_authorizer(const AppState& state) {
-    if (!state.sandbox_enabled) {
+PatchPathAuthorizer make_patch_path_authorizer(const PathResolutionContext& context) {
+    if (context.active_sandbox == nullptr) {
         return PatchPathAuthorizer();
     }
-    return [&state](const std::string& path) { authorize_sandbox_path(state, SANDBOX_WRITE, path); };
+    return [context](const std::string& path) {
+        authorize_sandbox_path(context, SANDBOX_WRITE, path);
+    };
 }

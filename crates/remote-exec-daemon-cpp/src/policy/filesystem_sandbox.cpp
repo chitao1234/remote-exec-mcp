@@ -46,7 +46,10 @@ const SandboxPathList& source_list(const FilesystemSandbox& sandbox, SandboxAcce
     return sandbox.read;
 }
 
-const CompiledSandboxPathList& compiled_list(const CompiledFilesystemSandbox& sandbox, SandboxAccess access) {
+const CompiledSandboxPathList& compiled_list(
+    const CompiledFilesystemSandbox& sandbox,
+    SandboxAccess access
+) {
     switch (access) {
     case SANDBOX_EXEC_CWD:
         return sandbox.exec_cwd;
@@ -69,7 +72,11 @@ char policy_separator(PathPolicy policy) {
     return policy.style == PATH_STYLE_WINDOWS ? '\\' : '/';
 }
 
-std::string join_components(PathPolicy policy, const std::string& prefix, const std::vector<std::string>& parts) {
+std::string join_components(
+    PathPolicy policy,
+    const std::string& prefix,
+    const std::vector<std::string>& parts
+) {
     const char separator = policy_separator(policy);
     if (prefix.empty()) {
         std::string output;
@@ -102,8 +109,9 @@ std::string lexical_normalize_for_policy(PathPolicy policy, const std::string& r
             prefix = "/";
             start = 1;
         }
-    } else if (normalized.size() >= 3 && std::isalpha(static_cast<unsigned char>(normalized[0])) != 0 &&
-               normalized[1] == ':' && is_separator(policy, normalized[2])) {
+    } else if (normalized.size() >= 3
+               && std::isalpha(static_cast<unsigned char>(normalized[0])) != 0
+               && normalized[1] == ':' && is_separator(policy, normalized[2])) {
         prefix = normalized.substr(0, 2);
         prefix.push_back('\\');
         start = 3;
@@ -207,17 +215,24 @@ std::string full_windows_path_for_existing_path(const std::string& path) {
     const std::wstring wide = wide_from_utf8_path(path);
     DWORD length = GetFullPathNameW(wide.c_str(), 0, nullptr, nullptr);
     if (length == 0U) {
-        throw SandboxError("unable to canonicalize `" + path +
-                           "`: " + error_message_from_code("GetFullPathNameW", GetLastError()));
+        throw SandboxError(
+            "unable to canonicalize `" + path
+            + "`: " + error_message_from_code("GetFullPathNameW", GetLastError())
+        );
     }
 
     std::vector<wchar_t> buffer(length + 1U);
     length = GetFullPathNameW(wide.c_str(), static_cast<DWORD>(buffer.size()), &buffer[0], nullptr);
     if (length == 0U || length >= buffer.size()) {
-        throw SandboxError("unable to canonicalize `" + path +
-                           "`: " + error_message_from_code("GetFullPathNameW", GetLastError()));
+        throw SandboxError(
+            "unable to canonicalize `" + path
+            + "`: " + error_message_from_code("GetFullPathNameW", GetLastError())
+        );
     }
-    return lexical_normalize_for_policy(windows_path_policy(), utf8_from_wide_path(std::wstring(&buffer[0], length)));
+    return lexical_normalize_for_policy(
+        windows_path_policy(),
+        utf8_from_wide_path(std::wstring(&buffer[0], length))
+    );
 }
 
 std::string long_windows_leaf_for_existing_path(const std::string& path) {
@@ -226,8 +241,10 @@ std::string long_windows_leaf_for_existing_path(const std::string& path) {
     const std::wstring wide = wide_from_utf8_path(full);
     HANDLE find = FindFirstFileW(wide.c_str(), &data);
     if (find == INVALID_HANDLE_VALUE) {
-        throw SandboxError("unable to canonicalize `" + path +
-                           "`: " + error_message_from_code("FindFirstFileW", GetLastError()));
+        throw SandboxError(
+            "unable to canonicalize `" + path
+            + "`: " + error_message_from_code("FindFirstFileW", GetLastError())
+        );
     }
     FindClose(find);
 
@@ -236,8 +253,10 @@ std::string long_windows_leaf_for_existing_path(const std::string& path) {
     if (parent.empty() || long_name.empty()) {
         return full;
     }
-    return lexical_normalize_for_policy(windows_path_policy(),
-                                        join_for_policy(windows_path_policy(), parent, long_name));
+    return lexical_normalize_for_policy(
+        windows_path_policy(),
+        join_for_policy(windows_path_policy(), parent, long_name)
+    );
 }
 
 std::string canonicalize_existing_windows_path(const std::string& path) {
@@ -269,7 +288,8 @@ std::string canonicalize_existing_windows_path(const std::string& path) {
         const std::string probe = join_for_policy(policy, rebuilt, current);
         const std::string canonical_probe = long_windows_leaf_for_existing_path(probe);
         std::string canonical_name;
-        if (!basename_for_policy(policy, canonical_probe, &canonical_name) || canonical_name.empty()) {
+        if (!basename_for_policy(policy, canonical_probe, &canonical_name)
+            || canonical_name.empty()) {
             canonical_name = current;
         }
         rebuilt = join_for_policy(policy, rebuilt, canonical_name);
@@ -298,8 +318,10 @@ std::string canonicalize_windows_for_sandbox(const std::string& path) {
 
         const DWORD error = GetLastError();
         if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
-            throw SandboxError("unable to canonicalize `" + normalized +
-                               "`: " + error_message_from_code("GetFileAttributesW", error));
+            throw SandboxError(
+                "unable to canonicalize `" + normalized
+                + "`: " + error_message_from_code("GetFileAttributesW", error)
+            );
         }
 
         const std::string name = basename_for_windows_path(probe);
@@ -366,8 +388,10 @@ std::string canonicalize_posix_for_sandbox(const std::string& path) {
         }
 
         if (errno != ENOENT) {
-            throw SandboxError("unable to canonicalize `" + normalized +
-                               "`: " + errno_error::message_from_errno(errno));
+            throw SandboxError(
+                "unable to canonicalize `" + normalized
+                + "`: " + errno_error::message_from_errno(errno)
+            );
         }
 
         const std::string name = basename_for_posix_path(probe);
@@ -398,19 +422,27 @@ std::string canonicalize_for_sandbox(const std::string& path) {
 #endif
 }
 
-std::string compile_root(SandboxAccess access, const std::string& list_label, const std::string& raw) {
+std::string compile_root(
+    SandboxAccess access,
+    const std::string& list_label,
+    const std::string& raw
+) {
     const PathPolicy policy = host_path_policy();
     if (!is_absolute_for_policy(policy, raw)) {
-        throw SandboxError(std::string("sandbox ") + access_label(access) + "." + list_label + " path `" + raw +
-                           "` is not absolute");
+        throw SandboxError(
+            std::string("sandbox ") + access_label(access) + "." + list_label + " path `" + raw
+            + "` is not absolute"
+        );
     }
 
     const std::string normalized = normalize_for_system(policy, raw);
     try {
         return canonicalize_for_sandbox(normalized);
     } catch (const SandboxError& ex) {
-        throw SandboxError(std::string("sandbox ") + access_label(access) + "." + list_label + " path `" + normalized +
-                           "` is invalid: " + ex.what());
+        throw SandboxError(
+            std::string("sandbox ") + access_label(access) + "." + list_label + " path `"
+            + normalized + "` is invalid: " + ex.what()
+        );
     }
 }
 
@@ -438,7 +470,11 @@ CompiledFilesystemSandbox compile_filesystem_sandbox(const FilesystemSandbox& sa
     return compiled;
 }
 
-void authorize_path(const CompiledFilesystemSandbox* sandbox, SandboxAccess access, const std::string& path) {
+void authorize_path(
+    const CompiledFilesystemSandbox* sandbox,
+    SandboxAccess access,
+    const std::string& path
+) {
     const PathPolicy policy = host_path_policy();
     if (!is_absolute_for_policy(policy, path)) {
         throw SandboxError(std::string("path `") + path + "` is not absolute");
@@ -453,8 +489,10 @@ void authorize_path(const CompiledFilesystemSandbox* sandbox, SandboxAccess acce
 
     for (std::size_t i = 0; i < rules.deny.size(); ++i) {
         if (host_path_is_within(resolved, rules.deny[i])) {
-            throw SandboxError(std::string(access_label(access)) + " access to `" + resolved +
-                               "` is denied by sandbox rule `" + rules.deny[i] + "`");
+            throw SandboxError(
+                std::string(access_label(access)) + " access to `" + resolved
+                + "` is denied by sandbox rule `" + rules.deny[i] + "`"
+            );
         }
     }
 
@@ -467,6 +505,8 @@ void authorize_path(const CompiledFilesystemSandbox* sandbox, SandboxAccess acce
         }
     }
 
-    throw SandboxError(std::string(access_label(access)) + " access to `" + resolved +
-                       "` is outside the configured sandbox");
+    throw SandboxError(
+        std::string(access_label(access)) + " access to `" + resolved
+        + "` is outside the configured sandbox"
+    );
 }

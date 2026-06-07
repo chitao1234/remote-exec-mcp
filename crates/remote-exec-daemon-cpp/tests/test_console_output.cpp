@@ -49,7 +49,11 @@ bool should_skip_real_winpty_timing_tests() {
 #endif
 }
 
-std::string winpty_repaint_physical_line(const std::string& left, const std::string& right, std::size_t width) {
+std::string winpty_repaint_physical_line(
+    const std::string& left,
+    const std::string& right,
+    std::size_t width
+) {
     TEST_ASSERT(left.size() + right.size() <= width);
     return left + std::string(width - left.size() - right.size(), ' ') + right + "\n";
 }
@@ -58,15 +62,15 @@ void assert_winpty_command_repaint_width(std::size_t width) {
     WinptyTranscriptNormalizer normalizer(width);
     const std::string prompt = "C:\\p>";
     const std::string command_line = prompt + "echo hello";
-    const std::string physical = winpty_repaint_physical_line(command_line, "hello", width) +
-                                 winpty_repaint_physical_line("", "C:\\p", width) + ">\n";
-    const std::string expected =
-        command_line + "\n"
-        "hello\n" +
-        prompt + "\n";
+    const std::string physical = winpty_repaint_physical_line(command_line, "hello", width)
+                                 + winpty_repaint_physical_line("", "C:\\p", width) + ">\n";
+    const std::string expected = command_line
+                                 + "\n"
+                                   "hello\n"
+                                 + prompt + "\n";
 
-    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
-                               drain_winpty_transcript_for_test(&normalizer);
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical)
+                               + drain_winpty_transcript_for_test(&normalizer);
     TEST_ASSERT(actual == expected);
 }
 
@@ -74,17 +78,22 @@ void assert_winpty_one_column_short_repaint_width(std::size_t width) {
     WinptyTranscriptNormalizer normalizer(width);
     const std::string prompt = "C:\\p>";
     const std::string command_line = prompt + "echo hello";
-    const std::string physical = winpty_repaint_physical_line(command_line, "hell", width - 1U) + "o\n";
-    const std::string expected =
-        command_line + "\n"
-        "hello\n";
+    const std::string physical =
+        winpty_repaint_physical_line(command_line, "hell", width - 1U) + "o\n";
+    const std::string expected = command_line
+                                 + "\n"
+                                   "hello\n";
 
-    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
-                               drain_winpty_transcript_for_test(&normalizer);
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical)
+                               + drain_winpty_transcript_for_test(&normalizer);
     TEST_ASSERT(actual == expected);
 }
 
-void assert_code_page_decode(unsigned int code_page, const std::string& raw, const std::string& expected_utf8) {
+void assert_code_page_decode(
+    unsigned int code_page,
+    const std::string& raw,
+    const std::string& expected_utf8
+) {
     if (!code_page_available(code_page)) {
         return;
     }
@@ -95,18 +104,29 @@ void test_wide_to_utf8() {
     TEST_ASSERT(utf8_from_windows_wide_for_test(L"ascii") == "ascii");
 
     const unsigned int cjk_units[] = {0x4F60U, 0x597DU};
-    TEST_ASSERT(utf8_from_windows_wide_for_test(wide_from_units(cjk_units, 2U)) == "\xE4\xBD\xA0\xE5\xA5\xBD");
+    TEST_ASSERT(
+        utf8_from_windows_wide_for_test(wide_from_units(cjk_units, 2U))
+        == "\xE4\xBD\xA0\xE5\xA5\xBD"
+    );
 
     const unsigned int surrogate_pair[] = {0xD83DU, 0xDE00U};
-    TEST_ASSERT(utf8_from_windows_wide_for_test(wide_from_units(surrogate_pair, 2U)) == "\xF0\x9F\x98\x80");
+    TEST_ASSERT(
+        utf8_from_windows_wide_for_test(wide_from_units(surrogate_pair, 2U)) == "\xF0\x9F\x98\x80"
+    );
 
     const unsigned int unpaired_high[] = {'x', 0xD83DU, 'y'};
-    TEST_ASSERT(utf8_from_windows_wide_for_test(wide_from_units(unpaired_high, 3U)) == "x\xEF\xBF\xBD"
-                                                                                       "y");
+    TEST_ASSERT(
+        utf8_from_windows_wide_for_test(wide_from_units(unpaired_high, 3U))
+        == "x\xEF\xBF\xBD"
+           "y"
+    );
 
     const unsigned int unpaired_low[] = {'x', 0xDE00U, 'y'};
-    TEST_ASSERT(utf8_from_windows_wide_for_test(wide_from_units(unpaired_low, 3U)) == "x\xEF\xBF\xBD"
-                                                                                      "y");
+    TEST_ASSERT(
+        utf8_from_windows_wide_for_test(wide_from_units(unpaired_low, 3U))
+        == "x\xEF\xBF\xBD"
+           "y"
+    );
 }
 
 void test_utf8_to_wide() {
@@ -144,25 +164,35 @@ void test_invalid_utf8_to_wide() {
 
 void test_code_page_decode() {
     assert_code_page_decode(936U, "\xC4\xE3\xBA\xC3", "\xE4\xBD\xA0\xE5\xA5\xBD");
-    assert_code_page_decode(932U, "\x82\xB1\x82\xF1\x82\xC9\x82\xBF\x82\xCD", "\xE3\x81\x93\xE3\x82\x93"
-                                                                               "\xE3\x81\xAB\xE3\x81\xA1"
-                                                                               "\xE3\x81\xAF");
+    assert_code_page_decode(
+        932U,
+        "\x82\xB1\x82\xF1\x82\xC9\x82\xBF\x82\xCD",
+        "\xE3\x81\x93\xE3\x82\x93"
+        "\xE3\x81\xAB\xE3\x81\xA1"
+        "\xE3\x81\xAF"
+    );
     assert_code_page_decode(950U, "\xA7\x41\xA6\x6E", "\xE4\xBD\xA0\xE5\xA5\xBD");
     assert_code_page_decode(949U, "\xC7\xD1\xB1\xDB", "\xED\x95\x9C\xEA\xB8\x80");
 }
 
-void assert_decode_split_carry(unsigned int code_page,
-                               const std::string& first_byte,
-                               const std::string& second_byte,
-                               const std::string& expected_utf8) {
+void assert_decode_split_carry(
+    unsigned int code_page,
+    const std::string& first_byte,
+    const std::string& second_byte,
+    const std::string& expected_utf8
+) {
     if (!code_page_available(code_page)) {
         return;
     }
 
     std::string carry;
-    TEST_ASSERT(decode_console_output_for_test(code_page, 1252U, &carry, first_byte, false).empty());
+    TEST_ASSERT(decode_console_output_for_test(code_page, 1252U, &carry, first_byte, false).empty()
+    );
     TEST_ASSERT(carry == first_byte);
-    TEST_ASSERT(decode_console_output_for_test(code_page, 1252U, &carry, second_byte, false) == expected_utf8);
+    TEST_ASSERT(
+        decode_console_output_for_test(code_page, 1252U, &carry, second_byte, false)
+        == expected_utf8
+    );
     TEST_ASSERT(carry.empty());
 }
 
@@ -173,15 +203,19 @@ void test_decode_carry() {
     assert_decode_split_carry(949U, "\xC7", "\xD1", "\xED\x95\x9C");
 }
 
-void assert_decode_without_false_carry(unsigned int code_page,
-                                       const std::string& raw,
-                                       const std::string& expected_utf8) {
+void assert_decode_without_false_carry(
+    unsigned int code_page,
+    const std::string& raw,
+    const std::string& expected_utf8
+) {
     if (!code_page_available(code_page)) {
         return;
     }
 
     std::string carry;
-    TEST_ASSERT(decode_console_output_for_test(code_page, 1252U, &carry, raw, false) == expected_utf8);
+    TEST_ASSERT(
+        decode_console_output_for_test(code_page, 1252U, &carry, raw, false) == expected_utf8
+    );
     TEST_ASSERT(carry.empty());
 }
 
@@ -194,7 +228,9 @@ void test_decode_complete_dbcs_character_does_not_carry_trail_byte() {
 
 void test_invalid_decode_fallback() {
     std::string carry;
-    TEST_ASSERT(decode_console_output_for_test(99999U, 99999U, &carry, "ok\xFF", true) == "ok\xEF\xBF\xBD");
+    TEST_ASSERT(
+        decode_console_output_for_test(99999U, 99999U, &carry, "ok\xFF", true) == "ok\xEF\xBF\xBD"
+    );
     TEST_ASSERT(carry.empty());
 }
 
@@ -216,15 +252,25 @@ void test_utf8_stream_decode_flush_replaces_incomplete_suffix() {
 
 void test_terminal_output_filter_strips_winpty_control_sequences() {
     TerminalOutputFilter filter;
-    TEST_ASSERT(filter_terminal_output_for_test(
-                    &filter, "\x1b[0m\x1b[0Khello\x1b[0K\x1b[?25l\r\n\x1b[0K\x1b[?25h") == "hello\n");
+    TEST_ASSERT(
+        filter_terminal_output_for_test(
+            &filter,
+            "\x1b[0m\x1b[0Khello\x1b[0K\x1b[?25l\r\n\x1b[0K\x1b[?25h"
+        )
+        == "hello\n"
+    );
     TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
 }
 
 void test_terminal_output_filter_strips_osc_title_sequences() {
     TerminalOutputFilter filter;
-    TEST_ASSERT(filter_terminal_output_for_test(
-                    &filter, "\x1b]0;C:\\Windows\\system32\\cmd.exe\x07hello \r\n") == "hello\n");
+    TEST_ASSERT(
+        filter_terminal_output_for_test(
+            &filter,
+            "\x1b]0;C:\\Windows\\system32\\cmd.exe\x07hello \r\n"
+        )
+        == "hello\n"
+    );
     TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
 }
 
@@ -237,29 +283,42 @@ void test_terminal_output_filter_handles_split_escape_sequences() {
 
 void test_terminal_output_filter_applies_backspace_to_utf8_codepoints() {
     TerminalOutputFilter filter;
-    TEST_ASSERT(filter_terminal_output_for_test(&filter, "\xE4\xBD\xA0\xE5\xA5\xBD\x08!\r\n") == "\xE4\xBD\xA0!\n");
+    TEST_ASSERT(
+        filter_terminal_output_for_test(&filter, "\xE4\xBD\xA0\xE5\xA5\xBD\x08!\r\n")
+        == "\xE4\xBD\xA0!\n"
+    );
 }
 
 void test_terminal_output_filter_collapses_winpty_prompt_rewrites() {
     TerminalOutputFilter filter;
-    const std::string first =
-        filter_terminal_output_for_test(&filter,
-                                        "Microsoft Windows XP [\xE7\x89\x88\xE6\x9C\xAC 5.1.2600]"
-                                        "\x1b[105G(C\r\n)\x20"
-                                        "\xE7\x89\x88\xE6\x9D\x83\xE6\x89\x80\xE6\x9C\x89 1985-2001 Microsoft Corp.\r\n"
-                                        "\x1b[107GC:\\chi\r\n>\r");
-    const std::string second =
-        filter_terminal_output_for_test(&filter,
-                                        "\x1b[107GC:\\chi>e\r\n"
-                                        "cho hello\x1b[100Ghello\r\n"
-                                        "\x1b[107GC:\\chi>\r");
+    const std::string first = filter_terminal_output_for_test(
+        &filter,
+        "Microsoft Windows XP [\xE7\x89\x88\xE6\x9C\xAC 5.1.2600]"
+        "\x1b[105G(C\r\n)\x20"
+        "\xE7\x89\x88\xE6\x9D\x83\xE6\x89\x80\xE6\x9C\x89 1985-2001 Microsoft Corp.\r\n"
+        "\x1b[107GC:\\chi\r\n>\r"
+    );
+    const std::string second = filter_terminal_output_for_test(
+        &filter,
+        "\x1b[107GC:\\chi>e\r\n"
+        "cho hello\x1b[100Ghello\r\n"
+        "\x1b[107GC:\\chi>\r"
+    );
     const std::string final = first + second + drain_terminal_output_for_test(&filter);
 
-    TEST_ASSERT(final.find("Microsoft Windows XP [\xE7\x89\x88\xE6\x9C\xAC 5.1.2600]") != std::string::npos);
-    TEST_ASSERT(final.find("\xE7\x89\x88\xE6\x9D\x83\xE6\x89\x80\xE6\x9C\x89 1985-2001 Microsoft Corp.") != std::string::npos);
+    TEST_ASSERT(
+        final.find("Microsoft Windows XP [\xE7\x89\x88\xE6\x9C\xAC 5.1.2600]") != std::string::npos
+    );
+    TEST_ASSERT(
+        final.find("\xE7\x89\x88\xE6\x9D\x83\xE6\x89\x80\xE6\x9C\x89 1985-2001 Microsoft Corp.")
+        != std::string::npos
+    );
     TEST_ASSERT(final.find("C:\\chi>") != std::string::npos);
     TEST_ASSERT(final.find("hellohello") != std::string::npos);
-    TEST_ASSERT(final.find("                                                                ") == std::string::npos);
+    TEST_ASSERT(
+        final.find("                                                                ")
+        == std::string::npos
+    );
     TEST_ASSERT(final.find('\x1b') == std::string::npos);
 }
 
@@ -273,9 +332,17 @@ void test_terminal_output_filter_debounces_touched_rows() {
 
 void test_terminal_output_filter_debounce_uses_latest_repaint() {
     TerminalOutputFilter filter(100UL, 500UL);
-    TEST_ASSERT(filter_terminal_output_at_for_test(&filter, "prompt>echo hello\x1b[116Ghell\r\no", 1000U).empty());
+    TEST_ASSERT(
+        filter_terminal_output_at_for_test(&filter, "prompt>echo hello\x1b[116Ghell\r\no", 1000U)
+            .empty()
+    );
     TEST_ASSERT(flush_terminal_output_due_for_test(&filter, 1050U).empty());
-    TEST_ASSERT(filter_terminal_output_at_for_test(&filter, "\r\x1b[1Aprompt>echo hello\x1b[0K\r\nhello", 1050U).empty());
+    TEST_ASSERT(filter_terminal_output_at_for_test(
+                    &filter,
+                    "\r\x1b[1Aprompt>echo hello\x1b[0K\r\nhello",
+                    1050U
+    )
+                    .empty());
     TEST_ASSERT(flush_terminal_output_due_for_test(&filter, 1149U).empty());
 
     const std::string emitted = flush_terminal_output_due_for_test(&filter, 1150U);
@@ -298,19 +365,34 @@ void test_terminal_output_filter_does_not_finalize_partial_rows_on_flush_due() {
     TerminalOutputFilter filter(150UL, 500UL);
     WinptyTranscriptNormalizer normalizer;
 
-    TEST_ASSERT(filter_terminal_output_at_for_test(&filter, "prompt>echo hello\x1b[116Ghell\r\no", 1000U).empty());
-    TEST_ASSERT(normalize_winpty_transcript_chunk_for_test(&normalizer, flush_terminal_output_due_for_test(&filter, 1100U)).empty());
     TEST_ASSERT(
-        normalize_winpty_transcript_chunk_for_test(&normalizer, filter_terminal_output_at_for_test(
-                                                                  &filter,
-                                                                  "\r\x1b[1Aprompt>echo hello\x1b[0K\r\nhello\r\n",
-                                                                  1150U))
-            .empty());
-    TEST_ASSERT(normalize_winpty_transcript_chunk_for_test(&normalizer, flush_terminal_output_due_for_test(&filter, 1299U))
+        filter_terminal_output_at_for_test(&filter, "prompt>echo hello\x1b[116Ghell\r\no", 1000U)
+            .empty()
+    );
+    TEST_ASSERT(normalize_winpty_transcript_chunk_for_test(
+                    &normalizer,
+                    flush_terminal_output_due_for_test(&filter, 1100U)
+    )
                     .empty());
-    const std::string actual =
-        normalize_winpty_transcript_chunk_for_test(&normalizer, flush_terminal_output_due_for_test(&filter, 1300U)) +
-        drain_winpty_transcript_for_test(&normalizer);
+    TEST_ASSERT(normalize_winpty_transcript_chunk_for_test(
+                    &normalizer,
+                    filter_terminal_output_at_for_test(
+                        &filter,
+                        "\r\x1b[1Aprompt>echo hello\x1b[0K\r\nhello\r\n",
+                        1150U
+                    )
+    )
+                    .empty());
+    TEST_ASSERT(normalize_winpty_transcript_chunk_for_test(
+                    &normalizer,
+                    flush_terminal_output_due_for_test(&filter, 1299U)
+    )
+                    .empty());
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(
+                                   &normalizer,
+                                   flush_terminal_output_due_for_test(&filter, 1300U)
+                               )
+                               + drain_winpty_transcript_for_test(&normalizer);
     TEST_ASSERT(actual == "prompt>echo hello\nhello\n");
 }
 
@@ -320,31 +402,34 @@ void test_winpty_transcript_normalizer_reconstructs_banner_and_prompt() {
         "Microsoft Windows XP [\xE7\x89\x88\xE6\x9C\xAC 5.1.2600]"
         "                                                                                    (C\n"
         ") \xE7\x89\x88\xE6\x9D\x83\xE6\x89\x80\xE6\x9C\x89 1985-2001 Microsoft Corp.\n"
-        "                                                                                                                  C:\\chi\n"
+        "                                                                                          "
+        "                    "
+        "    C:\\chi\n"
         "\\winpty-probe>\n";
     const std::string expected =
         "Microsoft Windows XP [\xE7\x89\x88\xE6\x9C\xAC 5.1.2600]\n"
         "(C) \xE7\x89\x88\xE6\x9D\x83\xE6\x89\x80\xE6\x9C\x89 1985-2001 Microsoft Corp.\n"
         "C:\\chi\\winpty-probe>\n";
 
-    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
-                               drain_winpty_transcript_for_test(&normalizer);
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical)
+                               + drain_winpty_transcript_for_test(&normalizer);
     TEST_ASSERT(actual == expected);
 }
 
 void test_winpty_transcript_normalizer_splits_echo_output_from_prompt_repaint() {
     WinptyTranscriptNormalizer normalizer;
     const std::string physical =
-        "\\winpty-probe>echo hello                                                                                          hello\n"
-        "                                                                                                                  C:\\chi\n"
+        "\\winpty-probe>echo hello                                                            "
+        "                              hello\n"
+        "                                                                                     "
+        "                             C:\\chi\n"
         "\\winpty-probe>\n";
-    const std::string expected =
-        "\\winpty-probe>echo hello\n"
-        "hello\n"
-        "C:\\chi\\winpty-probe>\n";
+    const std::string expected = "\\winpty-probe>echo hello\n"
+                                 "hello\n"
+                                 "C:\\chi\\winpty-probe>\n";
 
-    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
-                               drain_winpty_transcript_for_test(&normalizer);
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical)
+                               + drain_winpty_transcript_for_test(&normalizer);
     TEST_ASSERT(actual == expected);
 }
 
@@ -352,58 +437,66 @@ void test_winpty_transcript_normalizer_handles_chunked_repaint_lines() {
     WinptyTranscriptNormalizer normalizer;
     std::string actual;
     actual += normalize_winpty_transcript_chunk_for_test(
-        &normalizer, "\\winpty-probe>echo hello                                                ");
+        &normalizer,
+        "\\winpty-probe>echo hello                                                "
+    );
     actual += normalize_winpty_transcript_chunk_for_test(
-        &normalizer, "                                          hello\n"
-                     "                                                   ");
+        &normalizer,
+        "                                          hello\n"
+        "                                                   "
+    );
     actual += normalize_winpty_transcript_chunk_for_test(
-        &normalizer, "                                                               C:\\chi\n\\winpty");
+        &normalizer,
+        "                                                               C:\\chi\n\\winpty"
+    );
     actual += normalize_winpty_transcript_chunk_for_test(&normalizer, "-probe>\n");
     actual += drain_winpty_transcript_for_test(&normalizer);
 
-    const std::string expected =
-        "\\winpty-probe>echo hello\n"
-        "hello\n"
-        "C:\\chi\\winpty-probe>\n";
+    const std::string expected = "\\winpty-probe>echo hello\n"
+                                 "hello\n"
+                                 "C:\\chi\\winpty-probe>\n";
     TEST_ASSERT(actual == expected);
 }
 
 void test_winpty_transcript_normalizer_handles_windows_2000_short_wrap_fragment() {
     WinptyTranscriptNormalizer normalizer;
-    const std::string user_profile = "DOCUME~1\\REMOTE~1\\LOCALS~1\\Temp\\remote-exec-cpp-session-store-test-probe";
+    const std::string user_profile =
+        "DOCUME~1\\REMOTE~1\\LOCALS~1\\Temp\\remote-exec-cpp-session-store-test-probe";
     const std::string wrapped_prompt_fragment = user_profile.substr(1U) + ">";
     const std::string full_prompt = "C:\\" + user_profile + ">";
     const std::string command_line = wrapped_prompt_fragment + "echo hello";
-    const std::string physical = winpty_repaint_physical_line(command_line, "hell", 120U) + "o\n" + full_prompt + "\n";
-    const std::string expected =
-        command_line + "\n"
-        "hello\n" +
-        full_prompt + "\n";
+    const std::string physical =
+        winpty_repaint_physical_line(command_line, "hell", 120U) + "o\n" + full_prompt + "\n";
+    const std::string expected = command_line
+                                 + "\n"
+                                   "hello\n"
+                                 + full_prompt + "\n";
 
-    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
-                               drain_winpty_transcript_for_test(&normalizer);
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical)
+                               + drain_winpty_transcript_for_test(&normalizer);
     TEST_ASSERT(actual == expected);
 }
 
 void test_winpty_transcript_normalizer_merges_pending_repaint_fragment() {
     WinptyTranscriptNormalizer normalizer;
     const std::string physical =
-        "                                                                                                                  C:\\chi\n"
+        "                                                                                     "
+        "                             C:\\chi\n"
         "\\winpty-probe>\n";
     const std::string expected = "C:\\chi\\winpty-probe>\n";
 
-    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
-                               drain_winpty_transcript_for_test(&normalizer);
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical)
+                               + drain_winpty_transcript_for_test(&normalizer);
     TEST_ASSERT(actual == expected);
 }
 
 void test_winpty_transcript_normalizer_preserves_regular_wide_spacing() {
     WinptyTranscriptNormalizer normalizer;
-    const std::string physical =
-        "column-a                                                column-b                                 column-c\n";
+    const std::string physical = "column-a                                                column-b "
+                                 "                                column-c\n";
 
-    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
-                               drain_winpty_transcript_for_test(&normalizer);
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical)
+                               + drain_winpty_transcript_for_test(&normalizer);
     TEST_ASSERT(actual == physical);
 }
 
@@ -423,31 +516,32 @@ void test_winpty_transcript_normalizer_accepts_one_column_short_rows() {
 
 void test_winpty_transcript_normalizer_updates_configured_width() {
     WinptyTranscriptNormalizer normalizer(80U);
-    const std::string stale_width_physical = winpty_repaint_physical_line("C:\\p>echo hello", "hello", 100U);
-    std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, stale_width_physical);
+    const std::string stale_width_physical =
+        winpty_repaint_physical_line("C:\\p>echo hello", "hello", 100U);
+    std::string actual =
+        normalize_winpty_transcript_chunk_for_test(&normalizer, stale_width_physical);
 
     normalizer.set_physical_width(100U);
     actual += normalize_winpty_transcript_chunk_for_test(
         &normalizer,
-        winpty_repaint_physical_line("C:\\p>echo hello", "hello", 100U) +
-            winpty_repaint_physical_line("", "C:\\p", 100U) + ">\n");
+        winpty_repaint_physical_line("C:\\p>echo hello", "hello", 100U)
+            + winpty_repaint_physical_line("", "C:\\p", 100U) + ">\n"
+    );
     actual += drain_winpty_transcript_for_test(&normalizer);
 
-    const std::string expected =
-        stale_width_physical +
-        "C:\\p>echo hello\n"
-        "hello\n"
-        "C:\\p>\n";
+    const std::string expected = stale_width_physical
+                                 + "C:\\p>echo hello\n"
+                                   "hello\n"
+                                   "C:\\p>\n";
     TEST_ASSERT(actual == expected);
 }
 
 void test_winpty_transcript_normalizer_ignores_non_width_sized_padding() {
     WinptyTranscriptNormalizer normalizer(120U);
-    const std::string physical =
-        "C:\\probe>echo hello                                hello\n";
+    const std::string physical = "C:\\probe>echo hello                                hello\n";
 
-    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
-                               drain_winpty_transcript_for_test(&normalizer);
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical)
+                               + drain_winpty_transcript_for_test(&normalizer);
     TEST_ASSERT(actual == physical);
 }
 

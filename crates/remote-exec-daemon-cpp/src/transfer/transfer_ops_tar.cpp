@@ -9,20 +9,15 @@
 #include <string>
 #include <vector>
 
-#ifndef _WIN32
-#include <sys/stat.h>
-#endif
-
 #include "core/stdio_retry.h"
-#include "json.hpp"
 #include "platform/path_utils.h"
 #include "platform/scoped_file.h"
 #include "rpc/rpc_failures.h"
-#include "transfer_ops_internal.h"
+#include "transfer_archive.h"
+#include "transfer_tar_codec.h"
+#include "transfer_warning_codec.h"
 
-using Json = nlohmann::json;
-
-namespace transfer_ops_internal {
+namespace transfer_tar_codec {
 
 extern const std::size_t TAR_BLOCK_SIZE = 512;
 extern const char SINGLE_FILE_ENTRY[] = ".remote-exec-file";
@@ -30,17 +25,32 @@ extern const char TRANSFER_SUMMARY_ENTRY[] = ".remote-exec-transfer-summary.json
 
 namespace {
 
-void write_string_field(std::string* header, std::size_t offset, std::size_t width, const std::string& value) {
+void write_string_field(
+    std::string* header,
+    std::size_t offset,
+    std::size_t width,
+    const std::string& value
+) {
     const std::size_t length = std::min(width, value.size());
     if (length > 0) {
         header->replace(offset, length, value.substr(0, length));
     }
 }
 
-void write_octal_field(std::string* header, std::size_t offset, std::size_t width, std::uint64_t value) {
+void write_octal_field(
+    std::string* header,
+    std::size_t offset,
+    std::size_t width,
+    std::uint64_t value
+) {
     char buffer[64];
     std::snprintf(
-        buffer, sizeof(buffer), "%0*llo", static_cast<int>(width - 1), static_cast<unsigned long long>(value));
+        buffer,
+        sizeof(buffer),
+        "%0*llo",
+        static_cast<int>(width - 1),
+        static_cast<unsigned long long>(value)
+    );
     const std::string digits(buffer);
     if (digits.size() > width - 1) {
         throw std::runtime_error("tar numeric field overflow");
@@ -90,13 +100,15 @@ void append_padded_body(TransferArchiveSink* archive, const std::string& body) {
     append_padding(archive, body.size());
 }
 
-void append_tar_header(TransferArchiveSink* archive,
-                       const std::string& path,
-                       char typeflag,
-                       std::uint64_t size,
-                       std::uint64_t mode,
-                       const std::string& link_name = std::string(),
-                       bool long_name_emitted = false) {
+void append_tar_header(
+    TransferArchiveSink* archive,
+    const std::string& path,
+    char typeflag,
+    std::uint64_t size,
+    std::uint64_t mode,
+    const std::string& link_name = std::string(),
+    bool long_name_emitted = false
+) {
     std::string header(TAR_BLOCK_SIZE, '\0');
     write_string_field(&header, 0, 100, path_for_header_name(path, long_name_emitted));
     write_octal_field(&header, 100, 8, mode);
@@ -136,13 +148,6 @@ std::uint64_t parse_octal_field(const char* data, std::size_t size) {
     return value;
 }
 
-std::uint64_t checked_add_u64(std::uint64_t left, std::uint64_t right, const std::string& label) {
-    if (left > std::numeric_limits<std::uint64_t>::max() - right) {
-        throw TransferFailure(TransferRpcCode::TransferFailed, label + " is too large");
-    }
-    return left + right;
-}
-
 bool checksum_valid(const char* block) {
     const std::uint64_t stored = parse_octal_field(block + 148, 8);
     std::uint64_t computed = 0;
@@ -154,17 +159,6 @@ bool checksum_valid(const char* block) {
         }
     }
     return stored == computed;
-}
-
-Json transfer_warnings_json(const std::vector<TransferWarning>& warnings) {
-    Json json = Json::array();
-    for (std::size_t i = 0; i < warnings.size(); ++i) {
-        json.push_back(Json{
-            {"code", warnings[i].code},
-            {"message", warnings[i].message},
-        });
-    }
-    return json;
 }
 
 std::string header_path(const char* block) {
@@ -200,7 +194,11 @@ void append_directory_entry(TransferArchiveSink* archive, const std::string& rel
     append_tar_header(archive, rel_path, '5', 0, 0755, std::string(), long_name_emitted);
 }
 
-void append_file_entry(TransferArchiveSink* archive, const std::string& rel_path, const std::string& body) {
+void append_file_entry(
+    TransferArchiveSink* archive,
+    const std::string& rel_path,
+    const std::string& body
+) {
     const bool long_name_emitted = rel_path.size() > 100;
     if (long_name_emitted) {
         append_gnu_long_name(archive, rel_path);
@@ -209,22 +207,22 @@ void append_file_entry(TransferArchiveSink* archive, const std::string& rel_path
     append_padded_body(archive, body);
 }
 
-void append_file_entry_from_path(TransferArchiveSink* archive,
-                                 const std::string& rel_path,
-                                 const std::string& source_path) {
-    struct stat st;
-    if (!path_utils::stat_path(source_path, &st)) {
+void append_file_entry_from_path(
+    TransferArchiveSink* archive,
+    const std::string& rel_path,
+    const std::string& source_path
+) {
+    path_utils::PathMetadata metadata;
+    if (!path_utils::path_metadata(source_path, &metadata)) {
         throw TransferFailure(TransferRpcCode::SourceMissing, "transfer source missing");
     }
-    const std::uint64_t mode = static_cast<std::uint64_t>(st.st_mode & 0777);
+    const std::uint64_t mode =
+        metadata.has_mode_bits ? static_cast<std::uint64_t>(metadata.mode_bits & 0777U) : 0644U;
     ScopedFile input(path_utils::open_file(source_path, "rb"));
     if (!input.valid()) {
         throw TransferFailure(TransferRpcCode::SourceMissing, "transfer source missing");
     }
-    if (st.st_size < 0) {
-        throw std::runtime_error("unable to read transfer source");
-    }
-    const std::uint64_t file_size = static_cast<std::uint64_t>(st.st_size);
+    const std::uint64_t file_size = metadata.size;
 
     const bool long_name_emitted = rel_path.size() > 100;
     if (long_name_emitted) {
@@ -235,7 +233,8 @@ void append_file_entry_from_path(TransferArchiveSink* archive,
     char buffer[8192];
     std::uint64_t remaining = file_size;
     while (remaining > 0U) {
-        const std::size_t requested = remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
+        const std::size_t requested =
+            remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
         const std::size_t received = stdio_retry::fread_some(input.get(), buffer, requested);
         if (received != requested) {
             throw std::runtime_error("unable to read transfer source");
@@ -247,7 +246,11 @@ void append_file_entry_from_path(TransferArchiveSink* archive,
 }
 
 #ifndef _WIN32
-void append_symlink_entry(TransferArchiveSink* archive, const std::string& rel_path, const std::string& target) {
+void append_symlink_entry(
+    TransferArchiveSink* archive,
+    const std::string& rel_path,
+    const std::string& target
+) {
     const bool long_name_emitted = rel_path.size() > 100;
     if (long_name_emitted) {
         append_gnu_long_name(archive, rel_path);
@@ -272,29 +275,18 @@ bool is_transfer_summary_path(const std::string& path) {
     return path == TRANSFER_SUMMARY_ENTRY;
 }
 
-void append_transfer_summary_entry(TransferArchiveSink* archive, const std::vector<TransferWarning>& warnings) {
+void append_transfer_summary_entry(
+    TransferArchiveSink* archive,
+    const std::vector<TransferWarning>& warnings
+) {
     if (warnings.empty()) {
         return;
     }
-    const Json summary = Json{{"warnings", transfer_warnings_json(warnings)}};
-    append_file_entry(archive, TRANSFER_SUMMARY_ENTRY, summary.dump());
-}
-
-std::vector<TransferWarning> read_transfer_summary(const std::string& body) {
-    std::vector<TransferWarning> warnings;
-    const Json summary = Json::parse(body);
-    const Json raw_warnings = summary.value("warnings", Json::array());
-    for (std::size_t i = 0; i < raw_warnings.size(); ++i) {
-        warnings.push_back(TransferWarning{
-            raw_warnings[i].value("code", std::string()),
-            raw_warnings[i].value("message", std::string()),
-        });
-    }
-    return warnings;
-}
-
-void append_warnings(std::vector<TransferWarning>* destination, const std::vector<TransferWarning>& source) {
-    destination->insert(destination->end(), source.begin(), source.end());
+    append_file_entry(
+        archive,
+        TRANSFER_SUMMARY_ENTRY,
+        transfer_warning_codec::transfer_summary_body(warnings)
+    );
 }
 
 TarHeaderView parse_header(const char* block) {
@@ -313,45 +305,92 @@ TarHeaderView parse_header(const char* block) {
 
 void ensure_u64_fits_size_t(std::uint64_t value, const std::string& label) {
     if (value > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
-        throw TransferFailure(TransferRpcCode::TransferFailed, label + " is too large for this platform");
+        throw TransferFailure(
+            TransferRpcCode::TransferFailed,
+            label + " is too large for this platform"
+        );
     }
 }
 
-void ensure_transfer_entry_within_limits(std::uint64_t entry_size,
-                                         std::uint64_t copied_so_far,
-                                         const TransferLimitConfig& limits) {
+void ensure_transfer_entry_within_limits(
+    std::uint64_t entry_size,
+    std::uint64_t copied_so_far,
+    const TransferLimitConfig& limits
+) {
     if (entry_size > limits.max_entry_bytes) {
         std::ostringstream message;
-        message << "archive entry size " << entry_size << " exceeds transfer entry limit " << limits.max_entry_bytes;
+        message << "archive entry size " << entry_size << " exceeds transfer entry limit "
+                << limits.max_entry_bytes;
         throw TransferFailure(TransferRpcCode::TransferFailed, message.str());
     }
-    if (copied_so_far > limits.max_archive_bytes || entry_size > limits.max_archive_bytes - copied_so_far) {
+    if (copied_so_far > limits.max_archive_bytes
+        || entry_size > limits.max_archive_bytes - copied_so_far) {
         std::ostringstream message;
         message << "archive byte count exceeds transfer archive limit " << limits.max_archive_bytes;
         throw TransferFailure(TransferRpcCode::TransferFailed, message.str());
     }
 }
 
-std::size_t padded_length(std::uint64_t size) {
-    const std::uint64_t padded = checked_add_u64(size, static_cast<std::uint64_t>(tar_padding(size)), "tar entry size");
-    ensure_u64_fits_size_t(padded, "tar entry size");
-    return static_cast<std::size_t>(padded);
+std::uint64_t entry_padding(std::uint64_t size) {
+    const std::uint64_t remainder = size % TAR_BLOCK_SIZE;
+    return remainder == 0U ? 0U : static_cast<std::uint64_t>(TAR_BLOCK_SIZE) - remainder;
 }
 
-std::string read_gnu_long_name(const std::string& archive, std::size_t body_offset, std::uint64_t size) {
-    if (body_offset + padded_length(size) > archive.size()) {
-        throw TransferFailure(TransferRpcCode::TransferFailed, "truncated tar entry body");
+std::uint64_t entry_body_with_padding(std::uint64_t size) {
+    if (size > std::numeric_limits<std::uint64_t>::max() - entry_padding(size)) {
+        throw TransferFailure(TransferRpcCode::TransferFailed, "tar entry size is too large");
     }
-    ensure_u64_fits_size_t(size, "GNU long name entry size");
-    std::string value = archive.substr(body_offset, static_cast<std::size_t>(size));
+    return size + entry_padding(size);
+}
+
+void require_archive_terminator(TransferArchiveReader& reader) {
+    std::vector<char> terminator(TAR_BLOCK_SIZE);
+    transfer_archive::read_exact_or_throw(
+        reader,
+        terminator.data(),
+        terminator.size(),
+        "truncated tar terminator"
+    );
+    if (!is_zero_block(terminator.data())) {
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "invalid tar terminator");
+    }
+
+    while (reader.read_exact_or_eof(terminator.data(), terminator.size())) {
+        if (!is_zero_block(terminator.data())) {
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "trailing data after tar terminator"
+            );
+        }
+    }
+}
+
+void skip_entry_padding(TransferArchiveReader& reader, std::uint64_t size) {
+    transfer_archive::skip_exact(reader, entry_padding(size), "truncated tar entry body");
+}
+
+std::string read_limited_metadata_string(
+    TransferArchiveReader& reader,
+    std::uint64_t size,
+    const TransferLimitConfig& limits,
+    const std::string& error_message
+) {
+    ensure_transfer_entry_within_limits(size, 0U, limits);
+    return transfer_archive::read_exact_string(reader, size, error_message);
+}
+
+std::string read_gnu_long_name_from_reader(
+    TransferArchiveReader& reader,
+    std::uint64_t size,
+    const TransferLimitConfig& limits
+) {
+    std::string value =
+        read_limited_metadata_string(reader, size, limits, "truncated tar entry body");
+    skip_entry_padding(reader, size);
     while (!value.empty() && value[value.size() - 1] == '\0') {
         value.erase(value.size() - 1);
     }
     return value;
 }
 
-void validate_transfer_options(const ExportOptions& options) {
-    (void)options;
-}
-
-} // namespace transfer_ops_internal
+} // namespace transfer_tar_codec

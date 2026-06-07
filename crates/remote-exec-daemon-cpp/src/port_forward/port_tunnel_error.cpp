@@ -6,26 +6,45 @@
 #include "port_tunnel_service.h"
 #include "port_tunnel_spawn.h"
 
+#include "json.hpp"
+
+using Json = nlohmann::json;
+
 namespace {
 
 void log_tunnel_send_failure(const char* frame_kind, const std::exception& ex) {
     log_message(
-        LOG_WARN, "port_tunnel", std::string("dropping ") + frame_kind + " frame after send failure: " + ex.what());
+        LOG_WARN,
+        "port_tunnel",
+        std::string("dropping ") + frame_kind + " frame after send failure: " + ex.what()
+    );
 }
 
 void log_unknown_tunnel_send_failure(const char* frame_kind) {
-    log_message(LOG_WARN, "port_tunnel", std::string("dropping ") + frame_kind + " frame after unknown send failure");
+    log_message(
+        LOG_WARN,
+        "port_tunnel",
+        std::string("dropping ") + frame_kind + " frame after unknown send failure"
+    );
 }
 
 } // namespace
 
-void PortTunnelConnection::send_error(uint32_t stream_id, const std::string& code, const std::string& message) {
+void PortTunnelConnection::send_error(
+    uint32_t stream_id,
+    const std::string& code,
+    const std::string& message
+) {
     PortTunnelFrame frame;
     frame.type = PortTunnelFrameType::Error;
     frame.flags = 0U;
     frame.stream_id = stream_id;
-    frame.meta =
-        Json{{"code", code}, {"message", message}, {"fatal", false}, {"generation", current_generation()}}.dump();
+    frame.meta = Json{
+        {"code", code},
+        {"message", message},
+        {"fatal", false},
+        {"generation", current_generation()}
+    }.dump();
     try {
         send_frame(frame);
     } catch (const std::exception& ex) {
@@ -35,15 +54,21 @@ void PortTunnelConnection::send_error(uint32_t stream_id, const std::string& cod
     }
 }
 
-void PortTunnelConnection::send_terminal_error(uint32_t stream_id,
-                                               const std::string& code,
-                                               const std::string& message) {
+void PortTunnelConnection::send_terminal_error(
+    uint32_t stream_id,
+    const std::string& code,
+    const std::string& message
+) {
     PortTunnelFrame frame;
     frame.type = PortTunnelFrameType::Error;
     frame.flags = 0U;
     frame.stream_id = stream_id;
-    frame.meta =
-        Json{{"code", code}, {"message", message}, {"fatal", true}, {"generation", current_generation()}}.dump();
+    frame.meta = Json{
+        {"code", code},
+        {"message", message},
+        {"fatal", true},
+        {"generation", current_generation()}
+    }.dump();
     try {
         send_frame(frame);
     } catch (const std::exception& ex) {
@@ -53,15 +78,18 @@ void PortTunnelConnection::send_terminal_error(uint32_t stream_id,
     }
 }
 
-void PortTunnelConnection::send_forward_drop(uint32_t stream_id,
-                                             const std::string& kind,
-                                             const std::string& reason,
-                                             const std::string& message) {
+void PortTunnelConnection::send_forward_drop(
+    uint32_t stream_id,
+    const std::string& kind,
+    const std::string& reason,
+    const std::string& message
+) {
     PortTunnelFrame frame;
     frame.type = PortTunnelFrameType::ForwardDrop;
     frame.flags = 0U;
     frame.stream_id = stream_id;
-    frame.meta = Json{{"kind", kind}, {"count", 1U}, {"reason", reason}, {"message", message}}.dump();
+    frame.meta =
+        Json{{"kind", kind}, {"count", 1U}, {"reason", reason}, {"message", message}}.dump();
     try {
         send_frame(frame);
     } catch (const std::exception& ex) {
@@ -97,9 +125,11 @@ void PortTunnelConnection::send_worker_limit(uint32_t stream_id) {
     send_error(stream_id, "port_tunnel_limit_exceeded", "port tunnel worker limit reached");
 }
 
-void PortTunnelConnection::drop_tcp_stream(ConnectionLocalStreams* local_streams,
-                                           uint32_t stream_id,
-                                           const std::shared_ptr<TunnelTcpStream>& fallback) {
+void PortTunnelConnection::drop_tcp_stream(
+    ConnectionLocalStreams* local_streams,
+    uint32_t stream_id,
+    const std::shared_ptr<TunnelTcpStream>& fallback
+) {
     std::shared_ptr<TunnelTcpStream> removed_stream = local_streams->remove_tcp(stream_id);
     if (removed_stream.get() != nullptr) {
         removed_stream->close();
@@ -108,17 +138,26 @@ void PortTunnelConnection::drop_tcp_stream(ConnectionLocalStreams* local_streams
     }
 }
 
-bool PortTunnelConnection::send_tcp_success_after_io_threads_started(const PortTunnelFrame& success,
-                                                                     ConnectionLocalStreams* local_streams,
-                                                                     uint32_t stream_id,
-                                                                     const std::shared_ptr<TunnelTcpStream>& stream,
-                                                                     PortTunnelWorkerLease worker_lease) {
+bool PortTunnelConnection::send_tcp_success_after_io_threads_started(
+    const PortTunnelFrame& success,
+    ConnectionLocalStreams* local_streams,
+    uint32_t stream_id,
+    const std::shared_ptr<TunnelTcpStream>& stream,
+    PortTunnelWorkerLease worker_lease
+) {
     std::shared_ptr<TcpReadStartGate> start_gate(new TcpReadStartGate());
     if (!spawn_tcp_write_thread(service_, shared_from_this(), stream_id, stream)) {
         drop_tcp_stream(local_streams, stream_id, stream);
         return false;
     }
-    if (!spawn_tcp_read_thread(service_, shared_from_this(), stream_id, stream, std::move(worker_lease), start_gate)) {
+    if (!spawn_tcp_read_thread(
+            service_,
+            shared_from_this(),
+            stream_id,
+            stream,
+            std::move(worker_lease),
+            start_gate
+        )) {
         drop_tcp_stream(local_streams, stream_id, stream);
         return false;
     }
@@ -130,26 +169,31 @@ bool PortTunnelConnection::send_tcp_success_after_io_threads_started(const PortT
 void PortTunnelConnection::close_current_session(PortTunnelCloseMode mode) {
     std::shared_ptr<PortTunnelSession> session = current_session();
     if (session.get() != nullptr) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("connection close session")
-                        .quoted_field("session_id", session->session_id)
-                        .raw(std::string("mode=") + port_tunnel_close_mode_name(mode))
-                        .field("generation", current_generation())
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("connection close session")
+                .quoted_field("session_id", session->session_id)
+                .raw(std::string("mode=") + port_tunnel_close_mode_name(mode))
+                .field("generation", current_generation())
+                .str()
+        );
         if (mode == PortTunnelCloseMode::RetryableDetach) {
             service_->detach_session(session);
-        } else if (mode == PortTunnelCloseMode::GracefulClose || mode == PortTunnelCloseMode::TerminalFailure) {
+        } else if (mode == PortTunnelCloseMode::GracefulClose
+                   || mode == PortTunnelCloseMode::TerminalFailure) {
             service_->close_session(session);
         }
     } else {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("connection close session")
-                        .raw("session=none")
-                        .raw(std::string("mode=") + port_tunnel_close_mode_name(mode))
-                        .field("generation", current_generation())
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("connection close session")
+                .raw("session=none")
+                .raw(std::string("mode=") + port_tunnel_close_mode_name(mode))
+                .field("generation", current_generation())
+                .str()
+        );
     }
 }
 
@@ -158,13 +202,15 @@ void PortTunnelConnection::close_connection_local_state() {
     std::vector<std::shared_ptr<TunnelUdpSocket>> udp_sockets;
     mark_closed();
     connection_local_streams_.drain(&tcp_streams, &udp_sockets);
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("connection close local state")
-                    .field("generation", current_generation())
-                    .field("tcp_streams", tcp_streams.size())
-                    .field("udp_sockets", udp_sockets.size())
-                    .str());
+    log_message(
+        LOG_DEBUG,
+        "port_tunnel",
+        LogMessageBuilder("connection close local state")
+            .field("generation", current_generation())
+            .field("tcp_streams", tcp_streams.size())
+            .field("udp_sockets", udp_sockets.size())
+            .str()
+    );
     for (std::size_t i = 0; i < tcp_streams.size(); ++i) {
         tcp_streams[i]->close();
     }
@@ -179,8 +225,9 @@ std::shared_ptr<PortTunnelSession> PortTunnelConnection::current_session() {
     return session_;
 }
 
-std::shared_ptr<PortTunnelSessionAttachment>
-PortTunnelConnection::session_attachment_for(const std::shared_ptr<PortTunnelSession>& session) {
+std::shared_ptr<PortTunnelSessionAttachment> PortTunnelConnection::session_attachment_for(
+    const std::shared_ptr<PortTunnelSession>& session
+) {
     if (session.get() == nullptr) {
         return std::shared_ptr<PortTunnelSessionAttachment>();
     }
@@ -199,7 +246,8 @@ std::shared_ptr<TunnelTcpStream> PortTunnelConnection::get_active_tcp_stream(uin
     return connection_local_streams_.get_tcp(stream_id);
 }
 
-std::shared_ptr<TunnelTcpStream> PortTunnelConnection::remove_active_tcp_stream(uint32_t stream_id) {
+std::shared_ptr<TunnelTcpStream> PortTunnelConnection::remove_active_tcp_stream(uint32_t stream_id
+) {
     std::shared_ptr<PortTunnelSessionAttachment> attachment = current_session_attachment();
     if (attachment.get() != nullptr) {
         return attachment->local_streams.remove_tcp(stream_id);
@@ -212,20 +260,26 @@ PortTunnelMode PortTunnelConnection::current_mode() {
     return mode_;
 }
 
-void PortTunnelConnection::require_mode(PortTunnelMode mode, PortTunnelProtocol protocol, const std::string& message) {
+void PortTunnelConnection::require_mode(
+    PortTunnelMode mode,
+    PortTunnelProtocol protocol,
+    const std::string& message
+) {
     BasicLockGuard lock(state_mutex_);
     if (mode_ != mode || protocol_ != protocol) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("tunnel invariant rejected")
-                        .raw("invariant=mode_protocol")
-                        .raw(std::string("current_mode=") + port_tunnel_mode_name(mode_))
-                        .raw(std::string("current_protocol=") + port_tunnel_protocol_name(protocol_))
-                        .raw(std::string("expected_mode=") + port_tunnel_mode_name(mode))
-                        .raw(std::string("expected_protocol=") + port_tunnel_protocol_name(protocol))
-                        .field("generation", current_generation())
-                        .quoted_field("message", message)
-                        .str());
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("tunnel invariant rejected")
+                .raw("invariant=mode_protocol")
+                .raw(std::string("current_mode=") + port_tunnel_mode_name(mode_))
+                .raw(std::string("current_protocol=") + port_tunnel_protocol_name(protocol_))
+                .raw(std::string("expected_mode=") + port_tunnel_mode_name(mode))
+                .raw(std::string("expected_protocol=") + port_tunnel_protocol_name(protocol))
+                .field("generation", current_generation())
+                .quoted_field("message", message)
+                .str()
+        );
         throw PortForwardError(400, "invalid_port_tunnel", message);
     }
 }
@@ -246,20 +300,24 @@ void PortTunnelConnection::ensure_generation(std::uint64_t frame_generation) con
     const std::uint64_t generation = current_generation();
     if (frame_generation != generation) {
         std::ostringstream message;
-        message << "frame generation `" << frame_generation << "` does not match tunnel generation `" << generation
-                << "`";
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("tunnel invariant rejected")
-                        .raw("invariant=generation")
-                        .field("frame_generation", frame_generation)
-                        .field("tunnel_generation", generation)
-                        .str());
+        message << "frame generation `" << frame_generation
+                << "` does not match tunnel generation `" << generation << "`";
+        log_message(
+            LOG_DEBUG,
+            "port_tunnel",
+            LogMessageBuilder("tunnel invariant rejected")
+                .raw("invariant=generation")
+                .field("frame_generation", frame_generation)
+                .field("tunnel_generation", generation)
+                .str()
+        );
         throw PortForwardError(400, "port_tunnel_generation_mismatch", message.str());
     }
 }
 
-bool PortTunnelConnection::owns_attachment(const std::shared_ptr<PortTunnelSessionAttachment>& attachment) {
+bool PortTunnelConnection::owns_attachment(
+    const std::shared_ptr<PortTunnelSessionAttachment>& attachment
+) {
     if (attachment.get() == nullptr) {
         return false;
     }
@@ -274,24 +332,29 @@ bool PortTunnelConnection::owns_attachment(const std::shared_ptr<PortTunnelSessi
     return session_attachment_for(session).get() == attachment.get();
 }
 
-bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortTunnelSession>& session,
-                                                     const std::shared_ptr<PortTunnelSessionAttachment>& attachment,
-                                                     uint32_t listener_stream_id,
-                                                     UniqueSocket accepted_socket,
-                                                     const std::string& peer) {
+bool PortTunnelConnection::accept_session_tcp_stream(
+    const std::shared_ptr<PortTunnelSession>& session,
+    const std::shared_ptr<PortTunnelSessionAttachment>& attachment,
+    uint32_t listener_stream_id,
+    UniqueSocket accepted_socket,
+    const std::string& peer
+) {
     uint32_t stream_id = 0U;
     PortTunnelWorkerLease worker_lease;
     PortTunnelBudgetLease active_stream_budget;
     if (!service_->try_acquire_active_tcp_stream(&active_stream_budget)) {
-        send_forward_drop(listener_stream_id,
-                          "tcp_stream",
-                          "port_tunnel_limit_exceeded",
-                          "port tunnel active tcp stream limit reached");
+        send_forward_drop(
+            listener_stream_id,
+            "tcp_stream",
+            "port_tunnel_limit_exceeded",
+            "port tunnel active tcp stream limit reached"
+        );
         return false;
     }
 
     std::shared_ptr<TunnelTcpStream> stream(
-        new TunnelTcpStream(accepted_socket.release(), std::move(active_stream_budget)));
+        new TunnelTcpStream(accepted_socket.release(), std::move(active_stream_budget))
+    );
     {
         BasicLockGuard state_lock(state_mutex_);
         if (closed() || session_.get() != session.get()) {
@@ -308,7 +371,11 @@ bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortT
         attachment->local_streams.remove_tcp(stream_id);
         stream->close();
         send_forward_drop(
-            listener_stream_id, "tcp_stream", "port_tunnel_limit_exceeded", "port tunnel worker limit reached");
+            listener_stream_id,
+            "tcp_stream",
+            "port_tunnel_limit_exceeded",
+            "port tunnel worker limit reached"
+        );
         return false;
     }
 
@@ -320,16 +387,23 @@ bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortT
     }
 
     if (!send_tcp_success_after_io_threads_started(
-            frame, &attachment->local_streams, stream_id, stream, std::move(worker_lease))) {
+            frame,
+            &attachment->local_streams,
+            stream_id,
+            stream,
+            std::move(worker_lease)
+        )) {
         return false;
     }
     return true;
 }
 
-bool PortTunnelConnection::emit_session_udp_datagram(const std::shared_ptr<PortTunnelSessionAttachment>& attachment,
-                                                     uint32_t stream_id,
-                                                     const std::string& peer,
-                                                     const std::vector<unsigned char>& data) {
+bool PortTunnelConnection::emit_session_udp_datagram(
+    const std::shared_ptr<PortTunnelSessionAttachment>& attachment,
+    uint32_t stream_id,
+    const std::string& peer,
+    const std::vector<unsigned char>& data
+) {
     if (!owns_attachment(attachment)) {
         return false;
     }

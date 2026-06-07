@@ -41,7 +41,9 @@ bool set_socket_cloexec_flag(SOCKET socket) {
 void apply_socket_sigpipe_policy(SOCKET socket) {
 #if !REMOTE_EXEC_CPP_HAVE_MSG_NOSIGNAL && REMOTE_EXEC_CPP_HAVE_SO_NOSIGPIPE
     int yes = 1;
-    (void)posix_eintr::retry<int>([&]() { return setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)); });
+    (void)posix_eintr::retry<int>([&]() {
+        return setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
+    });
 #else
     (void)socket;
 #endif
@@ -79,7 +81,8 @@ bool set_socket_cloexec(SOCKET socket) {
 SOCKET create_socket_cloexec(int family, int type, int protocol) {
     SOCKET created = INVALID_SOCKET;
 #if REMOTE_EXEC_CPP_HAVE_SOCK_CLOEXEC
-    created = posix_eintr::retry<int>([&]() { return socket(family, type | SOCK_CLOEXEC, protocol); });
+    created =
+        posix_eintr::retry<int>([&]() { return socket(family, type | SOCK_CLOEXEC, protocol); });
     if (created != INVALID_SOCKET) {
         apply_socket_sigpipe_policy(created);
         return created;
@@ -106,12 +109,16 @@ void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms) {
     timeval value;
     value.tv_sec = static_cast<long>(timeout_ms / 1000UL);
     value.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
-    if (posix_eintr::retry<int>([&]() { return setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value)); }) !=
-        0) {
+    if (posix_eintr::retry<int>([&]() {
+            return setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value));
+        })
+        != 0) {
         throw_socket_option_error("SO_RCVTIMEO", errno);
     }
-    if (posix_eintr::retry<int>([&]() { return setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &value, sizeof(value)); }) !=
-        0) {
+    if (posix_eintr::retry<int>([&]() {
+            return setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &value, sizeof(value));
+        })
+        != 0) {
         throw_socket_option_error("SO_SNDTIMEO", errno);
     }
 }
@@ -149,11 +156,13 @@ NetworkSession::NetworkSession() {
 NetworkSession::~NetworkSession() {
 }
 
-bool resolve_socket_addresses(const char* node,
-                              const char* service,
-                              const SocketAddressQuery& query,
-                              std::vector<SocketAddress>* addresses,
-                              std::string* error) {
+bool resolve_socket_addresses(
+    const char* node,
+    const char* service,
+    const SocketAddressQuery& query,
+    std::vector<SocketAddress>* addresses,
+    std::string* error
+) {
     addresses->clear();
 
     addrinfo hints;
@@ -164,7 +173,9 @@ bool resolve_socket_addresses(const char* node,
     hints.ai_flags = query.passive ? AI_PASSIVE : 0;
 
     addrinfo* result = nullptr;
-    const int status = posix_eintr::retry_eai_system([&]() { return getaddrinfo(node, service, &hints, &result); });
+    const int status = posix_eintr::retry_eai_system([&]() {
+        return getaddrinfo(node, service, &hints, &result);
+    });
     if (status != 0 || result == nullptr) {
         if (error != nullptr) {
             *error = gai_error_message("getaddrinfo", status);
@@ -199,13 +210,15 @@ std::string numeric_socket_address(const sockaddr* address, socklen_t address_le
     char host[NI_MAXHOST];
     char service[NI_MAXSERV];
     const int result = posix_eintr::retry_eai_system([&]() {
-        return getnameinfo(address,
-                           address_len,
-                           host,
-                           static_cast<socklen_t>(sizeof(host)),
-                           service,
-                           static_cast<socklen_t>(sizeof(service)),
-                           NI_NUMERICHOST | NI_NUMERICSERV);
+        return getnameinfo(
+            address,
+            address_len,
+            host,
+            static_cast<socklen_t>(sizeof(host)),
+            service,
+            static_cast<socklen_t>(sizeof(service)),
+            NI_NUMERICHOST | NI_NUMERICSERV
+        );
     });
     if (result != 0) {
         return "unknown:0";
@@ -269,18 +282,23 @@ int wait_socket_writable(SOCKET socket, unsigned long timeout_ms) {
 
 int socket_error_option(SOCKET socket, int* socket_error) {
     socklen_t socket_error_len = static_cast<socklen_t>(sizeof(*socket_error));
-    return posix_eintr::retry<int>(
-        [&]() { return getsockopt(socket, SOL_SOCKET, SO_ERROR, socket_error, &socket_error_len); });
+    return posix_eintr::retry<int>([&]() {
+        return getsockopt(socket, SOL_SOCKET, SO_ERROR, socket_error, &socket_error_len);
+    });
 }
 
 int set_socket_reuseaddr(SOCKET socket) {
     int yes = 1;
-    return posix_eintr::retry<int>([&]() { return setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)); });
+    return posix_eintr::retry<int>([&]() {
+        return setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    });
 }
 
 int set_socket_ipv6_only(SOCKET socket) {
     int yes = 1;
-    return posix_eintr::retry<int>([&]() { return setsockopt(socket, IPPROTO_IPV6, IPV6_V6ONLY, &yes, sizeof(yes)); });
+    return posix_eintr::retry<int>([&]() {
+        return setsockopt(socket, IPPROTO_IPV6, IPV6_V6ONLY, &yes, sizeof(yes));
+    });
 }
 
 int bind_socket(SOCKET socket, const sockaddr* address, socklen_t address_len) {

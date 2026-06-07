@@ -1,9 +1,9 @@
-#include <atomic>
 #include "test_assert.h"
+#include <atomic>
 #include <utility>
 
-#include "runtime/connection_manager.h"
 #include "platform/platform.h"
+#include "runtime/connection_manager.h"
 #include "test_socket_pair.h"
 
 static void hold_worker(SOCKET socket, std::atomic<bool>& release) {

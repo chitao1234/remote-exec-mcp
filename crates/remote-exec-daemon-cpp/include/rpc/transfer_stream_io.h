@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string>
 
-#include "transfer/transfer_ops.h"
+#include "transfer/transfer_archive_io.h"
 
 class TransferStreamByteReader {
 public:

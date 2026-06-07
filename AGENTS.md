@@ -16,9 +16,12 @@ and documentation maintained in:
 - MCP schemas in `crates/remote-exec-proto/src/public.rs` and
   `crates/remote-exec-proto/src/public/`
 
-Rust crate APIs in this workspace are internal implementation details. Assume
-there are no Rust consumers outside this repository unless a task explicitly
-changes that assumption.
+Rust crate APIs and C++ daemon source/header structure in this workspace are
+internal implementation details. The C++ daemon follows the same stability rule
+as the Rust daemon: the daemon protocol, MCP-visible behavior, operator-facing
+configuration, and maintained external documentation are the compatibility
+boundary. Nothing else in source code is guaranteed to be stable unless a task
+explicitly changes that assumption.
 
 ## Project Overview
 
@@ -91,7 +94,7 @@ C++11, and legacy-Windows-targeting C++11 split actually needs them.
 - `crates/remote-exec-daemon/src/`: Rust daemon config, TLS, HTTP routes, and
   RPC handler glue around `remote-exec-host`.
 - `crates/remote-exec-daemon/tests/`: Rust daemon RPC coverage.
-- `crates/remote-exec-daemon-cpp/`: C++ daemon source, public headers, config
+- `crates/remote-exec-daemon-cpp/`: C++ daemon source and headers, config
   example, GNU/BSD/NMAKE build files, and C++ tests.
 - `crates/remote-exec-proto/src/public.rs`: MCP tool arguments and results.
 - `crates/remote-exec-proto/src/rpc.rs` and `src/rpc/`: broker-daemon RPC

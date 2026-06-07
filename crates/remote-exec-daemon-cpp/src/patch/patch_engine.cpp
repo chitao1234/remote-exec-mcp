@@ -3,7 +3,6 @@
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
-#include <cstring>
 #include <functional>
 #include <sstream>
 #include <stdexcept>
@@ -13,7 +12,6 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
-#include <sys/stat.h>
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -115,8 +113,8 @@ NormalizedPathPrefix normalized_path_prefix(const std::string& raw, NormalizedPa
     }
 
 #ifdef _WIN32
-    if (raw.size() >= 3 && std::isalpha(static_cast<unsigned char>(raw[0])) != 0 && raw[1] == ':' &&
-        (raw[2] == '\\' || raw[2] == '/')) {
+    if (raw.size() >= 3 && std::isalpha(static_cast<unsigned char>(raw[0])) != 0 && raw[1] == ':'
+        && (raw[2] == '\\' || raw[2] == '/')) {
         prefix.value = raw.substr(0, 2);
         prefix.value.push_back(path_utils::native_separator());
         prefix.start = 3;
@@ -138,7 +136,11 @@ NormalizedPathPrefix normalized_path_prefix(const std::string& raw, NormalizedPa
     throw std::runtime_error("absolute patch path is not supported");
 }
 
-void push_normalized_segment(std::vector<std::string>* parts, const std::string& segment, NormalizedPathKind kind) {
+void push_normalized_segment(
+    std::vector<std::string>* parts,
+    const std::string& segment,
+    NormalizedPathKind kind
+) {
     if (segment.empty() || segment == ".") {
         return;
     }
@@ -155,11 +157,15 @@ void push_normalized_segment(std::vector<std::string>* parts, const std::string&
     parts->push_back(segment);
 }
 
-std::string build_normalized_path(const std::vector<std::string>& parts, const std::string& prefix) {
+std::string build_normalized_path(
+    const std::vector<std::string>& parts,
+    const std::string& prefix
+) {
     std::ostringstream out;
     out << prefix;
     for (std::size_t i = 0; i < parts.size(); ++i) {
-        if (i != 0 || (!prefix.empty() && prefix[prefix.size() - 1] != path_utils::native_separator())) {
+        if (i != 0
+            || (!prefix.empty() && prefix[prefix.size() - 1] != path_utils::native_separator())) {
             out << path_utils::native_separator();
         }
         out << parts[i];
@@ -222,16 +228,8 @@ std::string resolve_patch_path(const std::string& root, const std::string& path)
 }
 
 bool file_exists(const std::string& path) {
-    struct stat st;
-    return path_utils::stat_path(path, &st);
-}
-
-bool is_regular_file_mode(const struct stat& st) {
-    return (st.st_mode & S_IFMT) == S_IFREG;
-}
-
-bool is_directory_mode(const struct stat& st) {
-    return (st.st_mode & S_IFMT) == S_IFDIR;
+    path_utils::PathMetadata metadata;
+    return path_utils::path_metadata(path, &metadata);
 }
 
 bool paths_equal(const std::string& left, const std::string& right) {
@@ -263,27 +261,25 @@ std::string read_text_file(const std::string& path) {
 void write_text_atomic(const std::string& path, const std::string& content) {
     path_utils::create_parent_directories(path);
     const std::string temp_path = unique_atomic_write_temp_path(path);
-#ifndef _WIN32
-    struct stat existing;
-    const bool preserve_mode = path_utils::stat_path(path, &existing);
-#endif
+    path_utils::PathMetadata existing;
+    const bool preserve_mode = path_utils::path_metadata(path, &existing);
 
     ScopedFile output(path_utils::open_file(temp_path, "wb"));
     if (!output.valid()) {
         throw std::runtime_error("unable to write " + temp_path);
     }
-    if (!content.empty() && !stdio_retry::fwrite_all(output.get(), content.data(), content.size())) {
+    if (!content.empty()
+        && !stdio_retry::fwrite_all(output.get(), content.data(), content.size())) {
         throw std::runtime_error("unable to write " + temp_path);
     }
     if (output.close() != 0) {
         throw std::runtime_error("unable to write " + temp_path);
     }
-#ifndef _WIN32
-    if (preserve_mode && !path_utils::set_path_mode(temp_path, static_cast<unsigned int>(existing.st_mode))) {
+    if (preserve_mode && existing.has_mode_bits
+        && !path_utils::set_path_mode(temp_path, existing.mode_bits)) {
         (void)path_utils::remove_path(temp_path);
         throw std::runtime_error("unable to preserve mode for " + temp_path);
     }
-#endif
 
     if (!path_utils::rename_path(temp_path, path)) {
         (void)path_utils::remove_path(temp_path);
@@ -342,7 +338,11 @@ const char* line_ending_text(LineEndingKind line_ending) {
     return line_ending == LineEndingKind::Crlf ? "\r\n" : "\n";
 }
 
-std::string join_lines(const std::vector<std::string>& lines, bool trailing_newline, LineEndingKind line_ending) {
+std::string join_lines(
+    const std::vector<std::string>& lines,
+    bool trailing_newline,
+    LineEndingKind line_ending
+) {
     std::ostringstream out;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         if (i != 0) {
@@ -497,10 +497,12 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
     return actions;
 }
 
-static std::size_t find_sequence(const std::vector<std::string>& lines,
-                                 const std::vector<std::string>& needle,
-                                 std::size_t start,
-                                 bool require_eof) {
+static std::size_t find_sequence(
+    const std::vector<std::string>& lines,
+    const std::vector<std::string>& needle,
+    std::size_t start,
+    bool require_eof
+) {
     if (needle.empty()) {
         return std::min(start, lines.size());
     }
@@ -527,15 +529,21 @@ static std::size_t find_sequence(const std::vector<std::string>& lines,
     return std::string::npos;
 }
 
-static std::size_t find_context_anchor(const std::vector<std::string>& lines,
-                                       const std::string& context,
-                                       std::size_t start,
-                                       bool require_eof) {
+static std::size_t find_context_anchor(
+    const std::vector<std::string>& lines,
+    const std::string& context,
+    std::size_t start,
+    bool require_eof
+) {
     const std::vector<std::string> needle(1, context);
     return find_sequence(lines, needle, start, require_eof);
 }
 
-static void apply_update_chunk(std::vector<std::string>* lines, std::size_t* cursor, const UpdateChunk& chunk) {
+static void apply_update_chunk(
+    std::vector<std::string>* lines,
+    std::size_t* cursor,
+    const UpdateChunk& chunk
+) {
     std::size_t search_start = std::min(*cursor, lines->size());
     if (chunk.has_change_context) {
         search_start = find_context_anchor(*lines, chunk.change_context, *cursor, false);
@@ -545,7 +553,8 @@ static void apply_update_chunk(std::vector<std::string>* lines, std::size_t* cur
     }
 
     if (!chunk.old_lines.empty()) {
-        const std::size_t start = find_sequence(*lines, chunk.old_lines, search_start, chunk.is_end_of_file);
+        const std::size_t start =
+            find_sequence(*lines, chunk.old_lines, search_start, chunk.is_end_of_file);
         if (start == std::string::npos) {
             throw std::runtime_error("patch removal not found");
         }
@@ -568,7 +577,10 @@ static void apply_update_chunk(std::vector<std::string>* lines, std::size_t* cur
     *cursor = insert_at + chunk.new_lines.size();
 }
 
-static std::string apply_update_chunks(const std::string& old_text, const std::vector<UpdateChunk>& chunks) {
+static std::string apply_update_chunks(
+    const std::string& old_text,
+    const std::vector<UpdateChunk>& chunks
+) {
     bool had_trailing_newline = false;
     const LineEndingKind line_ending = detect_line_ending(old_text);
     std::vector<std::string> lines = split_lines(old_text, &had_trailing_newline);
@@ -616,7 +628,11 @@ const PlannedPathEntry* find_overlay_entry(const PathOverlay& overlay, const std
     return nullptr;
 }
 
-void set_overlay_state(PathOverlay* overlay, const std::string& path, const PlannedPathState& state) {
+void set_overlay_state(
+    PathOverlay* overlay,
+    const std::string& path,
+    const PlannedPathState& state
+) {
     PlannedPathEntry* existing = find_overlay_entry(overlay, path);
     if (existing != nullptr) {
         existing->state = state;
@@ -653,9 +669,13 @@ void mark_overlay_parent_directories(PathOverlay* overlay, const std::string& pa
     }
 }
 
-void require_stat_or_missing(const std::string& path, struct stat* st, bool* exists) {
+void require_metadata_or_missing(
+    const std::string& path,
+    path_utils::PathMetadata* metadata,
+    bool* exists
+) {
     errno = 0;
-    if (path_utils::stat_path(path, st)) {
+    if (path_utils::path_metadata(path, metadata)) {
         *exists = true;
         return;
     }
@@ -682,10 +702,10 @@ void ensure_parent_directories_can_exist(const std::string& path, const PathOver
             continue;
         }
 
-        struct stat st;
+        path_utils::PathMetadata metadata;
         bool exists = false;
-        require_stat_or_missing(parent, &st, &exists);
-        if (exists && !is_directory_mode(st)) {
+        require_metadata_or_missing(parent, &metadata, &exists);
+        if (exists && !metadata.is_directory) {
             throw std::runtime_error("parent path is not a directory: " + parent);
         }
         parent = path_utils::parent_directory(parent);
@@ -703,10 +723,10 @@ void ensure_writable_file_target(const std::string& path, const PathOverlay& ove
         return;
     }
 
-    struct stat st;
+    path_utils::PathMetadata metadata;
     bool exists = false;
-    require_stat_or_missing(path, &st, &exists);
-    if (exists && !is_regular_file_mode(st)) {
+    require_metadata_or_missing(path, &metadata, &exists);
+    if (exists && !metadata.is_regular_file) {
         throw std::runtime_error("patch target is not a file: " + path);
     }
 }
@@ -724,10 +744,10 @@ PlannedFile require_planned_file(const std::string& path, const PathOverlay& ove
         return planned->state.file;
     }
 
-    struct stat st;
+    path_utils::PathMetadata metadata;
     bool exists = false;
-    require_stat_or_missing(path, &st, &exists);
-    if (!exists || !is_regular_file_mode(st)) {
+    require_metadata_or_missing(path, &metadata, &exists);
+    if (!exists || !metadata.is_regular_file) {
         throw std::runtime_error("unable to read " + path);
     }
 
@@ -736,10 +756,12 @@ PlannedFile require_planned_file(const std::string& path, const PathOverlay& ove
     return file;
 }
 
-PlannedAction plan_add_action(const std::string& root,
-                              const PatchAction& action,
-                              const PatchPathAuthorizer& authorizer,
-                              PathOverlay* overlay) {
+PlannedAction plan_add_action(
+    const std::string& root,
+    const PatchAction& action,
+    const PatchPathAuthorizer& authorizer,
+    PathOverlay* overlay
+) {
     const std::string source_path = resolve_patch_path(root, action.path);
     if (authorizer) {
         authorizer(source_path);
@@ -760,10 +782,12 @@ PlannedAction plan_add_action(const std::string& root,
     return planned;
 }
 
-PlannedAction plan_delete_action(const std::string& root,
-                                 const PatchAction& action,
-                                 const PatchPathAuthorizer& authorizer,
-                                 PathOverlay* overlay) {
+PlannedAction plan_delete_action(
+    const std::string& root,
+    const PatchAction& action,
+    const PatchPathAuthorizer& authorizer,
+    PathOverlay* overlay
+) {
     const std::string source_path = resolve_patch_path(root, action.path);
     if (authorizer) {
         authorizer(source_path);
@@ -780,10 +804,12 @@ PlannedAction plan_delete_action(const std::string& root,
     return planned;
 }
 
-PlannedAction plan_update_action(const std::string& root,
-                                 const PatchAction& action,
-                                 const PatchPathAuthorizer& authorizer,
-                                 PathOverlay* overlay) {
+PlannedAction plan_update_action(
+    const std::string& root,
+    const PatchAction& action,
+    const PatchPathAuthorizer& authorizer,
+    PathOverlay* overlay
+) {
     const std::string source_path = resolve_patch_path(root, action.path);
     if (authorizer) {
         authorizer(source_path);
@@ -791,7 +817,8 @@ PlannedAction plan_update_action(const std::string& root,
     const PlannedFile current = require_planned_file(source_path, *overlay);
     const std::string destination_path =
         action.move_to.empty() ? source_path : resolve_patch_path(root, action.move_to);
-    const bool remove_source = !action.move_to.empty() && !paths_equal(source_path, destination_path);
+    const bool remove_source =
+        !action.move_to.empty() && !paths_equal(source_path, destination_path);
     if (remove_source) {
         if (authorizer) {
             authorizer(destination_path);
@@ -816,9 +843,11 @@ PlannedAction plan_update_action(const std::string& root,
     return planned;
 }
 
-std::vector<PlannedAction> plan_patch_actions(const std::string& root,
-                                              const std::vector<PatchAction>& actions,
-                                              const PatchPathAuthorizer& authorizer) {
+std::vector<PlannedAction> plan_patch_actions(
+    const std::string& root,
+    const std::vector<PatchAction>& actions,
+    const PatchPathAuthorizer& authorizer
+) {
     PathOverlay overlay;
     std::vector<PlannedAction> planned;
     planned.reserve(actions.size());
@@ -868,8 +897,11 @@ std::vector<std::string> execute_planned_actions(const std::vector<PlannedAction
 
 } // namespace
 
-PatchApplyResult
-apply_patch(const std::string& root, const std::string& patch_text, const PatchPathAuthorizer& authorizer) {
+PatchApplyResult apply_patch(
+    const std::string& root,
+    const std::string& patch_text,
+    const PatchPathAuthorizer& authorizer
+) {
     const std::vector<PatchAction> actions = parse_patch(patch_text);
     const std::vector<PlannedAction> planned = plan_patch_actions(root, actions, authorizer);
     const std::vector<std::string> summary = execute_planned_actions(planned);

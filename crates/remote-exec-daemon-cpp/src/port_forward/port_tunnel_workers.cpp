@@ -43,23 +43,29 @@ PortTunnelService::WorkerGroup::WorkerGroup() : shutting_down(false) {
 PortTunnelService::WorkerGroup::Thread::Thread() : finished(false), thread() {
 }
 
-bool PortTunnelService::spawn_tracked_worker(const char* operation,
-                                             PortTunnelWorkerLease worker_lease,
-                                             const std::function<void()>& work) {
+bool PortTunnelService::spawn_tracked_worker(
+    const char* operation,
+    PortTunnelWorkerLease worker_lease,
+    const std::function<void()>& work
+) {
     return worker_group_->spawn(shared_from_this(), operation, std::move(worker_lease), work);
 }
 
-bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelService>& service,
-                                           const char* operation,
-                                           PortTunnelWorkerLease worker_lease,
-                                           const std::function<void()>& work) {
+bool PortTunnelService::WorkerGroup::spawn(
+    const std::shared_ptr<PortTunnelService>& service,
+    const char* operation,
+    PortTunnelWorkerLease worker_lease,
+    const std::function<void()>& work
+) {
     if (!service->is_running()) {
         return false;
     }
     if (!worker_lease.valid() && !service->try_acquire_worker(&worker_lease)) {
         return false;
     }
-    std::shared_ptr<PortTunnelWorkerLease> worker_lease_holder(new PortTunnelWorkerLease(std::move(worker_lease)));
+    std::shared_ptr<PortTunnelWorkerLease> worker_lease_holder(
+        new PortTunnelWorkerLease(std::move(worker_lease))
+    );
     std::shared_ptr<PortTunnelWorkerStartGate> start_gate(new PortTunnelWorkerStartGate());
 
     std::vector<std::shared_ptr<Thread>> finished_workers;
@@ -71,14 +77,21 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
     try {
         BasicLockGuard lock(mutex);
         if (!shutting_down) {
-            worker->thread.reset(new std::thread([service, worker, worker_lease_holder, start_gate, work, operation]() {
+            worker->thread.reset(new std::thread([service,
+                                                  worker,
+                                                  worker_lease_holder,
+                                                  start_gate,
+                                                  work,
+                                                  operation]() {
                 if (!start_gate->wait()) {
                     worker->finished.store(true);
                     return;
                 }
-                log_message(LOG_DEBUG,
-                            "port_tunnel",
-                            LogMessageBuilder("worker start").quoted_field("operation", operation).str());
+                log_message(
+                    LOG_DEBUG,
+                    "port_tunnel",
+                    LogMessageBuilder("worker start").quoted_field("operation", operation).str()
+                );
                 try {
                     work();
                 } catch (const std::exception& ex) {
@@ -86,9 +99,11 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
                 } catch (...) {
                     log_unknown_tunnel_exception(operation);
                 }
-                log_message(LOG_DEBUG,
-                            "port_tunnel",
-                            LogMessageBuilder("worker finish").quoted_field("operation", operation).str());
+                log_message(
+                    LOG_DEBUG,
+                    "port_tunnel",
+                    LogMessageBuilder("worker finish").quoted_field("operation", operation).str()
+                );
                 worker->finished.store(true);
             }));
             threads.push_back(worker);
@@ -128,9 +143,12 @@ void PortTunnelService::WorkerGroup::begin_shutdown() {
     shutting_down = true;
 }
 
-void PortTunnelService::WorkerGroup::collect_finished(std::vector<std::shared_ptr<Thread>>* finished_workers) {
+void PortTunnelService::WorkerGroup::collect_finished(
+    std::vector<std::shared_ptr<Thread>>* finished_workers
+) {
     BasicLockGuard lock(mutex);
-    for (std::vector<std::shared_ptr<Thread>>::iterator it = threads.begin(); it != threads.end();) {
+    for (std::vector<std::shared_ptr<Thread>>::iterator it = threads.begin();
+         it != threads.end();) {
         if (!(*it)->finished.load()) {
             ++it;
             continue;
@@ -140,7 +158,9 @@ void PortTunnelService::WorkerGroup::collect_finished(std::vector<std::shared_pt
     }
 }
 
-void PortTunnelService::WorkerGroup::join_workers(const std::vector<std::shared_ptr<Thread>>& workers) {
+void PortTunnelService::WorkerGroup::join_workers(
+    const std::vector<std::shared_ptr<Thread>>& workers
+) {
     for (std::size_t i = 0; i < workers.size(); ++i) {
         consume_daemon_thread(&workers[i]->thread);
     }

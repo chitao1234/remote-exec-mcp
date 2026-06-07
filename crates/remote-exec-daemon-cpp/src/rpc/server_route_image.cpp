@@ -13,13 +13,15 @@ namespace {
 ImageFailure invalid_detail_failure(const std::string& detail) {
     return ImageFailure(
         ImageRpcCode::InvalidDetail,
-        "view_image.detail only supports `original`; omit `detail` for default original behavior, got `" + detail +
-            "`");
+        "view_image.detail only supports `original`; omit `detail` for default original behavior, "
+        "got `"
+            + detail + "`"
+    );
 }
 
 } // namespace
 
-HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
+HttpResponse handle_image_read(const ImageRouteContext& context, const HttpRequest& request) {
     return handle_image_rpc_route("image/read", [&](HttpResponse& response) {
         const Json body = parse_json_body(request);
         const std::string detail = body.value("detail", std::string());
@@ -27,12 +29,16 @@ HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
             throw invalid_detail_failure(detail);
         }
 
-        const std::string path = resolve_authorized_input_path(state, body, "path", SANDBOX_READ);
+        const std::string path =
+            resolve_authorized_input_path(context.paths, body, "path", SANDBOX_READ);
         const ImageReadResult image = read_image_original(path);
-        write_json(response,
-                   Json{
-                       {"image_url", "data:" + image.mime_type + ";base64," + base64_encode_bytes(image.bytes)},
-                       {"detail", "original"},
-                   });
+        write_json(
+            response,
+            Json{
+                {"image_url",
+                 "data:" + image.mime_type + ";base64," + base64_encode_bytes(image.bytes)},
+                {"detail", "original"},
+            }
+        );
     });
 }

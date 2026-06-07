@@ -3,10 +3,11 @@
 int main() {
     NetworkSession network;
     const fs::path root = make_test_root();
-    AppState state;
+    TestHttpConnectionHarness connection(root);
+    TestDaemonState state;
     initialize_state(state, root);
 
-    assert_http_streaming_routes(state, root);
+    assert_http_streaming_routes(connection, root);
     assert_tunnel_rejects_invalid_requests(state);
     assert_tunnel_open_ready_and_limits(state);
     assert_tunnel_tcp_listener_and_connect_paths(state);

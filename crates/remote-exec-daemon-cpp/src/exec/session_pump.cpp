@@ -29,8 +29,11 @@ void record_session_drain_stop_locked(LiveSession* session, SessionOutputDrainSt
     session->output_.last_drain_stop_reason = reason;
 }
 
-SessionOutputDrainResult
-make_session_drain_result_locked(LiveSession* session, bool completed, SessionOutputDrainStopReason reason) {
+SessionOutputDrainResult make_session_drain_result_locked(
+    LiveSession* session,
+    bool completed,
+    SessionOutputDrainStopReason reason
+) {
     record_session_drain_stop_locked(session, reason);
     return SessionOutputDrainResult(completed, reason);
 }
@@ -53,10 +56,13 @@ void note_session_drain_output_locked(LiveSession* session) {
     record_session_drain_stop_locked(session, SessionOutputDrainStopReason::None);
 }
 
-SessionOutputDrainStopReason grace_deadline_stop_reason_locked(LiveSession* session,
-                                                               const SessionOutputDrainPolicy& policy,
-                                                               std::uint64_t* next_deadline_ms) {
-    const std::uint64_t max_deadline = deadline_after_ms(session->output_.drain_started_at_ms, policy.max_grace_ms);
+SessionOutputDrainStopReason grace_deadline_stop_reason_locked(
+    LiveSession* session,
+    const SessionOutputDrainPolicy& policy,
+    std::uint64_t* next_deadline_ms
+) {
+    const std::uint64_t max_deadline =
+        deadline_after_ms(session->output_.drain_started_at_ms, policy.max_grace_ms);
     const std::uint64_t idle_deadline =
         deadline_after_ms(session->output_.drain_last_output_at_ms, policy.idle_grace_ms);
 
@@ -116,7 +122,11 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
         try {
             chunk = session->process->read_output(true, &eof, &carry);
         } catch (const std::exception& ex) {
-            log_message(LOG_WARN, "session", std::string("session output pump failed: ") + ex.what());
+            log_message(
+                LOG_WARN,
+                "session",
+                std::string("session output pump failed: ") + ex.what()
+            );
             BasicLockGuard lock(session->mutex_);
             session->output_.decode_carry = carry;
             finish_session_output_locked(session.get(), SessionOutputDrainStopReason::PumpError);
@@ -169,17 +179,23 @@ SessionOutputDrainPolicy default_session_output_drain_policy() {
     return policy;
 }
 
-SessionOutputDrainResult::SessionOutputDrainResult() : completed(false), reason(SessionOutputDrainStopReason::None) {
+SessionOutputDrainResult::SessionOutputDrainResult()
+    : completed(false), reason(SessionOutputDrainStopReason::None) {
 }
 
-SessionOutputDrainResult::SessionOutputDrainResult(bool completed_value, SessionOutputDrainStopReason reason_value)
+SessionOutputDrainResult::SessionOutputDrainResult(
+    bool completed_value,
+    SessionOutputDrainStopReason reason_value
+)
     : completed(completed_value), reason(reason_value) {
 }
 
-void wait_for_generation_change_locked(LiveSession* session,
-                                       std::uint64_t baseline_generation,
-                                       std::uint64_t deadline_ms,
-                                       unsigned long max_wait_ms) {
+void wait_for_generation_change_locked(
+    LiveSession* session,
+    std::uint64_t baseline_generation,
+    std::uint64_t deadline_ms,
+    unsigned long max_wait_ms
+) {
     while (!session->closing && session->output_.generation == baseline_generation) {
         if (platform::monotonic_deadline_expired(deadline_ms)) {
             return;
@@ -251,10 +267,12 @@ std::string take_session_output_locked(LiveSession* session, unsigned long max_o
     return output;
 }
 
-SessionOutputDrainResult drain_exited_session_output_locked(LiveSession* session,
-                                                            std::string* output,
-                                                            unsigned long max_output_tokens,
-                                                            const SessionOutputDrainPolicy& policy) {
+SessionOutputDrainResult drain_exited_session_output_locked(
+    LiveSession* session,
+    std::string* output,
+    unsigned long max_output_tokens,
+    const SessionOutputDrainPolicy& policy
+) {
     ensure_session_drain_started_locked(session);
 
     SessionOutputDrainStopReason grace_stop_reason = SessionOutputDrainStopReason::None;
@@ -267,7 +285,11 @@ SessionOutputDrainResult drain_exited_session_output_locked(LiveSession* session
             return make_session_drain_result_locked(session, true, eof_stop_reason_locked(session));
         }
         if (session->closing) {
-            return make_session_drain_result_locked(session, true, SessionOutputDrainStopReason::StoreClosing);
+            return make_session_drain_result_locked(
+                session,
+                true,
+                SessionOutputDrainStopReason::StoreClosing
+            );
         }
 
         std::uint64_t next_deadline_ms = 0ULL;
@@ -283,12 +305,16 @@ SessionOutputDrainResult drain_exited_session_output_locked(LiveSession* session
 
     if (!session->output_.descendant_cleanup_attempted) {
         session->output_.descendant_cleanup_attempted = true;
-        session->output_.descendant_cleanup_supported = terminate_descendants_after_exit_locked(session);
+        session->output_.descendant_cleanup_supported =
+            terminate_descendants_after_exit_locked(session);
         session->output_.descendant_cleanup_started_at_ms = platform::monotonic_ms();
     }
     if (!session->output_.descendant_cleanup_supported) {
         return make_session_drain_result_locked(
-            session, false, SessionOutputDrainStopReason::DescendantTerminateUnsupported);
+            session,
+            false,
+            SessionOutputDrainStopReason::DescendantTerminateUnsupported
+        );
     }
 
     for (;;) {
@@ -299,14 +325,23 @@ SessionOutputDrainResult drain_exited_session_output_locked(LiveSession* session
             return make_session_drain_result_locked(session, true, eof_stop_reason_locked(session));
         }
         if (session->closing) {
-            return make_session_drain_result_locked(session, true, SessionOutputDrainStopReason::StoreClosing);
+            return make_session_drain_result_locked(
+                session,
+                true,
+                SessionOutputDrainStopReason::StoreClosing
+            );
         }
 
-        const std::uint64_t terminate_deadline_ms =
-            deadline_after_ms(session->output_.descendant_cleanup_started_at_ms, policy.terminate_quiet_ms);
+        const std::uint64_t terminate_deadline_ms = deadline_after_ms(
+            session->output_.descendant_cleanup_started_at_ms,
+            policy.terminate_quiet_ms
+        );
         if (platform::monotonic_deadline_expired(terminate_deadline_ms)) {
             return make_session_drain_result_locked(
-                session, false, SessionOutputDrainStopReason::DescendantTerminateTimeout);
+                session,
+                false,
+                SessionOutputDrainStopReason::DescendantTerminateTimeout
+            );
         }
 
         const std::uint64_t seen_generation = session->output_.generation;

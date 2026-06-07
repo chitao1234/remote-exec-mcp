@@ -4,11 +4,17 @@
 # NMAKE. Rule logic stays in dialect-specific makefiles.
 
 TRANSFER_SRCS = \
+	$(SOURCE_PREFIX)src/transfer/transfer_archive_io.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_ops.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_archive.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_ops_fs.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_ops_tar.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_ops_export.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_ops_import.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_import_materializer.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_import_plan.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_options.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_warning_codec.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_glob.cpp
 
 POLICY_SRCS = \
@@ -17,6 +23,8 @@ POLICY_SRCS = \
 	$(SOURCE_PREFIX)src/policy/filesystem_sandbox.cpp
 
 RPC_FAILURE_SRCS = $(SOURCE_PREFIX)src/rpc/rpc_failures.cpp
+
+TRANSFER_WIRE_SRCS = $(SOURCE_PREFIX)src/rpc/transfer_wire.cpp
 
 PATCH_SRCS = $(SOURCE_PREFIX)src/patch/patch_engine.cpp
 
@@ -40,7 +48,10 @@ POSIX_PROCESS_SESSION_SRCS = \
 
 DAEMON_THREAD_SRCS = $(SOURCE_PREFIX)src/runtime/daemon_thread.cpp
 
+APP_CONTEXT_SRCS = $(SOURCE_PREFIX)src/runtime/app_context.cpp
+
 RUNTIME_SRCS = \
+	$(APP_CONTEXT_SRCS) \
 	$(SOURCE_PREFIX)src/runtime/server.cpp \
 	$(SOURCE_PREFIX)src/runtime/server_runtime.cpp \
 	$(SOURCE_PREFIX)src/runtime/connection_manager.cpp \
@@ -55,18 +66,23 @@ HTTP_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_request.cpp
 
 ROUTE_SRCS = \
+	$(SOURCE_PREFIX)src/rpc/capabilities_http_codec.cpp \
+	$(SOURCE_PREFIX)src/rpc/exec_http_codec.cpp \
 	$(SOURCE_PREFIX)src/rpc/exec_request_utils.cpp \
 	$(IMAGE_SRCS) \
 	$(SOURCE_PREFIX)src/rpc/server_contract.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_request_utils.cpp \
+	$(SOURCE_PREFIX)src/rpc/server_route_executor.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_routes.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_common.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_exec.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_image.cpp \
+	$(SOURCE_PREFIX)src/rpc/server_route_port_tunnel.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_transfer.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_http_codec.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_stream_codec.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_stream_io.cpp \
+	$(TRANSFER_WIRE_SRCS) \
 	$(SOURCE_PREFIX)src/rpc/transfer_request_utils.cpp
 
 PORT_FORWARD_SRCS = \
@@ -95,9 +111,9 @@ PATH_UTILS_SRCS = $(SOURCE_PREFIX)src/platform/path_utils.cpp
 
 WIN32_ERROR_SRCS = $(SOURCE_PREFIX)src/platform/win32_error.cpp
 
-SESSION_STORE_SUPPORT_SRCS = \
-	$(SOURCE_PREFIX)src/exec/output_renderer.cpp \
-	$(SOURCE_PREFIX)src/exec/session_response_builder.cpp
+SESSION_STORE_SUPPORT_SRCS = $(SOURCE_PREFIX)src/exec/output_renderer.cpp
+
+EXEC_HTTP_CODEC_SRCS = $(SOURCE_PREFIX)src/rpc/exec_http_codec.cpp
 
 SESSION_STORE_SRCS = \
 	$(SESSION_STORE_SUPPORT_SRCS) \
@@ -186,6 +202,7 @@ HOST_TRANSFER_SRCS = \
 	$(SOURCE_PREFIX)tests/test_transfer.cpp \
 	$(PATH_UTILS_SRCS) \
 	$(TRANSFER_SRCS) \
+	$(TRANSFER_WIRE_SRCS) \
 	$(RPC_FAILURE_SRCS)
 
 WINDOWS_TRANSFER_TEST_SRCS = \
@@ -259,6 +276,7 @@ WINDOWS_SERVER_TRANSPORT_TEST_SRCS = \
 	$(WIN32_ERROR_SRCS)
 
 SERVER_STREAMING_TEST_COMMON_SRCS = \
+	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
 	$(SOURCE_PREFIX)tests/test_server_streaming.cpp \
 	$(SOURCE_PREFIX)tests/test_server_streaming_shared.cpp \
 	$(SOURCE_PREFIX)tests/test_server_streaming_routes.cpp \
@@ -281,6 +299,7 @@ WINDOWS_SERVER_STREAMING_SRCS = \
 HOST_SESSION_STORE_SRCS = \
 	$(SOURCE_PREFIX)tests/test_session_store.cpp \
 	$(SESSION_STORE_SRCS) \
+	$(EXEC_HTTP_CODEC_SRCS) \
 	$(DAEMON_THREAD_SRCS) \
 	$(POSIX_PROCESS_SESSION_SRCS) \
 	$(PLATFORM_SRCS) \
@@ -326,7 +345,9 @@ WINDOWS_SERVER_RUNTIME_TEST_SUPPORT_SRCS = \
 	$(WINDOWS_BASE_SRCS_NO_MAIN)
 
 SERVER_ROUTES_TEST_COMMON_SRCS = \
+	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
 	$(SOURCE_PREFIX)tests/test_server_routes_shared.cpp \
+	$(APP_CONTEXT_SRCS) \
 	$(CAPABILITIES_SRCS) \
 	$(ROUTE_SRCS) \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
@@ -452,6 +473,7 @@ WINDOWS_DAEMON_SRCS = \
 WINDOWS_SESSION_STORE_TEST_SRCS = \
 	$(SOURCE_PREFIX)tests/test_session_store.cpp \
 	$(SESSION_STORE_SRCS) \
+	$(EXEC_HTTP_CODEC_SRCS) \
 	$(WINDOWS_DAEMON_SUPPORT_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \

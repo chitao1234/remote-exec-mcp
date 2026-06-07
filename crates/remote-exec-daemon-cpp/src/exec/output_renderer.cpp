@@ -31,8 +31,8 @@ bool is_utf8_continuation_byte(unsigned char byte) {
 
 std::size_t floor_char_boundary(const std::string& output, std::size_t max_bytes) {
     std::size_t index = std::min(max_bytes, output.size());
-    while (index > 0U && index < output.size() &&
-           is_utf8_continuation_byte(static_cast<unsigned char>(output[index]))) {
+    while (index > 0U && index < output.size()
+           && is_utf8_continuation_byte(static_cast<unsigned char>(output[index]))) {
         --index;
     }
     return index;
@@ -40,7 +40,8 @@ std::size_t floor_char_boundary(const std::string& output, std::size_t max_bytes
 
 std::size_t ceil_char_boundary(const std::string& output, std::size_t min_bytes) {
     std::size_t index = std::min(min_bytes, output.size());
-    while (index < output.size() && is_utf8_continuation_byte(static_cast<unsigned char>(output[index]))) {
+    while (index < output.size()
+           && is_utf8_continuation_byte(static_cast<unsigned char>(output[index]))) {
         ++index;
     }
     return index;
@@ -79,9 +80,10 @@ std::string render_output(const std::string& output, unsigned long max_output_to
         return std::string();
     }
 
-    const std::size_t max_output_bytes = max_output_tokens > SIZE_MAX / BYTES_PER_TOKEN
-                                             ? SIZE_MAX
-                                             : static_cast<std::size_t>(max_output_tokens) * BYTES_PER_TOKEN;
+    const std::size_t max_output_bytes =
+        max_output_tokens > SIZE_MAX / BYTES_PER_TOKEN
+            ? SIZE_MAX
+            : static_cast<std::size_t>(max_output_tokens) * BYTES_PER_TOKEN;
     if (output.size() <= max_output_bytes) {
         return output;
     }
@@ -98,8 +100,10 @@ std::string render_output(const std::string& output, unsigned long max_output_to
         const std::size_t head_budget = payload_budget / 2U;
         const std::size_t tail_budget = payload_budget - head_budget;
         const std::size_t head_end = floor_char_boundary(output, head_budget);
-        const std::size_t tail_start = std::max(head_end, suffix_start_for_budget(output, tail_budget));
-        const unsigned long next_truncated_tokens = approximate_output_token_count(tail_start - head_end);
+        const std::size_t tail_start =
+            std::max(head_end, suffix_start_for_budget(output, tail_budget));
+        const unsigned long next_truncated_tokens =
+            approximate_output_token_count(tail_start - head_end);
 
         if (next_truncated_tokens == truncated_tokens) {
             return prefix + output.substr(0, head_end) + marker + output.substr(tail_start);

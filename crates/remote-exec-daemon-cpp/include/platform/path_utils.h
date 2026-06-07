@@ -1,11 +1,33 @@
 #pragma once
 
+#include <cstdint>
 #include <cstdio>
 #include <string>
-#include <sys/stat.h>
 #include <vector>
 
 namespace path_utils {
+
+struct PathMetadata {
+    PathMetadata()
+        : exists(false), is_regular_file(false), is_directory(false), is_symlink(false), size(0),
+          mode_bits(0), has_mode_bits(false) {}
+
+    bool exists;
+    bool is_regular_file;
+    bool is_directory;
+    bool is_symlink;
+    std::uint64_t size;
+    unsigned int mode_bits;
+    bool has_mode_bits;
+};
+
+struct FileIdentity {
+    FileIdentity() : valid(false), device(0ULL), file(0ULL) {}
+
+    bool valid;
+    unsigned long long device;
+    unsigned long long file;
+};
 
 struct DirectoryEntryInfo {
     std::string name;
@@ -20,8 +42,9 @@ std::string join_path(const std::string& base, const std::string& child);
 void make_directory_if_missing(const std::string& path);
 void create_parent_directories(const std::string& path);
 FILE* open_file(const std::string& path, const char* mode);
-bool stat_path(const std::string& path, struct stat* st);
-bool lstat_path(const std::string& path, struct stat* st);
+bool path_metadata(const std::string& path, PathMetadata* metadata);
+bool path_metadata_no_follow(const std::string& path, PathMetadata* metadata);
+bool file_identity(const std::string& path, FileIdentity* identity);
 bool remove_path(const std::string& path);
 bool remove_directory(const std::string& path);
 bool rename_path(const std::string& source, const std::string& destination);

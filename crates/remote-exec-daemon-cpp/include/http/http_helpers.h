@@ -31,8 +31,15 @@ void assign_request_id(HttpRequest& req);
 void write_request_id_header(HttpResponse& res, const HttpRequest& req);
 void write_json(HttpResponse& res, const Json& body);
 void write_bearer_auth_challenge(HttpResponse& res);
-void write_rpc_error(HttpResponse& res, int status, const std::string& code, const std::string& message);
+void write_rpc_error(
+    HttpResponse& res,
+    int status,
+    const std::string& code,
+    const std::string& message
+);
 std::string render_http_response_head(const HttpResponse& res);
 std::string render_http_response(const HttpResponse& res);
-std::string render_http_upgrade_response(const std::string& upgrade_token,
-                                         const std::map<std::string, std::string>& headers);
+std::string render_http_upgrade_response(
+    const std::string& upgrade_token,
+    const std::map<std::string, std::string>& headers
+);

@@ -50,15 +50,19 @@ struct HttpRequestHead {
 
 class HttpRequestBodyStream {
 public:
-    HttpRequestBodyStream(SOCKET client,
-                          const std::string& initial_body,
-                          const HttpRequestBodyFraming& framing,
-                          std::size_t max_body_bytes);
-    HttpRequestBodyStream(SOCKET client,
-                          const std::string& initial_body,
-                          const HttpRequestBodyFraming& framing,
-                          std::size_t max_body_bytes,
-                          const HttpReadControl* read_control);
+    HttpRequestBodyStream(
+        SOCKET client,
+        const std::string& initial_body,
+        const HttpRequestBodyFraming& framing,
+        std::size_t max_body_bytes
+    );
+    HttpRequestBodyStream(
+        SOCKET client,
+        const std::string& initial_body,
+        const HttpRequestBodyFraming& framing,
+        std::size_t max_body_bytes,
+        const HttpReadControl* read_control
+    );
 
     std::size_t read(char* data, std::size_t max_size);
     bool fully_consumed() const;
@@ -106,18 +110,22 @@ private:
 };
 
 bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, HttpRequestHead* head);
-bool try_read_http_request_head_controlled(SOCKET client,
-                                           std::size_t max_header_bytes,
-                                           const HttpReadControl& read_control,
-                                           HttpRequestHead* head);
+bool try_read_http_request_head_controlled(
+    SOCKET client,
+    std::size_t max_header_bytes,
+    const HttpReadControl& read_control,
+    HttpRequestHead* head
+);
 HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes);
 std::string read_request_body_to_string(HttpRequestBodyStream* body);
 void send_all(SOCKET client, const std::string& data);
 void send_all_bytes(SOCKET client, const char* data, std::size_t size);
 void send_http_response(SOCKET client, const HttpResponse& response);
 void send_http_response_head(SOCKET client, const HttpResponse& response);
-void send_http_upgrade_response(SOCKET client,
-                                const std::string& upgrade_token,
-                                const std::map<std::string, std::string>& headers);
+void send_http_upgrade_response(
+    SOCKET client,
+    const std::string& upgrade_token,
+    const std::map<std::string, std::string>& headers
+);
 SOCKET create_listener(const DaemonConfig& config);
 SOCKET accept_client(SOCKET listener);

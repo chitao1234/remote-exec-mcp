@@ -4,7 +4,7 @@
 #include <string>
 
 #include "policy/filesystem_sandbox.h"
-#include "transfer/transfer_ops.h"
+#include "transfer/transfer_types.h"
 
 constexpr unsigned long DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS = 10000UL;
 constexpr unsigned long DEFAULT_YIELD_TIME_EXEC_COMMAND_MAX_MS = 30000UL;
@@ -31,7 +31,11 @@ constexpr unsigned long DEFAULT_MAX_OPEN_SESSIONS = 64UL;
 struct YieldTimeOperationConfig {
     YieldTimeOperationConfig() : default_ms(0UL), max_ms(0UL), min_ms(0UL) {}
 
-    YieldTimeOperationConfig(unsigned long default_ms_value, unsigned long max_ms_value, unsigned long min_ms_value)
+    YieldTimeOperationConfig(
+        unsigned long default_ms_value,
+        unsigned long max_ms_value,
+        unsigned long min_ms_value
+    )
         : default_ms(default_ms_value), max_ms(max_ms_value), min_ms(min_ms_value) {}
 
     unsigned long default_ms;
@@ -41,15 +45,21 @@ struct YieldTimeOperationConfig {
 
 struct YieldTimeConfig {
     YieldTimeConfig()
-        : exec_command(DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS,
-                       DEFAULT_YIELD_TIME_EXEC_COMMAND_MAX_MS,
-                       DEFAULT_YIELD_TIME_EXEC_COMMAND_MIN_MS),
-          write_stdin_poll(DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_DEFAULT_MS,
-                           DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MAX_MS,
-                           DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MIN_MS),
-          write_stdin_input(DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_DEFAULT_MS,
-                            DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MAX_MS,
-                            DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MIN_MS) {}
+        : exec_command(
+              DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS,
+              DEFAULT_YIELD_TIME_EXEC_COMMAND_MAX_MS,
+              DEFAULT_YIELD_TIME_EXEC_COMMAND_MIN_MS
+          ),
+          write_stdin_poll(
+              DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_DEFAULT_MS,
+              DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MAX_MS,
+              DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MIN_MS
+          ),
+          write_stdin_input(
+              DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_DEFAULT_MS,
+              DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MAX_MS,
+              DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MIN_MS
+          ) {}
 
     YieldTimeOperationConfig exec_command;
     YieldTimeOperationConfig write_stdin_poll;
@@ -97,7 +107,10 @@ struct DaemonConfig {
     FilesystemSandbox sandbox;
 };
 
-unsigned long
-resolve_yield_time_ms(const YieldTimeOperationConfig& config, bool has_requested_ms, unsigned long requested_ms);
+unsigned long resolve_yield_time_ms(
+    const YieldTimeOperationConfig& config,
+    bool has_requested_ms,
+    unsigned long requested_ms
+);
 
 DaemonConfig load_config(const std::string& path);

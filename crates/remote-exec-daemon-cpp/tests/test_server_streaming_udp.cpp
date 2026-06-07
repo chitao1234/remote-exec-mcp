@@ -6,34 +6,42 @@ static void assert_udp_bind_limit_is_enforced_and_released(const fs::path& root)
     PortForwardLimitConfig limits;
     limits.max_udp_binds = 1UL;
 
-    AppState state;
+    TestDaemonState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
     std::thread server_thread;
     open_v4_tunnel(state, &client_socket, &server_thread, "connect", "udp", 1ULL);
-    send_tunnel_frame(client_socket.get(),
-                      json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
     TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::UdpBindOk);
-    send_tunnel_frame(client_socket.get(),
-                      json_frame(PortTunnelFrameType::UdpBind, 3U, Json{{"endpoint", "127.0.0.1:0"}}));
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::UdpBind, 3U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
     assert_tunnel_error_code(read_tunnel_frame(client_socket.get()), "port_tunnel_limit_exceeded");
 
     send_tunnel_frame(client_socket.get(), empty_frame(PortTunnelFrameType::Close, 1U));
     TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
-    send_tunnel_frame(client_socket.get(),
-                      json_frame(PortTunnelFrameType::UdpBind, 5U, Json{{"endpoint", "127.0.0.1:0"}}));
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::UdpBind, 5U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
     TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::UdpBindOk);
 
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_tunnel_udp_bind_emits_two_peer_datagrams(AppState& state) {
+static void assert_tunnel_udp_bind_emits_two_peer_datagrams(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
-    send_tunnel_frame(client_socket.get(),
-                      json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
     const PortTunnelFrame bind_ok = read_tunnel_frame(client_socket.get());
     TEST_ASSERT(bind_ok.type == PortTunnelFrameType::UdpBindOk);
     const std::string endpoint = Json::parse(bind_ok.meta).at("endpoint").get<std::string>();
@@ -58,7 +66,7 @@ static void assert_tunnel_udp_bind_emits_two_peer_datagrams(AppState& state) {
     close_tunnel(&client_socket, &server_thread);
 }
 
-void assert_tunnel_udp_paths(AppState& state) {
+void assert_tunnel_udp_paths(TestDaemonState& state) {
     const fs::path root(state.config.default_workdir);
 
     assert_udp_bind_limit_is_enforced_and_released(root);

@@ -1,11 +1,11 @@
 #include <string>
 
-#include "capabilities/daemon_capabilities.h"
 #include "core/common.h"
 #include "exec/process_session.h"
 #include "exec/session_store.h"
 #include "patch/patch_engine.h"
 #include "platform/platform.h"
+#include "rpc/capabilities_http_codec.h"
 #include "rpc/exec_request_utils.h"
 #include "rpc/rpc_failures.h"
 #include "rpc/server_request_utils.h"
@@ -55,29 +55,44 @@ HttpResponse handle_image_rpc_route(const std::string& route_name, const RpcRout
         log_message(LOG_WARN, "server", route_name + " failed: " + ex.what());
         HttpResponse response;
         response.status = 400;
-        write_rpc_error(response, 400, image_error_code_name(ImageRpcCode::SandboxDenied), ex.what());
+        write_rpc_error(
+            response,
+            400,
+            image_error_code_name(ImageRpcCode::SandboxDenied),
+            ex.what()
+        );
         return response;
     } catch (const ImageFailure& failure) {
         log_message(LOG_WARN, "server", route_name + " failed: " + failure.message);
         HttpResponse response;
         response.status = image_error_status(failure.code);
         write_rpc_error(
-            response, image_error_status(failure.code), image_error_code_name(failure.code), failure.message);
+            response,
+            image_error_status(failure.code),
+            image_error_code_name(failure.code),
+            failure.message
+        );
         return response;
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", route_name + " failed: " + message);
         HttpResponse response;
         response.status = image_error_status(ImageRpcCode::Internal);
-        write_rpc_error(response,
-                        image_error_status(ImageRpcCode::Internal),
-                        image_error_code_name(ImageRpcCode::Internal),
-                        message);
+        write_rpc_error(
+            response,
+            image_error_status(ImageRpcCode::Internal),
+            image_error_code_name(ImageRpcCode::Internal),
+            message
+        );
         return response;
     }
 }
 
-HttpResponse handle_exec_rpc_route(const std::string& route_name, ExecRouteKind kind, const RpcRouteBody& body) {
+HttpResponse handle_exec_rpc_route(
+    const std::string& route_name,
+    ExecRouteKind kind,
+    const RpcRouteBody& body
+) {
     try {
         return run_rpc_route(body);
     } catch (const SessionLimitError& ex) {
@@ -145,54 +160,63 @@ HttpResponse handle_patch_rpc_route(const RpcRouteBody& body) {
     }
 }
 
-HttpResponse make_rpc_error_response(int status, const std::string& code, const std::string& message) {
+HttpResponse make_rpc_error_response(
+    int status,
+    const std::string& code,
+    const std::string& message
+) {
     HttpResponse response;
     response.status = status;
     write_rpc_error(response, status, code, message);
     return response;
 }
 
-HttpResponse handle_health(const AppState& state) {
+HttpResponse handle_health(const HealthRouteContext& context) {
     HttpResponse response;
-    write_json(response,
-               Json{
-                   {"status", "ok"},
-                   {"daemon_version", REMOTE_EXEC_CPP_VERSION},
-                   {"daemon_instance_id", state.daemon_instance_id},
-               });
+    write_json(
+        response,
+        Json{
+            {"status", "ok"},
+            {"daemon_version", REMOTE_EXEC_CPP_VERSION},
+            {"daemon_instance_id", context.daemon_instance_id},
+        }
+    );
     return response;
 }
 
-HttpResponse handle_target_info(const AppState& state) {
+HttpResponse handle_target_info(const TargetInfoRouteContext& context) {
     HttpResponse response;
     Json body{
-        {"target", state.config.target},
+        {"target", context.target},
         {"daemon_version", REMOTE_EXEC_CPP_VERSION},
-        {"daemon_instance_id", state.daemon_instance_id},
-        {"hostname", state.hostname},
+        {"daemon_instance_id", context.daemon_instance_id},
+        {"hostname", context.hostname},
         {"platform", platform::platform_name()},
         {"arch", platform::arch_name()},
     };
-    write_daemon_capabilities(&body, state.capabilities);
+    write_daemon_capabilities(&body, context.capabilities);
     write_json(response, body);
     return response;
 }
 
-HttpResponse handle_patch_apply(AppState& state, const HttpRequest& request) {
+HttpResponse handle_patch_apply(const PatchRouteContext& context, const HttpRequest& request) {
     return handle_patch_rpc_route([&](HttpResponse& response) {
         const Json body = parse_json_body(request);
-        const std::string workdir = resolve_workdir(state, body);
+        const std::string workdir = resolve_workdir(context.paths, body);
         const std::string patch_text = body.at("patch").get<std::string>();
-        const PatchApplyResult result = apply_patch(workdir, patch_text, make_patch_path_authorizer(state));
+        const PatchApplyResult result =
+            apply_patch(workdir, patch_text, make_patch_path_authorizer(context.paths));
         LogMessageBuilder summary("patch/apply");
         summary.field("patch_len", patch_text.size());
         log_message(LOG_INFO, "server", summary.str());
-        write_json(response,
-                   Json{
-                       {"output", result.output},
-                       {"daemon_instance_id", state.daemon_instance_id},
-                       {"updated_paths", result.updated_paths},
-                   });
+        write_json(
+            response,
+            Json{
+                {"output", result.output},
+                {"daemon_instance_id", context.daemon_instance_id},
+                {"updated_paths", result.updated_paths},
+            }
+        );
     });
 }
 

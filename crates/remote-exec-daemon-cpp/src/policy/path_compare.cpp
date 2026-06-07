@@ -42,8 +42,8 @@ ParsedPath parse_host_path(const std::string& raw) {
             parsed.prefix = "/";
             start = 1;
         }
-    } else if (normalized.size() >= 3 && is_ascii_alpha(normalized[0]) && normalized[1] == ':' &&
-               is_separator(policy.style, normalized[2])) {
+    } else if (normalized.size() >= 3 && is_ascii_alpha(normalized[0]) && normalized[1] == ':'
+               && is_separator(policy.style, normalized[2])) {
         parsed.prefix = normalized.substr(0, 2);
         parsed.prefix.push_back('\\');
         start = 3;
@@ -90,7 +90,8 @@ CompareStringOrdinalFn compare_string_ordinal_fn() {
         HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
         if (kernel32 != nullptr) {
             fn = remote_exec_win32::proc_address_as<CompareStringOrdinalFn>(
-                GetProcAddress(kernel32, "CompareStringOrdinal"));
+                GetProcAddress(kernel32, "CompareStringOrdinal")
+            );
         }
         initialized = true;
     }
@@ -119,18 +120,24 @@ bool component_equal(const std::string& left, const std::string& right) {
         const std::wstring right_wide = wide_from_utf8(right);
         const CompareStringOrdinalFn ordinal = compare_string_ordinal_fn();
         if (ordinal != nullptr) {
-            return ordinal(left_wide.empty() ? nullptr : left_wide.data(),
-                           static_cast<int>(left_wide.size()),
-                           right_wide.empty() ? nullptr : right_wide.data(),
-                           static_cast<int>(right_wide.size()),
-                           TRUE) == CSTR_EQUAL;
+            return ordinal(
+                       left_wide.empty() ? nullptr : left_wide.data(),
+                       static_cast<int>(left_wide.size()),
+                       right_wide.empty() ? nullptr : right_wide.data(),
+                       static_cast<int>(right_wide.size()),
+                       TRUE
+                   )
+                   == CSTR_EQUAL;
         }
-        return CompareStringW(LOCALE_USER_DEFAULT,
-                              NORM_IGNORECASE,
-                              left_wide.empty() ? nullptr : left_wide.data(),
-                              static_cast<int>(left_wide.size()),
-                              right_wide.empty() ? nullptr : right_wide.data(),
-                              static_cast<int>(right_wide.size())) == CSTR_EQUAL;
+        return CompareStringW(
+                   LOCALE_USER_DEFAULT,
+                   NORM_IGNORECASE,
+                   left_wide.empty() ? nullptr : left_wide.data(),
+                   static_cast<int>(left_wide.size()),
+                   right_wide.empty() ? nullptr : right_wide.data(),
+                   static_cast<int>(right_wide.size())
+               )
+               == CSTR_EQUAL;
     } catch (const std::exception& ex) {
         LogMessageBuilder message("Windows path comparison fallback to ASCII case folding");
         message.quoted_field("left", preview_text(left, 120))

@@ -1,6 +1,6 @@
+#include "test_assert.h"
 #include <atomic>
 #include <iostream>
-#include "test_assert.h"
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -178,24 +178,24 @@ int main() {
 
     const fs::path absolute_path = root / "absolute.txt";
     const std::string absolute_add_patch = "*** Begin Patch\n"
-                                           "*** Add File: " +
-                                           absolute_path.string() +
-                                           "\n"
-                                           "+absolute file\n"
-                                           "*** End Patch\n";
+                                           "*** Add File: "
+                                           + absolute_path.string()
+                                           + "\n"
+                                             "+absolute file\n"
+                                             "*** End Patch\n";
 
     PatchApplyResult absolute_add_result = apply_patch(root.string(), absolute_add_patch);
     TEST_ASSERT(absolute_add_result.output.find("A ") != std::string::npos);
     TEST_ASSERT(read_text(absolute_path) == "absolute file\n");
 
     const std::string absolute_update_patch = "*** Begin Patch\n"
-                                              "*** Update File: " +
-                                              absolute_path.string() +
-                                              "\n"
-                                              "@@\n"
-                                              "-absolute file\n"
-                                              "+absolute update\n"
-                                              "*** End Patch\n";
+                                              "*** Update File: "
+                                              + absolute_path.string()
+                                              + "\n"
+                                                "@@\n"
+                                                "-absolute file\n"
+                                                "+absolute update\n"
+                                                "*** End Patch\n";
 
     PatchApplyResult absolute_update_result = apply_patch(root.string(), absolute_update_patch);
     TEST_ASSERT(absolute_update_result.output.find("M ") != std::string::npos);
@@ -400,7 +400,8 @@ int main() {
                                                  "*** Delete File: planned-delete.txt\n"
                                                  "*** End Patch\n";
 
-    PatchApplyResult update_then_delete_result = apply_patch(root.string(), update_then_delete_patch);
+    PatchApplyResult update_then_delete_result =
+        apply_patch(root.string(), update_then_delete_patch);
     TEST_ASSERT(update_then_delete_result.output.find("M planned-delete.txt") != std::string::npos);
     TEST_ASSERT(update_then_delete_result.output.find("D planned-delete.txt") != std::string::npos);
     TEST_ASSERT(!fs::exists(root / "planned-delete.txt"));

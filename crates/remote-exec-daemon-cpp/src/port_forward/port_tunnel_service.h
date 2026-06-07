@@ -67,33 +67,53 @@ public:
     void shutdown();
     std::shared_ptr<PortTunnelSession> create_session();
     std::shared_ptr<PortTunnelSession> find_session(const std::string& session_id);
-    bool attach_new_session(const std::shared_ptr<PortTunnelSession>& session,
-                            const std::shared_ptr<PortTunnelConnection>& connection,
-                            std::uint64_t generation);
-    PortTunnelSessionResumeResult attach_resumed_session(const std::shared_ptr<PortTunnelSession>& session,
-                                                         const std::shared_ptr<PortTunnelConnection>& connection,
-                                                         std::uint64_t generation,
-                                                         std::uint64_t now_ms);
+    bool attach_new_session(
+        const std::shared_ptr<PortTunnelSession>& session,
+        const std::shared_ptr<PortTunnelConnection>& connection,
+        std::uint64_t generation
+    );
+    PortTunnelSessionResumeResult attach_resumed_session(
+        const std::shared_ptr<PortTunnelSession>& session,
+        const std::shared_ptr<PortTunnelConnection>& connection,
+        std::uint64_t generation,
+        std::uint64_t now_ms
+    );
     void detach_session(const std::shared_ptr<PortTunnelSession>& session);
     void close_session(const std::shared_ptr<PortTunnelSession>& session);
-    SessionRetainedInstallResult install_session_tcp_listener(const std::shared_ptr<PortTunnelSession>& session,
-                                                              uint32_t stream_id,
-                                                              const std::shared_ptr<RetainedTcpListener>& listener);
-    SessionRetainedInstallResult install_session_udp_bind(const std::shared_ptr<PortTunnelSession>& session,
-                                                          uint32_t stream_id,
-                                                          const std::shared_ptr<TunnelUdpSocket>& socket_value);
-    std::shared_ptr<TunnelUdpSocket> session_udp_bind(const std::shared_ptr<PortTunnelSession>& session,
-                                                      uint32_t stream_id);
-    bool close_session_retained_resource(const std::shared_ptr<PortTunnelSession>& session, uint32_t stream_id);
-    bool spawn_tcp_listener_loop(const std::shared_ptr<PortTunnelSession>& session,
-                                 const std::shared_ptr<RetainedTcpListener>& listener,
-                                 PortTunnelWorkerLease worker_lease = PortTunnelWorkerLease());
-    bool spawn_udp_bind_loop(const std::shared_ptr<PortTunnelSession>& session,
-                             uint32_t stream_id,
-                             const std::shared_ptr<TunnelUdpSocket>& socket_value,
-                             PortTunnelWorkerLease worker_lease = PortTunnelWorkerLease());
-    bool
-    spawn_tracked_worker(const char* operation, PortTunnelWorkerLease worker_lease, const std::function<void()>& work);
+    SessionRetainedInstallResult install_session_tcp_listener(
+        const std::shared_ptr<PortTunnelSession>& session,
+        uint32_t stream_id,
+        const std::shared_ptr<RetainedTcpListener>& listener
+    );
+    SessionRetainedInstallResult install_session_udp_bind(
+        const std::shared_ptr<PortTunnelSession>& session,
+        uint32_t stream_id,
+        const std::shared_ptr<TunnelUdpSocket>& socket_value
+    );
+    std::shared_ptr<TunnelUdpSocket> session_udp_bind(
+        const std::shared_ptr<PortTunnelSession>& session,
+        uint32_t stream_id
+    );
+    bool close_session_retained_resource(
+        const std::shared_ptr<PortTunnelSession>& session,
+        uint32_t stream_id
+    );
+    bool spawn_tcp_listener_loop(
+        const std::shared_ptr<PortTunnelSession>& session,
+        const std::shared_ptr<RetainedTcpListener>& listener,
+        PortTunnelWorkerLease worker_lease = PortTunnelWorkerLease()
+    );
+    bool spawn_udp_bind_loop(
+        const std::shared_ptr<PortTunnelSession>& session,
+        uint32_t stream_id,
+        const std::shared_ptr<TunnelUdpSocket>& socket_value,
+        PortTunnelWorkerLease worker_lease = PortTunnelWorkerLease()
+    );
+    bool spawn_tracked_worker(
+        const char* operation,
+        PortTunnelWorkerLease worker_lease,
+        const std::function<void()>& work
+    );
     bool try_acquire_worker();
     bool try_acquire_worker(PortTunnelWorkerLease* lease);
     unsigned long max_workers() const;
@@ -125,12 +145,18 @@ private:
     void stop_expiry_scheduler();
     void expiry_scheduler_loop();
     void expire_session_if_needed(const std::shared_ptr<PortTunnelSession>& session);
-    std::shared_ptr<PortTunnelSessionAttachment> wait_for_attachment(const std::shared_ptr<PortTunnelSession>& session);
-    void tcp_accept_loop(const std::shared_ptr<PortTunnelSession>& session,
-                         const std::shared_ptr<RetainedTcpListener>& listener);
-    void udp_read_loop(const std::shared_ptr<PortTunnelSession>& session,
-                       uint32_t stream_id,
-                       const std::shared_ptr<TunnelUdpSocket>& socket_value);
+    std::shared_ptr<PortTunnelSessionAttachment> wait_for_attachment(
+        const std::shared_ptr<PortTunnelSession>& session
+    );
+    void tcp_accept_loop(
+        const std::shared_ptr<PortTunnelSession>& session,
+        const std::shared_ptr<RetainedTcpListener>& listener
+    );
+    void udp_read_loop(
+        const std::shared_ptr<PortTunnelSession>& session,
+        uint32_t stream_id,
+        const std::shared_ptr<TunnelUdpSocket>& socket_value
+    );
 
     BasicMutex mutex_;
     LifecycleState lifecycle_state_;

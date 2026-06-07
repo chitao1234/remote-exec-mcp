@@ -4,28 +4,20 @@
 #include <utility>
 #include <vector>
 
-#ifndef _WIN32
-#include <sys/stat.h>
-#endif
-
 #include "platform/path_utils.h"
 #include "rpc/rpc_failures.h"
+#include "transfer_archive.h"
+#include "transfer_filesystem.h"
 #include "transfer_glob.h"
-#include "transfer_ops_internal.h"
+#include "transfer_options.h"
+#include "transfer_tar_codec.h"
 
 namespace {
 
-using namespace transfer_ops_internal;
-
-class StringTransferArchiveSink : public TransferArchiveSink {
-public:
-    explicit StringTransferArchiveSink(std::string* output) : output_(output) {}
-
-    void write(const char* data, std::size_t size) { output_->append(data, size); }
-
-private:
-    std::string* output_;
-};
+using transfer_archive::StringArchiveSink;
+using namespace transfer_filesystem;
+using namespace transfer_tar_codec;
+using transfer_options::ExportOptions;
 
 struct ExportContext {
     ExportOptions options;
@@ -37,7 +29,11 @@ struct ExportContext {
 
 const unsigned int MAX_EXPORT_RECURSION_DEPTH = 256U;
 
-void add_warning(std::vector<TransferWarning>* warnings, const std::string& code, const std::string& message) {
+void add_warning(
+    std::vector<TransferWarning>* warnings,
+    const std::string& code,
+    const std::string& message
+) {
     warnings->push_back(TransferWarning{code, message});
 }
 
@@ -48,14 +44,19 @@ void authorize_path_if_present(const TransferPathAuthorizer& authorizer, const s
 }
 
 void handle_unsupported_entry(ExportContext* context, const std::string& path) {
-    add_warning(&context->warnings,
-                "transfer_skipped_unsupported_entry",
-                "Skipped unsupported transfer source entry `" + path + "`.");
+    add_warning(
+        &context->warnings,
+        "transfer_skipped_unsupported_entry",
+        "Skipped unsupported transfer source entry `" + path + "`."
+    );
 }
 
 void handle_skipped_symlink(ExportContext* context, const std::string& path) {
     add_warning(
-        &context->warnings, "transfer_skipped_symlink", "Skipped symlink transfer source entry `" + path + "`.");
+        &context->warnings,
+        "transfer_skipped_symlink",
+        "Skipped symlink transfer source entry `" + path + "`."
+    );
 }
 
 #ifndef _WIN32
@@ -67,41 +68,47 @@ std::string read_symlink_target(const std::string& path) {
     return target;
 }
 
-void append_preserved_symlink_entry(TransferArchiveSink* archive,
-                                    const std::string& source_path,
-                                    const std::string& archive_path) {
+void append_preserved_symlink_entry(
+    TransferArchiveSink* archive,
+    const std::string& source_path,
+    const std::string& archive_path
+) {
     append_symlink_entry(archive, archive_path, read_symlink_target(source_path));
 }
 #endif
 
-void append_directory_contents(TransferArchiveSink* archive,
-                               const std::string& current_path,
-                               const std::string& current_rel,
-                               const transfer_glob::Matcher& exclude_matcher,
-                               ExportContext* context);
+void append_directory_contents(
+    TransferArchiveSink* archive,
+    const std::string& current_path,
+    const std::string& current_rel,
+    const transfer_glob::Matcher& exclude_matcher,
+    ExportContext* context
+);
 
-bool append_followed_symlink_entry(TransferArchiveSink* archive,
-                                   const std::string& child_path,
-                                   const std::string& child_rel,
-                                   const transfer_glob::Matcher& exclude_matcher,
-                                   ExportContext* context) {
+bool append_followed_symlink_entry(
+    TransferArchiveSink* archive,
+    const std::string& child_path,
+    const std::string& child_rel,
+    const transfer_glob::Matcher& exclude_matcher,
+    ExportContext* context
+) {
     if (is_directory_follow(child_path)) {
         if (context->recursion_depth >= MAX_EXPORT_RECURSION_DEPTH) {
             handle_skipped_symlink(context, child_path);
             return true;
         }
-#ifndef _WIN32
-        struct stat st;
-        if (path_utils::stat_path(child_path, &st)) {
+        path_utils::FileIdentity identity;
+        if (path_utils::file_identity(child_path, &identity) && identity.valid) {
             const std::pair<unsigned long long, unsigned long long> inode_key(
-                static_cast<unsigned long long>(st.st_dev), static_cast<unsigned long long>(st.st_ino));
+                identity.device,
+                identity.file
+            );
             if (context->followed_inodes.count(inode_key) != 0) {
                 handle_skipped_symlink(context, child_path);
                 return true;
             }
             context->followed_inodes.insert(inode_key);
         }
-#endif
         ++context->recursion_depth;
         append_directory_entry(archive, child_rel);
         append_directory_contents(archive, child_path, child_rel, exclude_matcher, context);
@@ -115,16 +122,19 @@ bool append_followed_symlink_entry(TransferArchiveSink* archive,
     return false;
 }
 
-void append_directory_contents(TransferArchiveSink* archive,
-                               const std::string& current_path,
-                               const std::string& current_rel,
-                               const transfer_glob::Matcher& exclude_matcher,
-                               ExportContext* context) {
+void append_directory_contents(
+    TransferArchiveSink* archive,
+    const std::string& current_path,
+    const std::string& current_rel,
+    const transfer_glob::Matcher& exclude_matcher,
+    ExportContext* context
+) {
     const std::vector<DirectoryEntry> entries = list_directory_entries(current_path);
     for (std::size_t i = 0; i < entries.size(); ++i) {
         const DirectoryEntry& entry = entries[i];
         const std::string child_path = join_path(current_path, entry.name);
-        const std::string child_rel = current_rel.empty() ? entry.name : current_rel + "/" + entry.name;
+        const std::string child_rel =
+            current_rel.empty() ? entry.name : current_rel + "/" + entry.name;
 
         if (entry.is_directory) {
             if (exclude_matcher.is_excluded_directory(child_rel)) {
@@ -147,8 +157,14 @@ void append_directory_contents(TransferArchiveSink* archive,
                 continue;
             }
 #ifdef _WIN32
-            if (context->options.symlink_mode == TransferSymlinkMode::Follow &&
-                append_followed_symlink_entry(archive, child_path, child_rel, exclude_matcher, context)) {
+            if (context->options.symlink_mode == TransferSymlinkMode::Follow
+                && append_followed_symlink_entry(
+                    archive,
+                    child_path,
+                    child_rel,
+                    exclude_matcher,
+                    context
+                )) {
                 continue;
             }
             handle_skipped_symlink(context, child_path);
@@ -159,14 +175,22 @@ void append_directory_contents(TransferArchiveSink* archive,
                 continue;
             }
             if (context->options.symlink_mode == TransferSymlinkMode::Follow) {
-                if (append_followed_symlink_entry(archive, child_path, child_rel, exclude_matcher, context)) {
+                if (append_followed_symlink_entry(
+                        archive,
+                        child_path,
+                        child_rel,
+                        exclude_matcher,
+                        context
+                    )) {
                     continue;
                 }
                 handle_unsupported_entry(context, child_path);
                 continue;
             }
-            throw TransferFailure(TransferRpcCode::SourceUnsupported,
-                                  "transfer source contains unsupported symlink " + child_path);
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "transfer source contains unsupported symlink " + child_path
+            );
 #endif
         }
         if (!entry.is_regular_file) {
@@ -178,17 +202,23 @@ void append_directory_contents(TransferArchiveSink* archive,
     }
 }
 
-void export_directory_as_tar(TransferArchiveSink* archive,
-                             const std::string& absolute_path,
-                             const transfer_glob::Matcher& exclude_matcher,
-                             ExportContext* context) {
+void export_directory_as_tar(
+    TransferArchiveSink* archive,
+    const std::string& absolute_path,
+    const transfer_glob::Matcher& exclude_matcher,
+    ExportContext* context
+) {
     append_directory_entry(archive, ".");
     append_directory_contents(archive, absolute_path, "", exclude_matcher, context);
     append_transfer_summary_entry(archive, context->warnings);
     append_archive_terminator(archive);
 }
 
-void export_file_as_tar(TransferArchiveSink* archive, const std::string& absolute_path, const ExportOptions& options) {
+void export_file_as_tar(
+    TransferArchiveSink* archive,
+    const std::string& absolute_path,
+    const ExportOptions& options
+) {
 #ifdef _WIN32
     (void)options;
     append_file_entry_from_path(archive, SINGLE_FILE_ENTRY, absolute_path);
@@ -199,8 +229,10 @@ void export_file_as_tar(TransferArchiveSink* archive, const std::string& absolut
         } else if (options.symlink_mode == TransferSymlinkMode::Follow) {
             append_file_entry_from_path(archive, SINGLE_FILE_ENTRY, absolute_path);
         } else {
-            throw TransferFailure(TransferRpcCode::SourceUnsupported,
-                                  "transfer source contains unsupported symlink " + absolute_path);
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "transfer source contains unsupported symlink " + absolute_path
+            );
         }
     } else {
         append_file_entry_from_path(archive, SINGLE_FILE_ENTRY, absolute_path);
@@ -209,11 +241,14 @@ void export_file_as_tar(TransferArchiveSink* archive, const std::string& absolut
     append_archive_terminator(archive);
 }
 
-ExportOptions normalized_options(TransferSymlinkMode symlink_mode, const std::vector<std::string>& exclude) {
+ExportOptions normalized_options(
+    TransferSymlinkMode symlink_mode,
+    const std::vector<std::string>& exclude
+) {
     ExportOptions options;
     options.symlink_mode = symlink_mode;
     options.exclude = exclude;
-    validate_transfer_options(options);
+    transfer_options::validate_transfer_options(options);
     return options;
 }
 
@@ -227,13 +262,17 @@ void validate_export_path(const std::string& absolute_path, const ExportOptions&
     if (is_symlink_path(absolute_path)) {
 #ifdef _WIN32
         if (options.symlink_mode != TransferSymlinkMode::Follow) {
-            throw TransferFailure(TransferRpcCode::SourceUnsupported,
-                                  "transfer source contains unsupported symlink " + absolute_path);
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "transfer source contains unsupported symlink " + absolute_path
+            );
         }
 #else
         if (options.symlink_mode == TransferSymlinkMode::Skip) {
-            throw TransferFailure(TransferRpcCode::SourceUnsupported,
-                                  "transfer source contains unsupported symlink " + absolute_path);
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "transfer source contains unsupported symlink " + absolute_path
+            );
         }
 #endif
     }
@@ -241,7 +280,10 @@ void validate_export_path(const std::string& absolute_path, const ExportOptions&
 
 } // namespace
 
-TransferSourceType export_path_source_type(const std::string& absolute_path, TransferSymlinkMode symlink_mode) {
+TransferSourceType export_path_source_type(
+    const std::string& absolute_path,
+    TransferSymlinkMode symlink_mode
+) {
     const ExportOptions options = normalized_options(symlink_mode, std::vector<std::string>());
     validate_export_path(absolute_path, options);
 #ifndef _WIN32
@@ -249,25 +291,30 @@ TransferSourceType export_path_source_type(const std::string& absolute_path, Tra
         return TransferSourceType::File;
     }
 #endif
-    if (is_regular_file(absolute_path) ||
-        (is_symlink_path(absolute_path) && options.symlink_mode == TransferSymlinkMode::Follow &&
-         is_regular_file_follow(absolute_path))) {
+    if (is_regular_file(absolute_path)
+        || (is_symlink_path(absolute_path) && options.symlink_mode == TransferSymlinkMode::Follow
+            && is_regular_file_follow(absolute_path))) {
         return TransferSourceType::File;
     }
-    if (is_directory(absolute_path) ||
-        (is_symlink_path(absolute_path) && options.symlink_mode == TransferSymlinkMode::Follow &&
-         is_directory_follow(absolute_path))) {
+    if (is_directory(absolute_path)
+        || (is_symlink_path(absolute_path) && options.symlink_mode == TransferSymlinkMode::Follow
+            && is_directory_follow(absolute_path))) {
         return TransferSourceType::Directory;
     }
-    throw TransferFailure(TransferRpcCode::SourceUnsupported, "transfer source must be a regular file or directory");
+    throw TransferFailure(
+        TransferRpcCode::SourceUnsupported,
+        "transfer source must be a regular file or directory"
+    );
 }
 
-void export_path_to_sink_as(TransferArchiveSink& sink,
-                            const std::string& absolute_path,
-                            TransferSourceType source_type,
-                            TransferSymlinkMode symlink_mode,
-                            const std::vector<std::string>& exclude,
-                            const TransferPathAuthorizer& authorizer) {
+void export_path_to_sink_as(
+    TransferArchiveSink& sink,
+    const std::string& absolute_path,
+    TransferSourceType source_type,
+    TransferSymlinkMode symlink_mode,
+    const std::vector<std::string>& exclude,
+    const TransferPathAuthorizer& authorizer
+) {
     ExportContext context;
     context.options = normalized_options(symlink_mode, exclude);
     context.authorizer = authorizer;
@@ -281,28 +328,39 @@ void export_path_to_sink_as(TransferArchiveSink& sink,
     } else if (source_type == TransferSourceType::Directory) {
         export_directory_as_tar(&sink, absolute_path, exclude_matcher, &context);
     } else if (source_type == TransferSourceType::Multiple) {
-        throw TransferFailure(TransferRpcCode::SourceUnsupported, "multiple source type is only supported for import");
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "multiple source type is only supported for import"
+        );
     } else {
-        throw TransferFailure(TransferRpcCode::SourceUnsupported, "unsupported transfer source type");
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "unsupported transfer source type"
+        );
     }
 }
 
-TransferSourceType export_path_to_sink(TransferArchiveSink& sink,
-                                       const std::string& absolute_path,
-                                       TransferSymlinkMode symlink_mode,
-                                       const std::vector<std::string>& exclude,
-                                       const TransferPathAuthorizer& authorizer) {
+TransferSourceType export_path_to_sink(
+    TransferArchiveSink& sink,
+    const std::string& absolute_path,
+    TransferSymlinkMode symlink_mode,
+    const std::vector<std::string>& exclude,
+    const TransferPathAuthorizer& authorizer
+) {
     const TransferSourceType source_type = export_path_source_type(absolute_path, symlink_mode);
     export_path_to_sink_as(sink, absolute_path, source_type, symlink_mode, exclude, authorizer);
     return source_type;
 }
 
-ExportedPayload export_path(const std::string& absolute_path,
-                            TransferSymlinkMode symlink_mode,
-                            const std::vector<std::string>& exclude,
-                            const TransferPathAuthorizer& authorizer) {
+ExportedPayload export_path(
+    const std::string& absolute_path,
+    TransferSymlinkMode symlink_mode,
+    const std::vector<std::string>& exclude,
+    const TransferPathAuthorizer& authorizer
+) {
     std::string archive;
-    StringTransferArchiveSink sink(&archive);
-    const TransferSourceType source_type = export_path_to_sink(sink, absolute_path, symlink_mode, exclude, authorizer);
+    StringArchiveSink sink(&archive);
+    const TransferSourceType source_type =
+        export_path_to_sink(sink, absolute_path, symlink_mode, exclude, authorizer);
     return ExportedPayload{source_type, archive};
 }
