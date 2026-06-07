@@ -47,6 +47,18 @@ bool is_windows_powershell_family(const std::string& lower) {
     return lower == "powershell.exe" || lower == "powershell" || lower == "pwsh.exe"
            || lower == "pwsh";
 }
+
+bool is_windows_nt_version(DWORD version) {
+    return (version & 0x80000000UL) == 0;
+}
+
+std::string windows_default_shell_for_version(DWORD version) {
+    return is_windows_nt_version(version) ? "cmd.exe" : "command.com";
+}
+
+std::string windows_default_shell_fallback() {
+    return windows_default_shell_for_version(GetVersion());
+}
 #endif
 
 #ifndef _WIN32
@@ -163,7 +175,7 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
     if (comspec != nullptr && comspec[0] != '\0' && shell_supported(comspec)) {
         return comspec;
     }
-    return "cmd.exe";
+    return windows_default_shell_fallback();
 #else
     if (!configured_default_shell.empty()) {
         const std::string resolved = validate_unix_shell_candidate(configured_default_shell);
@@ -200,6 +212,12 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
     );
 #endif
 }
+
+#if defined(_WIN32) && defined(REMOTE_EXEC_CPP_TESTING)
+std::string windows_default_shell_for_version_for_test(unsigned long version) {
+    return windows_default_shell_for_version(static_cast<DWORD>(version));
+}
+#endif
 
 std::string selected_shell(const std::string& shell_override, const std::string& default_shell) {
     const std::string shell = shell_override.empty() ? default_shell : shell_override;

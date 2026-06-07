@@ -73,4 +73,8 @@ std::vector<std::string> shell_argv(
     const std::string& command
 );
 
+#if defined(_WIN32) && defined(REMOTE_EXEC_CPP_TESTING)
+std::string windows_default_shell_for_version_for_test(unsigned long version);
+#endif
+
 } // namespace platform

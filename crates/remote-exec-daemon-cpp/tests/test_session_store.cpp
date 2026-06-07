@@ -648,6 +648,17 @@ static void assert_windows_command_com_command_line_omits_cmd_only_flags() {
     );
 }
 
+static void assert_windows_default_shell_fallback_tracks_runtime_family() {
+    TEST_ASSERT(platform::windows_default_shell_for_version_for_test(0x00000004UL) == "cmd.exe");
+    TEST_ASSERT(platform::windows_default_shell_for_version_for_test(0x00000005UL) == "cmd.exe");
+    TEST_ASSERT(
+        platform::windows_default_shell_for_version_for_test(0x80000004UL) == "command.com"
+    );
+    TEST_ASSERT(
+        platform::windows_default_shell_for_version_for_test(0x8000000AUL) == "command.com"
+    );
+}
+
 static std::string run_windows_quote_sensitive_command(
     SessionStore& store,
     const fs::path& root,
@@ -2281,6 +2292,7 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     assert_windows_cmd_command_line_preserves_command_quotes(shell);
     assert_windows_command_com_command_line_omits_cmd_only_flags();
+    assert_windows_default_shell_fallback_tracks_runtime_family();
     assert_win32_process_tree_terminates_descendants(root);
 #endif
     assert_explicit_drain_stop_reasons();

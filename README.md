@@ -495,9 +495,8 @@ The minimum supported Windows runtime is Windows NT 3.51 through the GNU
 Winsock 1.1 variant; that same variant has also been tested on Windows NT 4.0.
 The GNU Windows NT 4.0 API-floor build also supports Winsock 2 when that
 runtime is installed. GNU Windows builds default to the Unicode Win32 API path.
-An experimental GNU ANSI Win32 API path is available for Windows 9x/Me
-compatibility work and is validated on configured NT 4.0/Windows XP targets
-until an actual 9x target exists. This path covers daemon-owned Win32
+A GNU ANSI Win32 API path is available for Windows 9x/Me compatibility work
+and has been tested on Windows 98 SE. This path covers daemon-owned Win32
 file/process/path calls; compiler runtime libraries and vendored winpty API
 usage are separate compatibility concerns.
 
@@ -516,6 +515,7 @@ make -C crates/remote-exec-daemon-cpp check-windows-xp
 make -C crates/remote-exec-daemon-cpp check-windows-xp-ansi
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1-ansi
+make -C crates/remote-exec-daemon-cpp check-windows-9x-ws1-ansi
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws2
 bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
@@ -527,8 +527,10 @@ empty. The GNU make default is `wine` on non-Windows hosts and empty on
 Windows.
 Add `WINDOWS_CHAR_API=ansi`, or use aliases such as `check-windows-xp-ansi` and
 `check-windows-nt4-ws1-ansi`, to build the daemon-owned ANSI Win32 API path.
-ANSI builds use the active Windows ANSI code page for Win32 paths and command
-strings, reject unrepresentable UTF-8 input, and disable GNU winpty auto-enable.
+Use `check-windows-9x-ws1-ansi` for the GNU 9x/Me ANSI Winsock 1.1 path; it
+sets `WINVER=0x0400`, `_WIN32_WINDOWS=0x0400`, and `_CHICAGO_`. ANSI builds use
+the active Windows ANSI code page for Win32 paths and command strings, reject
+unrepresentable UTF-8 input, and disable GNU winpty auto-enable.
 
 From an x86 Visual Studio developer prompt:
 
@@ -640,9 +642,8 @@ NT 4.0/Winsock 1 test binaries run under Wine on Linux when available, and the
 32-bit host-native MSVC NMAKE path runs on `windows-latest`. CI also gates
 owned C++ daemon source formatting with `clang-format`. The GNU Winsock 1.1
 Unicode variant has also been manually tested on Windows NT 3.51, and the GNU
-ANSI API path is validated on NT 4.0/Windows XP targets while Windows 9x target
-coverage is unavailable. The MSVC path now exercises the vendored
-winpty-backed PTY build instead of a PTY-disabled fallback.
+ANSI API path has been tested on Windows 98 SE. The MSVC path now exercises the
+vendored winpty-backed PTY build instead of a PTY-disabled fallback.
 
 A separate periodic/manual GitHub Actions workflow exercises BSD coverage inside
 GitHub-hosted BSD VMs for FreeBSD, OpenBSD, NetBSD, and DragonFly BSD. Each BSD
