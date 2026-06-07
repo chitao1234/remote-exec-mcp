@@ -14,8 +14,10 @@ void write_u32_be(std::vector<unsigned char>& bytes, std::size_t offset, uint32_
 }
 
 uint32_t read_u32_be(const std::vector<unsigned char>& bytes, std::size_t offset) {
-    return (static_cast<uint32_t>(bytes[offset]) << 24) | (static_cast<uint32_t>(bytes[offset + 1U]) << 16) |
-           (static_cast<uint32_t>(bytes[offset + 2U]) << 8) | static_cast<uint32_t>(bytes[offset + 3U]);
+    return (static_cast<uint32_t>(bytes[offset]) << 24)
+           | (static_cast<uint32_t>(bytes[offset + 1U]) << 16)
+           | (static_cast<uint32_t>(bytes[offset + 2U]) << 8)
+           | static_cast<uint32_t>(bytes[offset + 3U]);
 }
 
 PortTunnelFrameType frame_type_from_byte(unsigned char value) {
@@ -83,7 +85,8 @@ void ensure_u32_len(std::size_t value, const char* name) {
 
 } // namespace
 
-PortTunnelFrameError::PortTunnelFrameError(const std::string& message) : std::runtime_error(message) {
+PortTunnelFrameError::PortTunnelFrameError(const std::string& message)
+    : std::runtime_error(message) {
 }
 
 const char* port_tunnel_preface() {
@@ -131,8 +134,8 @@ PortTunnelFrame decode_port_tunnel_frame(const std::vector<unsigned char>& bytes
     if (data_len > PORT_TUNNEL_MAX_DATA_LEN) {
         throw PortTunnelFrameError("port tunnel data exceeds maximum length");
     }
-    const std::size_t expected_size =
-        PORT_TUNNEL_HEADER_LEN + static_cast<std::size_t>(meta_len) + static_cast<std::size_t>(data_len);
+    const std::size_t expected_size = PORT_TUNNEL_HEADER_LEN + static_cast<std::size_t>(meta_len)
+                                      + static_cast<std::size_t>(data_len);
     if (bytes.size() != expected_size) {
         throw PortTunnelFrameError("port tunnel frame length mismatch");
     }

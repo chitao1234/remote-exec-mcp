@@ -24,8 +24,8 @@ inline std::string compact_pty_size_output(const std::string& input) {
     bool previous_space = true;
     for (std::string::const_iterator it = input.begin(); it != input.end(); ++it) {
         const unsigned char ch = static_cast<unsigned char>(*it);
-        const bool separator =
-            ch == '\0' || ch == '\r' || ch == '\n' || ch == '\t' || ch == ';' || ch == '=' || ch == ',';
+        const bool separator = ch == '\0' || ch == '\r' || ch == '\n' || ch == '\t' || ch == ';'
+                               || ch == '=' || ch == ',';
         if (separator || std::isspace(ch)) {
             if (!previous_space) {
                 output.push_back(' ');
@@ -42,26 +42,36 @@ inline std::string compact_pty_size_output(const std::string& input) {
     return output;
 }
 
-inline bool pty_size_output_matches(const std::string& output, unsigned short rows, unsigned short cols) {
+inline bool pty_size_output_matches(
+    const std::string& output,
+    unsigned short rows,
+    unsigned short cols
+) {
     const std::string compact = compact_pty_size_output(output);
     const std::string row_text = std::to_string(rows);
     const std::string col_text = std::to_string(cols);
-    return compact.find(row_text + " " + col_text) != std::string::npos ||
-           (compact.find("rows " + row_text) != std::string::npos &&
-            compact.find("columns " + col_text) != std::string::npos) ||
-           (compact.find(row_text + " rows") != std::string::npos &&
-            compact.find(col_text + " columns") != std::string::npos);
+    return compact.find(row_text + " " + col_text) != std::string::npos
+           || (compact.find("rows " + row_text) != std::string::npos
+               && compact.find("columns " + col_text) != std::string::npos)
+           || (compact.find(row_text + " rows") != std::string::npos
+               && compact.find(col_text + " columns") != std::string::npos);
 }
 
-inline bool wait_until_file_contains(const test_fs::path& path, const std::string& fragment, unsigned long timeout_ms) {
+inline bool wait_until_file_contains(
+    const test_fs::path& path,
+    const std::string& fragment,
+    unsigned long timeout_ms
+) {
     const std::uint64_t started = platform::monotonic_ms();
     while (platform::monotonic_ms() - started < timeout_ms) {
-        if (test_fs::exists(path) && test_fs::read_file_bytes(path).find(fragment) != std::string::npos) {
+        if (test_fs::exists(path)
+            && test_fs::read_file_bytes(path).find(fragment) != std::string::npos) {
             return true;
         }
         platform::sleep_ms(10UL);
     }
-    return test_fs::exists(path) && test_fs::read_file_bytes(path).find(fragment) != std::string::npos;
+    return test_fs::exists(path)
+           && test_fs::read_file_bytes(path).find(fragment) != std::string::npos;
 }
 
 inline std::string terminal_input_line(const std::string& value) {
@@ -131,9 +141,12 @@ inline std::string windows_ping_sleep_command(unsigned long seconds) {
     return "ping -n " + std::to_string(seconds + 1UL) + " 127.0.0.1>nul";
 }
 
-inline std::string windows_stdin_echo_helper_command(const std::string& helper_arg, const std::string& label) {
-    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " stdin-echo " +
-           windows_quote_arg(label);
+inline std::string windows_stdin_echo_helper_command(
+    const std::string& helper_arg,
+    const std::string& label
+) {
+    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " stdin-echo "
+           + windows_quote_arg(label);
 }
 
 inline std::string windows_stdin_echo_sleep_helper_command(
@@ -141,8 +154,8 @@ inline std::string windows_stdin_echo_sleep_helper_command(
     const std::string& label,
     unsigned long sleep_seconds
 ) {
-    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " stdin-echo-sleep " +
-           windows_quote_arg(label) + " " + std::to_string(sleep_seconds);
+    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg)
+           + " stdin-echo-sleep " + windows_quote_arg(label) + " " + std::to_string(sleep_seconds);
 }
 
 inline std::string windows_stdin_file_helper_command(
@@ -150,18 +163,24 @@ inline std::string windows_stdin_file_helper_command(
     const std::string& file_name,
     unsigned long sleep_seconds
 ) {
-    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " stdin-file " +
-           windows_quote_arg(file_name) + " " + std::to_string(sleep_seconds);
+    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " stdin-file "
+           + windows_quote_arg(file_name) + " " + std::to_string(sleep_seconds);
 }
 
-inline std::string windows_tty_flag_helper_command(const std::string& helper_arg, const std::string& flag_file_name) {
-    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " tty-flag " +
-           windows_quote_arg(flag_file_name);
+inline std::string windows_tty_flag_helper_command(
+    const std::string& helper_arg,
+    const std::string& flag_file_name
+) {
+    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " tty-flag "
+           + windows_quote_arg(flag_file_name);
 }
 
-inline std::string windows_resize_helper_command(const std::string& helper_arg, unsigned long sleep_seconds) {
-    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " resize " +
-           std::to_string(sleep_seconds);
+inline std::string windows_resize_helper_command(
+    const std::string& helper_arg,
+    unsigned long sleep_seconds
+) {
+    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " resize "
+           + std::to_string(sleep_seconds);
 }
 
 inline std::string read_stdin_line_for_helper() {
@@ -264,7 +283,10 @@ inline bool should_skip_pty_tests(bool runtime_supports_pty) {
     if (!runtime_supports_pty && is_wine_runtime()) {
         static bool warned = false;
         if (!warned) {
-            std::fprintf(stderr, "warning: skipping PTY tests under Wine; WinPTY TTY support is unavailable\n");
+            std::fprintf(
+                stderr,
+                "warning: skipping PTY tests under Wine; WinPTY TTY support is unavailable\n"
+            );
             warned = true;
         }
         return true;

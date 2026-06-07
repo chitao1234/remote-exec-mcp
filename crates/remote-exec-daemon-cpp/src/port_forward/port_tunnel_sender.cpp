@@ -16,8 +16,9 @@ const unsigned long MIN_CONTROL_QUEUE_BYTES = 4UL * 1024UL;
 } // namespace
 
 PortTunnelSender::PortTunnelSender(SOCKET client, const std::shared_ptr<PortTunnelService>& service)
-    : client_(client), service_(service), writer_started_(false), writer_shutdown_(false), writer_finished_(false),
-      writer_thread_(), closed_(false), queued_data_bytes_(0UL), queued_control_bytes_(0UL) {
+    : client_(client), service_(service), writer_started_(false), writer_shutdown_(false),
+      writer_finished_(false), writer_thread_(), closed_(false), queued_data_bytes_(0UL),
+      queued_control_bytes_(0UL) {
 }
 
 PortTunnelSender::~PortTunnelSender() {
@@ -200,7 +201,10 @@ bool PortTunnelSender::try_reserve_frame_bytes(
     return try_reserve_queued_bytes(counter, limit, *charge_value);
 }
 
-bool PortTunnelSender::try_reserve_data_frame(const PortTunnelFrame& frame, unsigned long* charge_value) {
+bool PortTunnelSender::try_reserve_data_frame(
+    const PortTunnelFrame& frame,
+    unsigned long* charge_value
+) {
     const std::size_t charge = PORT_TUNNEL_HEADER_LEN + frame.meta.size() + frame.data.size();
     return try_reserve_frame_bytes(
         charge,
@@ -210,8 +214,16 @@ bool PortTunnelSender::try_reserve_data_frame(const PortTunnelFrame& frame, unsi
     );
 }
 
-bool PortTunnelSender::try_reserve_control_frame(const std::vector<unsigned char>& bytes, unsigned long* charge_value) {
-    return try_reserve_frame_bytes(bytes.size(), queued_control_bytes_, control_queue_byte_limit(), charge_value);
+bool PortTunnelSender::try_reserve_control_frame(
+    const std::vector<unsigned char>& bytes,
+    unsigned long* charge_value
+) {
+    return try_reserve_frame_bytes(
+        bytes.size(),
+        queued_control_bytes_,
+        control_queue_byte_limit(),
+        charge_value
+    );
 }
 
 void PortTunnelSender::release_data_frame_reservation(unsigned long charge_value) {
@@ -222,7 +234,10 @@ void PortTunnelSender::release_control_frame_reservation(unsigned long charge_va
     queued_control_bytes_.fetch_sub(charge_value);
 }
 
-void PortTunnelSender::release_queued_frame_reservation(QueueReservationKind charge_kind, unsigned long charge_value) {
+void PortTunnelSender::release_queued_frame_reservation(
+    QueueReservationKind charge_kind,
+    unsigned long charge_value
+) {
     if (charge_value == 0UL) {
         return;
     }
@@ -234,16 +249,24 @@ void PortTunnelSender::release_queued_frame_reservation(QueueReservationKind cha
 }
 
 void PortTunnelSender::drain_queued_frame_reservations_locked() {
-    for (std::deque<QueuedFrame>::iterator it = writer_queue_.begin(); it != writer_queue_.end(); ++it) {
+    for (std::deque<QueuedFrame>::iterator it = writer_queue_.begin(); it != writer_queue_.end();
+         ++it) {
         release_queued_frame_reservation(it->charge_kind, it->charge_value);
     }
     writer_queue_.clear();
 }
 
-bool PortTunnelSender::send_data_frame_or_limit_error(PortTunnelConnection& connection, const PortTunnelFrame& frame) {
+bool PortTunnelSender::send_data_frame_or_limit_error(
+    PortTunnelConnection& connection,
+    const PortTunnelFrame& frame
+) {
     unsigned long charge_value = 0UL;
     if (!try_reserve_data_frame(frame, &charge_value)) {
-        connection.send_error(frame.stream_id, "port_tunnel_limit_exceeded", "port tunnel queued byte limit reached");
+        connection.send_error(
+            frame.stream_id,
+            "port_tunnel_limit_exceeded",
+            "port tunnel queued byte limit reached"
+        );
         return false;
     }
     try {

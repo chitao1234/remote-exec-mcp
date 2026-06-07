@@ -30,8 +30,8 @@ std::string daemon_instance_id() {
 } // namespace
 
 ServerRuntime::ServerRuntime(const DaemonConfig& config)
-    : config_(config), connections_(config.max_open_sessions), shutting_down_(false), accept_thread_(),
-      maintenance_thread_() {
+    : config_(config), connections_(config.max_open_sessions), shutting_down_(false),
+      accept_thread_(), maintenance_thread_() {
     metadata_.daemon_instance_id = daemon_instance_id();
     metadata_.hostname = platform::hostname();
     metadata_.default_shell = platform::resolve_default_shell(config.default_shell);
@@ -192,7 +192,11 @@ void ServerRuntime::accept_loop() {
             try {
                 set_socket_nonblocking(client.get(), false);
             } catch (const std::exception& ex) {
-                log_message(LOG_WARN, "server", std::string("accepted socket setup failed: ") + ex.what());
+                log_message(
+                    LOG_WARN,
+                    "server",
+                    std::string("accepted socket setup failed: ") + ex.what()
+                );
                 continue;
             }
 

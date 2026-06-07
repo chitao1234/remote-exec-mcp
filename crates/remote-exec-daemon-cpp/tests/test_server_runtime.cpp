@@ -62,7 +62,11 @@ static std::string read_http_head_from_socket(SOCKET socket) {
     return response;
 }
 
-static bool wait_for_active_connections(ConnectionManager& manager, unsigned long expected, unsigned long timeout_ms) {
+static bool wait_for_active_connections(
+    ConnectionManager& manager,
+    unsigned long expected,
+    unsigned long timeout_ms
+) {
     const std::uint64_t deadline = platform::monotonic_ms() + timeout_ms;
     while (platform::monotonic_ms() < deadline) {
         if (manager.active_count() == expected) {
@@ -91,7 +95,13 @@ static SOCKET connect_client(unsigned short port) {
 
     std::vector<SocketAddress> addresses;
     std::string resolve_error;
-    TEST_ASSERT(resolve_socket_addresses("127.0.0.1", service.str().c_str(), query, &addresses, &resolve_error));
+    TEST_ASSERT(resolve_socket_addresses(
+        "127.0.0.1",
+        service.str().c_str(),
+        query,
+        &addresses,
+        &resolve_error
+    ));
 
     SOCKET client = INVALID_SOCKET;
     for (std::size_t i = 0; i < addresses.size(); ++i) {
@@ -129,7 +139,10 @@ static void assert_health_request(ServerRuntime& runtime, unsigned short port) {
     TEST_ASSERT(wait_for_active_connections(runtime.connection_manager(), 0UL, TEST_TIMEOUT_MS));
 }
 
-static std::unique_ptr<ServerRuntime> start_runtime(const DaemonConfig& config, unsigned short* port) {
+static std::unique_ptr<ServerRuntime> start_runtime(
+    const DaemonConfig& config,
+    unsigned short* port
+) {
     std::unique_ptr<ServerRuntime> runtime(new ServerRuntime(config));
     runtime->start_accept_loop();
     *port = runtime->bound_port();

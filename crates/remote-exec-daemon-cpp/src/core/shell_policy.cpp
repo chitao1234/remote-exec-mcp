@@ -40,14 +40,15 @@ bool is_windows_cmd_family(const std::string& lower) {
 }
 
 bool is_windows_powershell_family(const std::string& lower) {
-    return lower == "powershell.exe" || lower == "powershell" || lower == "pwsh.exe" || lower == "pwsh";
+    return lower == "powershell.exe" || lower == "powershell" || lower == "pwsh.exe"
+           || lower == "pwsh";
 }
 #endif
 
 #ifndef _WIN32
 bool is_path_like(const std::string& command) {
-    return command.find('/') != std::string::npos || command.find('\\') != std::string::npos ||
-           platform::is_absolute_path(command);
+    return command.find('/') != std::string::npos || command.find('\\') != std::string::npos
+           || platform::is_absolute_path(command);
 }
 
 bool is_disallowed_unix_shell(const std::string& shell) {
@@ -58,8 +59,8 @@ bool is_disallowed_unix_shell(const std::string& shell) {
 
 bool is_executable_file(const std::string& path) {
     path_utils::PathMetadata metadata;
-    return path_utils::path_metadata(path, &metadata) && metadata.is_regular_file &&
-           posix_fd::access_path(path.c_str(), X_OK) == 0;
+    return path_utils::path_metadata(path, &metadata) && metadata.is_regular_file
+           && posix_fd::access_path(path.c_str(), X_OK) == 0;
 }
 
 bool probe_unix_shell(const std::string& shell) {
@@ -160,7 +161,9 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
     if (!configured_default_shell.empty()) {
         const std::string resolved = validate_unix_shell_candidate(configured_default_shell);
         if (resolved.empty()) {
-            throw std::runtime_error("configured default shell `" + configured_default_shell + "` is not usable");
+            throw std::runtime_error(
+                "configured default shell `" + configured_default_shell + "` is not usable"
+            );
         }
         return resolved;
     }
@@ -185,7 +188,9 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
         }
     }
 
-    throw std::runtime_error("no usable default shell found; tried SHELL, passwd shell, bash, and /bin/sh");
+    throw std::runtime_error(
+        "no usable default shell found; tried SHELL, passwd shell, bash, and /bin/sh"
+    );
 #endif
 }
 
@@ -197,7 +202,11 @@ std::string selected_shell(const std::string& shell_override, const std::string&
     return shell;
 }
 
-std::vector<std::string> shell_argv(const std::string& shell, bool login, const std::string& command) {
+std::vector<std::string> shell_argv(
+    const std::string& shell,
+    bool login,
+    const std::string& command
+) {
     std::vector<std::string> argv;
     argv.push_back(shell);
 

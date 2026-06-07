@@ -60,12 +60,32 @@ int send_bounded(SOCKET client, const char* data, std::size_t remaining, int fla
 #endif
 }
 
-int recvfrom_bounded(SOCKET socket, char* data, std::size_t size, sockaddr* peer_address, socklen_t* peer_len) {
+int recvfrom_bounded(
+    SOCKET socket,
+    char* data,
+    std::size_t size,
+    sockaddr* peer_address,
+    socklen_t* peer_len
+) {
 #ifdef _WIN32
-    return recvfrom(socket, data, static_cast<int>(bounded_socket_io_size(size)), 0, peer_address, peer_len);
+    return recvfrom(
+        socket,
+        data,
+        static_cast<int>(bounded_socket_io_size(size)),
+        0,
+        peer_address,
+        peer_len
+    );
 #else
     return posix_eintr::retry<int>([&]() {
-        return recvfrom(socket, data, static_cast<int>(bounded_socket_io_size(size)), 0, peer_address, peer_len);
+        return recvfrom(
+            socket,
+            data,
+            static_cast<int>(bounded_socket_io_size(size)),
+            0,
+            peer_address,
+            peer_len
+        );
     });
 #endif
 }
@@ -114,8 +134,9 @@ SOCKET accept_socket(SOCKET listener, sockaddr* peer_address, socklen_t* peer_le
 SOCKET accept_socket_cloexec(SOCKET listener, sockaddr* peer_address, socklen_t* peer_len) {
 #ifndef _WIN32
 #if REMOTE_EXEC_CPP_HAVE_ACCEPT4 && REMOTE_EXEC_CPP_HAVE_SOCK_CLOEXEC
-    SOCKET accepted_with_flags =
-        posix_eintr::retry<int>([&]() { return accept4(listener, peer_address, peer_len, SOCK_CLOEXEC); });
+    SOCKET accepted_with_flags = posix_eintr::retry<int>([&]() {
+        return accept4(listener, peer_address, peer_len, SOCK_CLOEXEC);
+    });
     if (accepted_with_flags != INVALID_SOCKET) {
         return accepted_with_flags;
     }
@@ -153,7 +174,8 @@ const sockaddr* SocketAddress::sockaddr_ptr() const {
     return reinterpret_cast<const sockaddr*>(&address);
 }
 
-SocketAddressQuery::SocketAddressQuery() : family(AF_UNSPEC), socktype(0), protocol(0), passive(false) {
+SocketAddressQuery::SocketAddressQuery()
+    : family(AF_UNSPEC), socktype(0), protocol(0), passive(false) {
 }
 
 UniqueSocket::UniqueSocket() : socket_(INVALID_SOCKET) {

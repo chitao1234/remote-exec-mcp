@@ -52,7 +52,10 @@ HttpResponse route_transfer_export(const ServerRouteContext& context, const Http
     return handle_transfer_export(context.transfer, request);
 }
 
-HttpResponse route_transfer_path_info(const ServerRouteContext& context, const HttpRequest& request) {
+HttpResponse route_transfer_path_info(
+    const ServerRouteContext& context,
+    const HttpRequest& request
+) {
     return handle_transfer_path_info(context.transfer, request);
 }
 
@@ -73,9 +76,14 @@ const RouteDispatchEntry ROUTE_DISPATCH[] = {
     {server_contract::ROUTE_EXEC_START, &route_exec_start, ROUTE_EXECUTION_BUFFERED},
     {server_contract::ROUTE_EXEC_WRITE, &route_exec_write, ROUTE_EXECUTION_BUFFERED},
     {server_contract::ROUTE_PATCH_APPLY, &route_patch_apply, ROUTE_EXECUTION_BUFFERED},
-    {server_contract::ROUTE_TRANSFER_EXPORT, &route_transfer_export, ROUTE_EXECUTION_STREAMING_EXPORT},
-    {server_contract::ROUTE_TRANSFER_PATH_INFO, &route_transfer_path_info, ROUTE_EXECUTION_BUFFERED},
-    {server_contract::ROUTE_TRANSFER_IMPORT, &route_transfer_import, ROUTE_EXECUTION_STREAMING_IMPORT},
+    {server_contract::ROUTE_TRANSFER_EXPORT,
+     &route_transfer_export,
+     ROUTE_EXECUTION_STREAMING_EXPORT},
+    {server_contract::ROUTE_TRANSFER_PATH_INFO, &route_transfer_path_info, ROUTE_EXECUTION_BUFFERED
+    },
+    {server_contract::ROUTE_TRANSFER_IMPORT,
+     &route_transfer_import,
+     ROUTE_EXECUTION_STREAMING_IMPORT},
     {server_contract::ROUTE_PORT_TUNNEL, nullptr, ROUTE_EXECUTION_UPGRADE},
 };
 
@@ -91,7 +99,8 @@ const RouteDispatchEntry* find_route_entry(server_contract::RouteId id) {
 }
 
 RouteExecutionMode route_execution_mode(const HttpRequest& request) {
-    const RouteDispatchEntry* entry = find_route_entry(server_contract::route_id_for_path(request.path));
+    const RouteDispatchEntry* entry =
+        find_route_entry(server_contract::route_id_for_path(request.path));
     return entry == nullptr ? ROUTE_EXECUTION_BUFFERED : entry->mode;
 }
 
@@ -110,7 +119,10 @@ RpcRouteExecution streaming_import_execution(HttpResponse response, bool close_a
     return execution;
 }
 
-RpcRouteExecution streaming_export_execution(HttpResponse response, const StreamingTransferExport& transfer) {
+RpcRouteExecution streaming_export_execution(
+    HttpResponse response,
+    const StreamingTransferExport& transfer
+) {
     RpcRouteExecution execution;
     execution.kind = RPC_ROUTE_EXECUTION_STREAMING_RESPONSE;
     execution.response = response;
@@ -127,13 +139,18 @@ RpcRouteExecution upgrade_execution(const PortTunnelUpgradeRoute& upgrade) {
     execution.close_after_response = true;
     execution.upgrade_token = upgrade.upgrade_token;
     execution.upgrade_headers = upgrade.response_headers;
-    execution.run_upgrade = [upgrade](SOCKET client) { run_port_tunnel_route_upgrade(upgrade, client); };
+    execution.run_upgrade = [upgrade](SOCKET client) {
+        run_port_tunnel_route_upgrade(upgrade, client);
+    };
     return execution;
 }
 
 } // namespace
 
-RpcRouteBodyPolicy rpc_route_body_policy(const HttpRequest& request, std::size_t default_max_body_bytes) {
+RpcRouteBodyPolicy rpc_route_body_policy(
+    const HttpRequest& request,
+    std::size_t default_max_body_bytes
+) {
     RpcRouteBodyPolicy policy;
     policy.max_body_bytes = default_max_body_bytes;
     if (route_execution_mode(request) == ROUTE_EXECUTION_STREAMING_IMPORT) {
@@ -144,7 +161,10 @@ RpcRouteBodyPolicy rpc_route_body_policy(const HttpRequest& request, std::size_t
     return policy;
 }
 
-HttpResponse execute_buffered_rpc_route(const ServerRouteContext& context, const HttpRequest& request) {
+HttpResponse execute_buffered_rpc_route(
+    const ServerRouteContext& context,
+    const HttpRequest& request
+) {
     HttpResponse response;
     response.status = 200;
     if (reject_before_route(context.gate, request, &response)) {
@@ -152,7 +172,8 @@ HttpResponse execute_buffered_rpc_route(const ServerRouteContext& context, const
         return response;
     }
 
-    const RouteDispatchEntry* entry = find_route_entry(server_contract::route_id_for_path(request.path));
+    const RouteDispatchEntry* entry =
+        find_route_entry(server_contract::route_id_for_path(request.path));
     if (entry != nullptr && entry->handler != nullptr) {
         response = entry->handler(context, request);
     } else {
@@ -172,7 +193,8 @@ RpcRouteExecution execute_rpc_route(
     const RouteExecutionMode mode = route_execution_mode(request);
     if (mode == ROUTE_EXECUTION_STREAMING_EXPORT) {
         StreamingTransferExport transfer;
-        HttpResponse response = prepare_streaming_transfer_export(routes.transfer, request, body, &transfer);
+        HttpResponse response =
+            prepare_streaming_transfer_export(routes.transfer, request, body, &transfer);
         write_request_id_header(response, request);
         if (response.status != 200) {
             return buffered_execution(response);

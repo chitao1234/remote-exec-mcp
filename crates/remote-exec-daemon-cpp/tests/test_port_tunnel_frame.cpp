@@ -30,8 +30,12 @@ void assert_control_frame_round_trips(PortTunnelFrameType type) {
     TEST_ASSERT(decoded.meta == frame.meta);
 }
 
-std::vector<unsigned char>
-frame_header(unsigned char frame_type, uint32_t stream_id, uint32_t meta_len, uint32_t data_len) {
+std::vector<unsigned char> frame_header(
+    unsigned char frame_type,
+    uint32_t stream_id,
+    uint32_t meta_len,
+    uint32_t data_len
+) {
     std::vector<unsigned char> bytes(PORT_TUNNEL_HEADER_LEN, 0U);
     bytes[0] = frame_type;
     bytes[4] = static_cast<unsigned char>((stream_id >> 24) & 0xffU);
@@ -51,8 +55,8 @@ frame_header(unsigned char frame_type, uint32_t stream_id, uint32_t meta_len, ui
 
 void assert_frame_type_matches_contract(const char* name, PortTunnelFrameType type) {
     TEST_ASSERT(
-        test_contract::port_tunnel_contract().at("frame_types").at(name).get<unsigned int>() ==
-        static_cast<unsigned int>(type)
+        test_contract::port_tunnel_contract().at("frame_types").at(name).get<unsigned int>()
+        == static_cast<unsigned int>(type)
     );
 }
 
@@ -84,7 +88,10 @@ int main() {
     assert_frame_type_matches_contract("TcpEof", PortTunnelFrameType::TcpEof);
     assert_frame_type_matches_contract("TunnelClosed", PortTunnelFrameType::TunnelClosed);
     assert_frame_type_matches_contract("TunnelHeartbeat", PortTunnelFrameType::TunnelHeartbeat);
-    assert_frame_type_matches_contract("TunnelHeartbeatAck", PortTunnelFrameType::TunnelHeartbeatAck);
+    assert_frame_type_matches_contract(
+        "TunnelHeartbeatAck",
+        PortTunnelFrameType::TunnelHeartbeatAck
+    );
     assert_frame_type_matches_contract("ForwardRecovering", PortTunnelFrameType::ForwardRecovering);
     assert_frame_type_matches_contract("ForwardRecovered", PortTunnelFrameType::ForwardRecovered);
     assert_frame_type_matches_contract("ForwardDrop", PortTunnelFrameType::ForwardDrop);
@@ -97,7 +104,8 @@ int main() {
     frame.flags = 7U;
     frame.stream_id = 3U;
     frame.meta = "{\"note\":\"binary\"}";
-    frame.data = {0U, 1U, 2U, 255U, static_cast<unsigned char>('R'), static_cast<unsigned char>('\n')};
+    frame.data =
+        {0U, 1U, 2U, 255U, static_cast<unsigned char>('R'), static_cast<unsigned char>('\n')};
 
     const std::vector<unsigned char> encoded = encode_port_tunnel_frame(frame);
     const PortTunnelFrame decoded = decode_port_tunnel_frame(encoded);
@@ -111,7 +119,8 @@ int main() {
     empty_control.type = PortTunnelFrameType::TunnelHeartbeat;
     empty_control.flags = 0U;
     empty_control.stream_id = 0U;
-    const PortTunnelFrame decoded_empty_control = decode_port_tunnel_frame(encode_port_tunnel_frame(empty_control));
+    const PortTunnelFrame decoded_empty_control =
+        decode_port_tunnel_frame(encode_port_tunnel_frame(empty_control));
     TEST_ASSERT(decoded_empty_control.type == PortTunnelFrameType::TunnelHeartbeat);
     TEST_ASSERT(decoded_empty_control.meta.empty());
     TEST_ASSERT(decoded_empty_control.data.empty());

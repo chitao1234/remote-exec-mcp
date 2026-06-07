@@ -18,7 +18,11 @@ fs::path make_test_root() {
     return root;
 }
 
-bool denied(const CompiledFilesystemSandbox* sandbox, SandboxAccess access, const std::string& path) {
+bool denied(
+    const CompiledFilesystemSandbox* sandbox,
+    SandboxAccess access,
+    const std::string& path
+) {
     try {
         authorize_path(sandbox, access, path);
         return false;
@@ -79,7 +83,11 @@ SandboxAccess access_for_label(const std::string& label) {
     throw std::runtime_error("unknown sandbox access `" + label + "`");
 }
 
-std::string replace_all(std::string value, const std::string& needle, const std::string& replacement) {
+std::string replace_all(
+    std::string value,
+    const std::string& needle,
+    const std::string& replacement
+) {
     std::string::size_type position = 0;
     while ((position = value.find(needle, position)) != std::string::npos) {
         value.replace(position, needle.size(), replacement);
@@ -139,7 +147,11 @@ void apply_setup(const fs::path& root, const Json& setup) {
 #endif
 }
 
-void assign_sandbox_list(FilesystemSandbox* sandbox, SandboxAccess access, const SandboxPathList& list) {
+void assign_sandbox_list(
+    FilesystemSandbox* sandbox,
+    SandboxAccess access,
+    const SandboxPathList& list
+) {
     switch (access) {
     case SANDBOX_EXEC_CWD:
         sandbox->exec_cwd = list;
@@ -165,7 +177,11 @@ FilesystemSandbox sandbox_for_case(const Json& case_json, const fs::path& root) 
     }
 
     FilesystemSandbox sandbox;
-    assign_sandbox_list(&sandbox, access_for_label(case_json.at("access").get<std::string>()), list);
+    assign_sandbox_list(
+        &sandbox,
+        access_for_label(case_json.at("access").get<std::string>()),
+        list
+    );
     return sandbox;
 }
 
@@ -175,14 +191,18 @@ void run_shared_path_policy_cases() {
     const Json& absolute_cases = cases.at("is_absolute");
     for (Json::const_iterator it = absolute_cases.begin(); it != absolute_cases.end(); ++it) {
         const PathPolicy policy = policy_for_style(it->at("style").get<std::string>());
-        TEST_ASSERT(is_absolute_for_policy(policy, it->at("raw").get<std::string>()) == it->at("expected").get<bool>());
+        TEST_ASSERT(
+            is_absolute_for_policy(policy, it->at("raw").get<std::string>())
+            == it->at("expected").get<bool>()
+        );
     }
 
     const Json& normalize_cases = cases.at("normalize_for_system");
     for (Json::const_iterator it = normalize_cases.begin(); it != normalize_cases.end(); ++it) {
         const PathPolicy policy = policy_for_style(it->at("style").get<std::string>());
         TEST_ASSERT(
-            normalize_for_system(policy, it->at("raw").get<std::string>()) == it->at("expected").get<std::string>()
+            normalize_for_system(policy, it->at("raw").get<std::string>())
+            == it->at("expected").get<std::string>()
         );
     }
 
@@ -190,8 +210,12 @@ void run_shared_path_policy_cases() {
     for (Json::const_iterator it = syntax_cases.begin(); it != syntax_cases.end(); ++it) {
         const PathPolicy policy = policy_for_style(it->at("style").get<std::string>());
         TEST_ASSERT(
-            syntax_eq_for_policy(policy, it->at("left").get<std::string>(), it->at("right").get<std::string>()) ==
-            it->at("expected").get<bool>()
+            syntax_eq_for_policy(
+                policy,
+                it->at("left").get<std::string>(),
+                it->at("right").get<std::string>()
+            )
+            == it->at("expected").get<bool>()
         );
     }
 
@@ -199,8 +223,12 @@ void run_shared_path_policy_cases() {
     for (Json::const_iterator it = join_cases.begin(); it != join_cases.end(); ++it) {
         const PathPolicy policy = policy_for_style(it->at("style").get<std::string>());
         TEST_ASSERT(
-            join_for_policy(policy, it->at("base").get<std::string>(), it->at("child").get<std::string>()) ==
-            it->at("expected").get<std::string>()
+            join_for_policy(
+                policy,
+                it->at("base").get<std::string>(),
+                it->at("child").get<std::string>()
+            )
+            == it->at("expected").get<std::string>()
         );
     }
 
@@ -228,8 +256,8 @@ void run_shared_path_compare_cases() {
             continue;
         }
         TEST_ASSERT(
-            host_path_equal(it->at("left").get<std::string>(), it->at("right").get<std::string>()) ==
-            it->at("expected").get<bool>()
+            host_path_equal(it->at("left").get<std::string>(), it->at("right").get<std::string>())
+            == it->at("expected").get<bool>()
         );
     }
 
@@ -239,8 +267,11 @@ void run_shared_path_compare_cases() {
             continue;
         }
         TEST_ASSERT(
-            host_path_has_prefix(it->at("path").get<std::string>(), it->at("prefix").get<std::string>()) ==
-            it->at("expected").get<bool>()
+            host_path_has_prefix(
+                it->at("path").get<std::string>(),
+                it->at("prefix").get<std::string>()
+            )
+            == it->at("expected").get<bool>()
         );
     }
 
@@ -250,8 +281,11 @@ void run_shared_path_compare_cases() {
             continue;
         }
         TEST_ASSERT(
-            host_path_is_within(it->at("path").get<std::string>(), it->at("root").get<std::string>()) ==
-            it->at("expected").get<bool>()
+            host_path_is_within(
+                it->at("path").get<std::string>(),
+                it->at("root").get<std::string>()
+            )
+            == it->at("expected").get<bool>()
         );
     }
 }
@@ -278,8 +312,10 @@ void run_shared_sandbox_cases() {
             failed = true;
             if (it->contains("expected_message_fragment")) {
                 TEST_ASSERT(
-                    std::string(ex.what()).find(it->at("expected_message_fragment").get<std::string>()) !=
-                    std::string::npos
+                    std::string(ex.what()).find(
+                        it->at("expected_message_fragment").get<std::string>()
+                    )
+                    != std::string::npos
                 );
             }
         }
@@ -312,8 +348,10 @@ void run_shared_sandbox_cases() {
             failed = true;
             if (it->contains("expected_message_fragment")) {
                 TEST_ASSERT(
-                    std::string(ex.what()).find(it->at("expected_message_fragment").get<std::string>()) !=
-                    std::string::npos
+                    std::string(ex.what()).find(
+                        it->at("expected_message_fragment").get<std::string>()
+                    )
+                    != std::string::npos
                 );
             }
         }
@@ -340,11 +378,28 @@ void run_windows_short_alias_sandbox_cases() {
     FilesystemSandbox long_rule_sandbox;
     long_rule_sandbox.read.allow.push_back(allowed.string());
     long_rule_sandbox.read.deny.push_back(denied_root.string());
-    const CompiledFilesystemSandbox long_rule_compiled = compile_filesystem_sandbox(long_rule_sandbox);
-    authorize_path(&long_rule_compiled, SANDBOX_READ, short_allowed + "\\Eight Three Public Directory\\ok.txt");
-    authorize_path(&long_rule_compiled, SANDBOX_READ, short_allowed + "\\Eight Three Public Directory\\new.txt");
-    TEST_ASSERT(denied(&long_rule_compiled, SANDBOX_READ, short_allowed + "\\Eight Three Denied Directory\\key.txt"));
-    TEST_ASSERT(denied(&long_rule_compiled, SANDBOX_READ, short_allowed + "\\Eight Three Denied Directory\\new.txt"));
+    const CompiledFilesystemSandbox long_rule_compiled =
+        compile_filesystem_sandbox(long_rule_sandbox);
+    authorize_path(
+        &long_rule_compiled,
+        SANDBOX_READ,
+        short_allowed + "\\Eight Three Public Directory\\ok.txt"
+    );
+    authorize_path(
+        &long_rule_compiled,
+        SANDBOX_READ,
+        short_allowed + "\\Eight Three Public Directory\\new.txt"
+    );
+    TEST_ASSERT(denied(
+        &long_rule_compiled,
+        SANDBOX_READ,
+        short_allowed + "\\Eight Three Denied Directory\\key.txt"
+    ));
+    TEST_ASSERT(denied(
+        &long_rule_compiled,
+        SANDBOX_READ,
+        short_allowed + "\\Eight Three Denied Directory\\new.txt"
+    ));
 
     std::string short_denied;
     const std::string denied_rule = distinct_short_path_for_test(denied_root, &short_denied)
@@ -356,7 +411,8 @@ void run_windows_short_alias_sandbox_cases() {
     FilesystemSandbox short_rule_sandbox;
     short_rule_sandbox.read.allow.push_back(short_allowed);
     short_rule_sandbox.read.deny.push_back(denied_rule);
-    const CompiledFilesystemSandbox short_rule_compiled = compile_filesystem_sandbox(short_rule_sandbox);
+    const CompiledFilesystemSandbox short_rule_compiled =
+        compile_filesystem_sandbox(short_rule_sandbox);
     authorize_path(&short_rule_compiled, SANDBOX_READ, (public_root / "ok.txt").string());
     authorize_path(&short_rule_compiled, SANDBOX_READ, (public_root / "new.txt").string());
     TEST_ASSERT(denied(&short_rule_compiled, SANDBOX_READ, (denied_root / "key.txt").string()));
@@ -411,8 +467,13 @@ int main() {
     TEST_ASSERT(is_absolute_for_policy(windows_policy, "/c/Work/file.txt"));
     TEST_ASSERT(is_absolute_for_policy(windows_policy, "/cygdrive/c/Work/file.txt"));
     TEST_ASSERT(normalize_for_system(windows_policy, "/c/Work/file.txt") == "C:\\Work\\file.txt");
-    TEST_ASSERT(normalize_for_system(windows_policy, "/cygdrive/c/Work/file.txt") == "C:\\Work\\file.txt");
-    TEST_ASSERT(join_for_policy(windows_policy, "C:/Work", "nested/file.txt") == "C:\\Work\\nested\\file.txt");
+    TEST_ASSERT(
+        normalize_for_system(windows_policy, "/cygdrive/c/Work/file.txt") == "C:\\Work\\file.txt"
+    );
+    TEST_ASSERT(
+        join_for_policy(windows_policy, "C:/Work", "nested/file.txt")
+        == "C:\\Work\\nested\\file.txt"
+    );
 
 #ifdef _WIN32
     TEST_ASSERT(host_path_equal("/c/WORK/File.txt", "c:\\work\\file.txt"));
@@ -431,7 +492,8 @@ int main() {
     FilesystemSandbox unicode_windows_sandbox;
     unicode_windows_sandbox.read.allow.push_back("C:\\RÉSUMÉ");
     unicode_windows_sandbox.read.deny.push_back("C:\\RÉSUMÉ\\Ärger");
-    const CompiledFilesystemSandbox unicode_windows_compiled = compile_filesystem_sandbox(unicode_windows_sandbox);
+    const CompiledFilesystemSandbox unicode_windows_compiled =
+        compile_filesystem_sandbox(unicode_windows_sandbox);
     authorize_path(&unicode_windows_compiled, SANDBOX_READ, "c:/résumé/out.txt");
     TEST_ASSERT(denied(&unicode_windows_compiled, SANDBOX_READ, "C:\\résumé\\ärger\\key.txt"));
 

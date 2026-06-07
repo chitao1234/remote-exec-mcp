@@ -11,8 +11,10 @@ bool constant_time_equals(const std::string& actual, const std::string& expected
     unsigned int diff = static_cast<unsigned int>(actual.size() ^ expected.size());
 
     for (std::size_t i = 0; i < max_size; ++i) {
-        const unsigned char actual_byte = i < actual.size() ? static_cast<unsigned char>(actual[i]) : 0U;
-        const unsigned char expected_byte = i < expected.size() ? static_cast<unsigned char>(expected[i]) : 0U;
+        const unsigned char actual_byte =
+            i < actual.size() ? static_cast<unsigned char>(actual[i]) : 0U;
+        const unsigned char expected_byte =
+            i < expected.size() ? static_cast<unsigned char>(expected[i]) : 0U;
         diff |= static_cast<unsigned int>(actual_byte ^ expected_byte);
     }
 
@@ -97,7 +99,12 @@ void write_bearer_auth_challenge(HttpResponse& res) {
     res.headers["WWW-Authenticate"] = "Bearer";
 }
 
-void write_rpc_error(HttpResponse& res, int status, const std::string& code, const std::string& message) {
+void write_rpc_error(
+    HttpResponse& res,
+    int status,
+    const std::string& code,
+    const std::string& message
+) {
     res.status = status;
     res.headers["Content-Type"] = "application/json";
     res.body =
@@ -135,7 +142,9 @@ std::string render_http_response_head(const HttpResponse& res) {
     std::ostringstream out;
     out << "HTTP/1.1 " << res.status << ' ' << reason_phrase(res.status) << "\r\n";
 
-    for (std::map<std::string, std::string>::const_iterator it = res.headers.begin(); it != res.headers.end(); ++it) {
+    for (std::map<std::string, std::string>::const_iterator it = res.headers.begin();
+         it != res.headers.end();
+         ++it) {
         out << it->first << ": " << it->second << "\r\n";
     }
 
@@ -152,14 +161,18 @@ std::string render_http_response(const HttpResponse& res) {
     return rendered;
 }
 
-std::string
-render_http_upgrade_response(const std::string& upgrade_token, const std::map<std::string, std::string>& headers) {
+std::string render_http_upgrade_response(
+    const std::string& upgrade_token,
+    const std::map<std::string, std::string>& headers
+) {
     std::ostringstream out;
     out << "HTTP/1.1 101 Switching Protocols\r\n";
     out << "Connection: Upgrade\r\n";
     out << "Upgrade: " << upgrade_token << "\r\n";
 
-    for (std::map<std::string, std::string>::const_iterator it = headers.begin(); it != headers.end(); ++it) {
+    for (std::map<std::string, std::string>::const_iterator it = headers.begin();
+         it != headers.end();
+         ++it) {
         out << it->first << ": " << it->second << "\r\n";
     }
 

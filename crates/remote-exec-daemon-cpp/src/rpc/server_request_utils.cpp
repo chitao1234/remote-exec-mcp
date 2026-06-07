@@ -19,8 +19,13 @@ std::string resolve_path_from_base(const std::string& base, const std::string& r
 
 } // namespace
 
-bool reject_before_route(const HttpGateContext& context, const HttpRequest& request, HttpResponse* response) {
-    if (!context.http_auth_bearer_token.empty() && !request_has_bearer_auth(request, context.http_auth_bearer_token)) {
+bool reject_before_route(
+    const HttpGateContext& context,
+    const HttpRequest& request,
+    HttpResponse* response
+) {
+    if (!context.http_auth_bearer_token.empty()
+        && !request_has_bearer_auth(request, context.http_auth_bearer_token)) {
         write_bearer_auth_challenge(*response);
         return true;
     }
@@ -42,13 +47,21 @@ std::string resolve_workdir(const PathResolutionContext& context, const Json& bo
     return resolve_path_from_base(context.default_workdir, raw);
 }
 
-std::string resolve_authorized_workdir(const PathResolutionContext& context, const Json& body, SandboxAccess access) {
+std::string resolve_authorized_workdir(
+    const PathResolutionContext& context,
+    const Json& body,
+    SandboxAccess access
+) {
     const std::string path = resolve_workdir(context, body);
     authorize_sandbox_path(context, access, path);
     return path;
 }
 
-std::string resolve_input_path(const PathResolutionContext& context, const Json& body, const std::string& key) {
+std::string resolve_input_path(
+    const PathResolutionContext& context,
+    const Json& body,
+    const std::string& key
+) {
     const std::string raw = body.at(key).get<std::string>();
     return resolve_path_from_base(resolve_workdir(context, body), raw);
 }
@@ -64,7 +77,11 @@ std::string resolve_authorized_input_path(
     return path;
 }
 
-void authorize_sandbox_path(const PathResolutionContext& context, SandboxAccess access, const std::string& path) {
+void authorize_sandbox_path(
+    const PathResolutionContext& context,
+    SandboxAccess access,
+    const std::string& path
+) {
     authorize_path(active_sandbox(context), access, path);
 }
 
@@ -72,5 +89,7 @@ PatchPathAuthorizer make_patch_path_authorizer(const PathResolutionContext& cont
     if (context.active_sandbox == nullptr) {
         return PatchPathAuthorizer();
     }
-    return [context](const std::string& path) { authorize_sandbox_path(context, SANDBOX_WRITE, path); };
+    return [context](const std::string& path) {
+        authorize_sandbox_path(context, SANDBOX_WRITE, path);
+    };
 }

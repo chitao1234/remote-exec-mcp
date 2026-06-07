@@ -53,7 +53,8 @@ std::vector<unsigned char> decode_base64_values(const std::string& data) {
         }
         bytes.push_back(static_cast<unsigned char>((values[0] << 2) | (values[1] >> 4)));
         if (padding < 2) {
-            bytes.push_back(static_cast<unsigned char>(((values[1] & 0x0f) << 4) | (values[2] >> 2)));
+            bytes.push_back(static_cast<unsigned char>(((values[1] & 0x0f) << 4) | (values[2] >> 2))
+            );
         }
         if (padding < 1) {
             bytes.push_back(static_cast<unsigned char>(((values[2] & 0x03) << 6) | values[3]));
@@ -73,13 +74,16 @@ std::string bytes_to_string(const std::vector<unsigned char>& bytes) {
 } // namespace
 
 std::string base64_encode_bytes(const std::string& bytes) {
-    static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string output;
     output.reserve(((bytes.size() + 2U) / 3U) * 4U);
     for (std::size_t offset = 0; offset < bytes.size(); offset += 3U) {
         const unsigned int octet_a = static_cast<unsigned char>(bytes[offset]);
-        const unsigned int octet_b = offset + 1U < bytes.size() ? static_cast<unsigned char>(bytes[offset + 1U]) : 0U;
-        const unsigned int octet_c = offset + 2U < bytes.size() ? static_cast<unsigned char>(bytes[offset + 2U]) : 0U;
+        const unsigned int octet_b =
+            offset + 1U < bytes.size() ? static_cast<unsigned char>(bytes[offset + 1U]) : 0U;
+        const unsigned int octet_c =
+            offset + 2U < bytes.size() ? static_cast<unsigned char>(bytes[offset + 2U]) : 0U;
         const unsigned int triple = (octet_a << 16) | (octet_b << 8) | octet_c;
 
         output.push_back(alphabet[(triple >> 18) & 0x3f]);

@@ -31,7 +31,10 @@ inline unsigned long monotonic_deadline_remaining_ms(std::uint64_t deadline_ms) 
     return static_cast<unsigned long>(remaining);
 }
 
-inline unsigned long monotonic_deadline_remaining_ms_bounded(std::uint64_t deadline_ms, unsigned long max_ms) {
+inline unsigned long monotonic_deadline_remaining_ms_bounded(
+    std::uint64_t deadline_ms,
+    unsigned long max_ms
+) {
     const unsigned long remaining = monotonic_deadline_remaining_ms(deadline_ms);
     return remaining < max_ms ? remaining : max_ms;
 }

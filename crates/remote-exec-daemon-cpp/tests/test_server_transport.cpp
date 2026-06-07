@@ -39,16 +39,22 @@ void assert_accept_socket_cloexec_sets_cloexec() {
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = 0;
 
-    TEST_ASSERT(bind_socket(listener.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+    TEST_ASSERT(
+        bind_socket(listener.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0
+    );
     TEST_ASSERT(listen_socket(listener.get(), 1) == 0);
 
     socklen_t address_len = sizeof(address);
-    TEST_ASSERT(socket_name(listener.get(), reinterpret_cast<sockaddr*>(&address), &address_len) == 0);
+    TEST_ASSERT(
+        socket_name(listener.get(), reinterpret_cast<sockaddr*>(&address), &address_len) == 0
+    );
 
     UniqueSocket client(create_socket_cloexec(AF_INET, SOCK_STREAM, IPPROTO_TCP));
     TEST_ASSERT(client.valid());
     assert_socket_has_cloexec(client.get());
-    TEST_ASSERT(connect_socket(client.get(), reinterpret_cast<sockaddr*>(&address), address_len) == 0);
+    TEST_ASSERT(
+        connect_socket(client.get(), reinterpret_cast<sockaddr*>(&address), address_len) == 0
+    );
 
     UniqueSocket accepted(accept_socket_cloexec(listener.get(), nullptr, nullptr));
     TEST_ASSERT(accepted.valid());
@@ -69,9 +75,18 @@ int main() {
 
     TEST_ASSERT(bounded_socket_io_size(0U) == 0U);
     TEST_ASSERT(bounded_socket_io_size(1U) == 1U);
-    TEST_ASSERT(bounded_socket_io_size(static_cast<std::size_t>(INT_MAX)) == static_cast<std::size_t>(INT_MAX));
-    TEST_ASSERT(bounded_socket_io_size(static_cast<std::size_t>(INT_MAX) + 1U) == static_cast<std::size_t>(INT_MAX));
-    TEST_ASSERT(bounded_socket_io_size(std::numeric_limits<std::size_t>::max()) == static_cast<std::size_t>(INT_MAX));
+    TEST_ASSERT(
+        bounded_socket_io_size(static_cast<std::size_t>(INT_MAX))
+        == static_cast<std::size_t>(INT_MAX)
+    );
+    TEST_ASSERT(
+        bounded_socket_io_size(static_cast<std::size_t>(INT_MAX) + 1U)
+        == static_cast<std::size_t>(INT_MAX)
+    );
+    TEST_ASSERT(
+        bounded_socket_io_size(std::numeric_limits<std::size_t>::max())
+        == static_cast<std::size_t>(INT_MAX)
+    );
 
 #ifndef _WIN32
     assert_accept_socket_cloexec_sets_cloexec();

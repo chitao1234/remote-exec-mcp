@@ -13,7 +13,10 @@ void authorize_materialized_relative_path(
     const std::string& relative_path,
     const TransferPathAuthorizer& authorizer
 );
-void ensure_no_existing_symlink_in_path(const std::string& destination_root, const std::string& relative_archive_path);
+void ensure_no_existing_symlink_in_path(
+    const std::string& destination_root,
+    const std::string& relative_archive_path
+);
 void write_validated_symlink(
     const std::string& raw_target,
     const std::string& output_path,

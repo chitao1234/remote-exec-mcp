@@ -57,7 +57,8 @@ int last_error_to_errno(DWORD error) {
 }
 
 bool should_retry_rename_error(DWORD error) {
-    return error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION;
+    return error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION
+           || error == ERROR_LOCK_VIOLATION;
 }
 
 bool is_windows_separator(wchar_t ch) {
@@ -66,8 +67,8 @@ bool is_windows_separator(wchar_t ch) {
 
 bool has_find_wildcard(const std::wstring& path) {
     std::size_t start = 0U;
-    if (path.size() >= 4U && is_windows_separator(path[0]) && is_windows_separator(path[1]) &&
-        (path[2] == L'?' || path[2] == L'.') && is_windows_separator(path[3])) {
+    if (path.size() >= 4U && is_windows_separator(path[0]) && is_windows_separator(path[1])
+        && (path[2] == L'?' || path[2] == L'.') && is_windows_separator(path[3])) {
         start = 4U;
     }
 
@@ -209,7 +210,8 @@ void make_directory_if_missing(const std::string& path) {
 #ifdef _WIN32
     if (_wmkdir(wide_from_utf8(path).c_str()) != 0 && errno != EEXIST) {
 #else
-    if (posix_eintr::retry<int>([&]() { return mkdir(path.c_str(), 0777); }) != 0 && errno != EEXIST) {
+    if (posix_eintr::retry<int>([&]() { return mkdir(path.c_str(), 0777); }) != 0
+        && errno != EEXIST) {
 #endif
         throw std::runtime_error("unable to create directory " + path);
     }
@@ -260,7 +262,12 @@ bool path_metadata(const std::string& path, PathMetadata* metadata) {
     WIN32_FIND_DATAW data;
     ScopedFindHandle handle(FindFirstFileW(wide_path.c_str(), &data));
     if (handle.valid()) {
-        fill_metadata_from_win32_attributes(metadata, data.dwFileAttributes, data.nFileSizeHigh, data.nFileSizeLow);
+        fill_metadata_from_win32_attributes(
+            metadata,
+            data.dwFileAttributes,
+            data.nFileSizeHigh,
+            data.nFileSizeLow
+        );
         return true;
     }
 
@@ -341,7 +348,8 @@ bool rename_path(const std::string& source, const std::string& destination) {
     unsigned long retry_delay_ms = 1UL;
 
     for (unsigned int attempt = 0U; attempt < RENAME_RETRY_ATTEMPTS; ++attempt) {
-        if (MoveFileExW(wide_source.c_str(), wide_destination.c_str(), MOVEFILE_REPLACE_EXISTING) != 0) {
+        if (MoveFileExW(wide_source.c_str(), wide_destination.c_str(), MOVEFILE_REPLACE_EXISTING)
+            != 0) {
             return true;
         }
         last_error = GetLastError();
@@ -358,7 +366,10 @@ bool rename_path(const std::string& source, const std::string& destination) {
     errno = last_error_to_errno(last_error);
     return false;
 #else
-    return posix_eintr::retry<int>([&]() { return std::rename(source.c_str(), destination.c_str()); }) == 0;
+    return posix_eintr::retry<int>([&]() {
+               return std::rename(source.c_str(), destination.c_str());
+           })
+           == 0;
 #endif
 }
 
@@ -366,7 +377,8 @@ bool set_path_mode(const std::string& path, unsigned int mode) {
 #ifdef _WIN32
     return _wchmod(wide_from_utf8(path).c_str(), static_cast<int>(mode)) == 0;
 #else
-    return posix_eintr::retry<int>([&]() { return chmod(path.c_str(), static_cast<mode_t>(mode)); }) == 0;
+    return posix_eintr::retry<int>([&]() { return chmod(path.c_str(), static_cast<mode_t>(mode)); })
+           == 0;
 #endif
 }
 
@@ -408,8 +420,9 @@ bool read_symlink_target(const std::string& path, std::string* target) {
     std::size_t capacity = 4096U;
     while (capacity <= MAX_SYMLINK_TARGET_BYTES) {
         std::vector<char> buffer(capacity);
-        const ssize_t target_len =
-            posix_eintr::retry<ssize_t>([&]() { return readlink(path.c_str(), buffer.data(), buffer.size()); });
+        const ssize_t target_len = posix_eintr::retry<ssize_t>([&]() {
+            return readlink(path.c_str(), buffer.data(), buffer.size());
+        });
         if (target_len < 0) {
             return false;
         }
@@ -446,7 +459,8 @@ std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path) 
     std::vector<DirectoryEntryInfo> entries;
 #ifdef _WIN32
     std::wstring pattern = wide_from_utf8(path);
-    if (!pattern.empty() && pattern[pattern.size() - 1] != '\\' && pattern[pattern.size() - 1] != '/') {
+    if (!pattern.empty() && pattern[pattern.size() - 1] != '\\'
+        && pattern[pattern.size() - 1] != '/') {
         pattern.push_back(L'\\');
     }
     pattern.push_back(L'*');
@@ -463,12 +477,16 @@ std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path) 
         if (name == "." || name == "..") {
             continue;
         }
-        const bool entry_is_symlink = (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        const bool entry_is_symlink =
+            (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
         const bool entry_is_directory =
             !entry_is_symlink && (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-        entries.push_back(
-            DirectoryEntryInfo{name, entry_is_directory, !entry_is_directory && !entry_is_symlink, entry_is_symlink}
-        );
+        entries.push_back(DirectoryEntryInfo{
+            name,
+            entry_is_directory,
+            !entry_is_directory && !entry_is_symlink,
+            entry_is_symlink
+        });
     } while (FindNextFileW(handle.get(), &find_data) != 0);
 
     const DWORD last_error = GetLastError();
@@ -487,7 +505,8 @@ std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path) 
     while ((entry = posix_eintr::retry_null<dirent*>([&]() {
                 errno = 0;
                 return readdir(dir.get());
-            })) != nullptr) {
+            }))
+           != nullptr) {
         const std::string name(entry->d_name);
         if (name == "." || name == "..") {
             continue;
@@ -497,8 +516,12 @@ std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path) 
         if (!path_metadata_no_follow(child, &metadata)) {
             throw std::runtime_error("unable to stat path " + child);
         }
-        entries.push_back(DirectoryEntryInfo{name, metadata.is_directory, metadata.is_regular_file, metadata.is_symlink}
-        );
+        entries.push_back(DirectoryEntryInfo{
+            name,
+            metadata.is_directory,
+            metadata.is_regular_file,
+            metadata.is_symlink
+        });
         errno = 0;
     }
     if (errno != 0) {
@@ -506,9 +529,13 @@ std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path) 
     }
 #endif
 
-    std::sort(entries.begin(), entries.end(), [](const DirectoryEntryInfo& left, const DirectoryEntryInfo& right) {
-        return left.name < right.name;
-    });
+    std::sort(
+        entries.begin(),
+        entries.end(),
+        [](const DirectoryEntryInfo& left, const DirectoryEntryInfo& right) {
+            return left.name < right.name;
+        }
+    );
     return entries;
 }
 

@@ -21,7 +21,11 @@ static void assert_tunnel_open_ready_and_close_round_trip(TestDaemonState& state
         json_frame(
             PortTunnelFrameType::TunnelClose,
             0U,
-            Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", kTunnelCloseReasonOperatorClose}}
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 1ULL},
+                {"reason", kTunnelCloseReasonOperatorClose}
+            }
         )
     );
     const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
@@ -152,7 +156,10 @@ static void assert_tunnel_open_metadata_error(TestDaemonState& state, const std:
 static void assert_tunnel_rejects_frames_for_wrong_role_or_protocol(TestDaemonState& state) {
     assert_tunnel_open_metadata_error(state, "{not-json");
     assert_tunnel_open_metadata_error(state, Json{{"role", "listen"}, {"protocol", "tcp"}}.dump());
-    assert_tunnel_open_metadata_error(state, Json{{"role", 7}, {"protocol", "tcp"}, {"generation", 1ULL}}.dump());
+    assert_tunnel_open_metadata_error(
+        state,
+        Json{{"role", 7}, {"protocol", "tcp"}, {"generation", 1ULL}}.dump()
+    );
     assert_tunnel_open_metadata_error(
         state,
         Json{{"role", "listen"}, {"protocol", "tcp"}, {"generation", "bad"}}.dump()
@@ -201,7 +208,10 @@ static void assert_tunnel_rejects_frames_for_wrong_role_or_protocol(TestDaemonSt
 }
 
 static void assert_legacy_session_frames_are_reserved_but_unsupported(TestDaemonState& state) {
-    const PortTunnelFrameType legacy_frames[] = {PortTunnelFrameType::SessionOpen, PortTunnelFrameType::SessionResume};
+    const PortTunnelFrameType legacy_frames[] = {
+        PortTunnelFrameType::SessionOpen,
+        PortTunnelFrameType::SessionResume
+    };
     for (std::size_t i = 0U; i < sizeof(legacy_frames) / sizeof(legacy_frames[0]); ++i) {
         UniqueSocket client_socket;
         std::thread server_thread;

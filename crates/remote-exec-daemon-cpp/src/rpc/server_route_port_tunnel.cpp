@@ -20,8 +20,9 @@ bool connection_header_has_upgrade(const HttpRequest& request) {
     std::size_t offset = 0;
     while (offset < value.size()) {
         const std::size_t comma = value.find(',', offset);
-        const std::string token =
-            trim_ascii(comma == std::string::npos ? value.substr(offset) : value.substr(offset, comma - offset));
+        const std::string token = trim_ascii(
+            comma == std::string::npos ? value.substr(offset) : value.substr(offset, comma - offset)
+        );
         if (token == "upgrade") {
             return true;
         }
@@ -41,15 +42,17 @@ HttpResponse prepare_port_tunnel_route_upgrade(
     PortTunnelUpgradeRoute* upgrade
 ) {
     HttpResponse response;
-    if (!context.gate.http_auth_bearer_token.empty() &&
-        !request_has_bearer_auth(request, context.gate.http_auth_bearer_token)) {
+    if (!context.gate.http_auth_bearer_token.empty()
+        && !request_has_bearer_auth(request, context.gate.http_auth_bearer_token)) {
         write_bearer_auth_challenge(response);
         return response;
     }
-    if (request.method != "POST" || request.path != server_contract::route_path(server_contract::ROUTE_PORT_TUNNEL) ||
-        !connection_header_has_upgrade(request) ||
-        header_token_lower(request, "upgrade") != server_contract::PORT_TUNNEL_UPGRADE_TOKEN ||
-        request.header(server_contract::PORT_TUNNEL_VERSION_HEADER) != server_contract::PORT_TUNNEL_VERSION_VALUE) {
+    if (request.method != "POST"
+        || request.path != server_contract::route_path(server_contract::ROUTE_PORT_TUNNEL)
+        || !connection_header_has_upgrade(request)
+        || header_token_lower(request, "upgrade") != server_contract::PORT_TUNNEL_UPGRADE_TOKEN
+        || request.header(server_contract::PORT_TUNNEL_VERSION_HEADER)
+               != server_contract::PORT_TUNNEL_VERSION_VALUE) {
         write_rpc_error(response, 400, "bad_request", "invalid port tunnel upgrade request");
         return response;
     }

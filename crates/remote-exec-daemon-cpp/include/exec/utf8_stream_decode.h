@@ -13,7 +13,11 @@ inline bool is_continuation_byte(unsigned char ch) {
     return (ch & 0xC0U) == 0x80U;
 }
 
-inline std::string decode_utf8_stream_chunk(std::string* carry, const std::string& raw_chunk, bool flush) {
+inline std::string decode_utf8_stream_chunk(
+    std::string* carry,
+    const std::string& raw_chunk,
+    bool flush
+) {
     std::string raw = *carry;
     raw += raw_chunk;
     carry->clear();

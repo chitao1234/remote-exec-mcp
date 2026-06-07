@@ -52,19 +52,29 @@ void TransferStreamArchiveReader::read_preface() {
     }
     std::string preface(server_contract::TRANSFER_STREAM_PREFACE_LEN, '\0');
     read_transport_exact(&preface[0], preface.size(), "transfer stream preface");
-    if (preface !=
-        std::string(server_contract::TRANSFER_STREAM_PREFACE, server_contract::TRANSFER_STREAM_PREFACE_LEN)) {
+    if (preface
+        != std::string(
+            server_contract::TRANSFER_STREAM_PREFACE,
+            server_contract::TRANSFER_STREAM_PREFACE_LEN
+        )) {
         throw TransferFailure(TransferRpcCode::BadRequest, "invalid transfer stream preface");
     }
     preface_read_ = true;
 }
 
-void TransferStreamArchiveReader::read_transport_exact(char* data, std::size_t size, const std::string& label) {
+void TransferStreamArchiveReader::read_transport_exact(
+    char* data,
+    std::size_t size,
+    const std::string& label
+) {
     std::size_t offset = 0U;
     while (offset < size) {
         const std::size_t received = reader_->read(data + offset, size - offset);
         if (received == 0U) {
-            throw TransferFailure(TransferRpcCode::TransferFailed, "transfer stream ended before " + label);
+            throw TransferFailure(
+                TransferRpcCode::TransferFailed,
+                "transfer stream ended before " + label
+            );
         }
         offset += received;
     }
@@ -84,20 +94,32 @@ bool TransferStreamArchiveReader::read_next_data_frame_or_terminal() {
         );
         const unsigned char frame_type = header[0];
         if (header[1] != 0U) {
-            throw TransferFailure(TransferRpcCode::BadRequest, "transfer stream frame flags must be zero");
+            throw TransferFailure(
+                TransferRpcCode::BadRequest,
+                "transfer stream frame flags must be zero"
+            );
         }
         if (header[2] != 0U || header[3] != 0U) {
-            throw TransferFailure(TransferRpcCode::BadRequest, "transfer stream frame reserved field must be zero");
+            throw TransferFailure(
+                TransferRpcCode::BadRequest,
+                "transfer stream frame reserved field must be zero"
+            );
         }
         const std::uint64_t payload_len = transfer_stream::read_u64_be(header + 4);
         const std::uint64_t limit = frame_type == transfer_stream::FRAME_DATA
                                         ? server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES
                                         : server_contract::TRANSFER_STREAM_CONTROL_FRAME_MAX_BYTES;
         if (payload_len > limit) {
-            throw TransferFailure(TransferRpcCode::BadRequest, "transfer stream frame payload is too large");
+            throw TransferFailure(
+                TransferRpcCode::BadRequest,
+                "transfer stream frame payload is too large"
+            );
         }
         if (payload_len > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
-            throw TransferFailure(TransferRpcCode::BadRequest, "transfer stream frame payload is too large");
+            throw TransferFailure(
+                TransferRpcCode::BadRequest,
+                "transfer stream frame payload is too large"
+            );
         }
 
         std::string payload(static_cast<std::size_t>(payload_len), '\0');
@@ -125,7 +147,8 @@ bool TransferStreamArchiveReader::read_next_data_frame_or_terminal() {
     }
 }
 
-StringTransferStreamByteReader::StringTransferStreamByteReader(const std::string* body) : body_(body), offset_(0U) {
+StringTransferStreamByteReader::StringTransferStreamByteReader(const std::string* body)
+    : body_(body), offset_(0U) {
 }
 
 std::size_t StringTransferStreamByteReader::read(char* data, std::size_t size) {
@@ -138,21 +161,25 @@ std::size_t StringTransferStreamByteReader::read(char* data, std::size_t size) {
     return count;
 }
 
-ChunkedTransferStreamArchiveSink::ChunkedTransferStreamArchiveSink(TransferStreamChunkWriter* chunks)
+ChunkedTransferStreamArchiveSink::ChunkedTransferStreamArchiveSink(TransferStreamChunkWriter* chunks
+)
     : chunks_(chunks), archive_bytes_(0U) {
 }
 
 void ChunkedTransferStreamArchiveSink::send_preface() {
-    chunks_->write_chunk(
-        std::string(server_contract::TRANSFER_STREAM_PREFACE, server_contract::TRANSFER_STREAM_PREFACE_LEN)
-    );
+    chunks_->write_chunk(std::string(
+        server_contract::TRANSFER_STREAM_PREFACE,
+        server_contract::TRANSFER_STREAM_PREFACE_LEN
+    ));
 }
 
 void ChunkedTransferStreamArchiveSink::write(const char* data, std::size_t size) {
     std::size_t offset = 0U;
     while (offset < size) {
-        const std::size_t chunk_size =
-            std::min<std::size_t>(server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES, size - offset);
+        const std::size_t chunk_size = std::min<std::size_t>(
+            server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES,
+            size - offset
+        );
         chunks_->write_chunk(transfer_stream::data_frame(data + offset, chunk_size));
         archive_bytes_ += static_cast<std::uint64_t>(chunk_size);
         offset += chunk_size;
@@ -170,11 +197,16 @@ void ChunkedTransferStreamArchiveSink::send_error_payload(const std::string& pay
 }
 
 std::string framed_transfer_body(const std::string& archive) {
-    std::string body(server_contract::TRANSFER_STREAM_PREFACE, server_contract::TRANSFER_STREAM_PREFACE_LEN);
+    std::string body(
+        server_contract::TRANSFER_STREAM_PREFACE,
+        server_contract::TRANSFER_STREAM_PREFACE_LEN
+    );
     std::size_t offset = 0U;
     while (offset < archive.size()) {
-        const std::size_t size =
-            std::min<std::size_t>(server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES, archive.size() - offset);
+        const std::size_t size = std::min<std::size_t>(
+            server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES,
+            archive.size() - offset
+        );
         body += transfer_stream::data_frame(archive.data() + offset, size);
         offset += size;
     }

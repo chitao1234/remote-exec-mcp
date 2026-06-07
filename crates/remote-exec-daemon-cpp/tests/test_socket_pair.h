@@ -45,7 +45,9 @@ inline ConnectedSocketPair make_connected_socket_pair() {
     TEST_ASSERT(listen(listener.get(), 1) == 0);
 
     int address_len = sizeof(address);
-    TEST_ASSERT(getsockname(listener.get(), reinterpret_cast<sockaddr*>(&address), &address_len) == 0);
+    TEST_ASSERT(
+        getsockname(listener.get(), reinterpret_cast<sockaddr*>(&address), &address_len) == 0
+    );
 
     UniqueSocket client(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
     TEST_ASSERT(client.valid());
@@ -53,7 +55,12 @@ inline ConnectedSocketPair make_connected_socket_pair() {
     u_long nonblocking = 1UL;
     TEST_ASSERT(ioctlsocket(client.get(), FIONBIO, &nonblocking) == 0);
 
-    if (connect_socket(client.get(), reinterpret_cast<sockaddr*>(&address), static_cast<socklen_t>(address_len)) != 0) {
+    if (connect_socket(
+            client.get(),
+            reinterpret_cast<sockaddr*>(&address),
+            static_cast<socklen_t>(address_len)
+        )
+        != 0) {
         const int connect_error = last_socket_error();
         TEST_ASSERT(connect_in_progress_socket_error(connect_error));
         TEST_ASSERT(wait_socket_writable(client.get(), WINDOWS_LOOPBACK_CONNECT_TIMEOUT_MS) > 0);

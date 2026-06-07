@@ -31,7 +31,11 @@ int protocol_to_socktype(const std::string& protocol) {
     if (protocol == "udp") {
         return SOCK_DGRAM;
     }
-    throw PortForwardError(400, "bad_request", "unsupported port forward protocol `" + protocol + "`");
+    throw PortForwardError(
+        400,
+        "bad_request",
+        "unsupported port forward protocol `" + protocol + "`"
+    );
 }
 
 int protocol_to_ipproto(const std::string& protocol) {
@@ -41,7 +45,11 @@ int protocol_to_ipproto(const std::string& protocol) {
     if (protocol == "udp") {
         return IPPROTO_UDP;
     }
-    throw PortForwardError(400, "bad_request", "unsupported port forward protocol `" + protocol + "`");
+    throw PortForwardError(
+        400,
+        "bad_request",
+        "unsupported port forward protocol `" + protocol + "`"
+    );
 }
 
 ParsedPortForwardEndpoint endpoint_to_host_port(const std::string& endpoint) {
@@ -53,15 +61,20 @@ ParsedPortForwardEndpoint endpoint_to_host_port(const std::string& endpoint) {
     return parsed;
 }
 
-std::vector<SocketAddress>
-resolve_endpoint(const std::string& endpoint, const std::string& protocol, bool passive, const char* error_code) {
+std::vector<SocketAddress> resolve_endpoint(
+    const std::string& endpoint,
+    const std::string& protocol,
+    bool passive,
+    const char* error_code
+) {
     const ParsedPortForwardEndpoint parsed = endpoint_to_host_port(endpoint);
 #ifdef REMOTE_EXEC_CPP_WINSOCK1
     if (parsed.host.find(':') != std::string::npos) {
         throw PortForwardError(
             400,
             error_code,
-            "IPv6 endpoint `" + endpoint + "` is not supported by the Winsock 1 Windows build; use an IPv4 endpoint"
+            "IPv6 endpoint `" + endpoint
+                + "` is not supported by the Winsock 1 Windows build; use an IPv4 endpoint"
         );
     }
 #endif
@@ -74,7 +87,13 @@ resolve_endpoint(const std::string& endpoint, const std::string& protocol, bool 
 
     std::vector<SocketAddress> addresses;
     std::string resolve_error;
-    if (!resolve_socket_addresses(parsed.host.c_str(), parsed.port.c_str(), query, &addresses, &resolve_error)) {
+    if (!resolve_socket_addresses(
+            parsed.host.c_str(),
+            parsed.port.c_str(),
+            query,
+            &addresses,
+            &resolve_error
+        )) {
         const std::string operation = "resolving endpoint `" + endpoint + "`";
         std::ostringstream message;
         message << operation << " failed";
@@ -110,7 +129,12 @@ bool wait_for_connect(SOCKET socket, unsigned long timeout_ms) {
     return selected > 0;
 }
 
-bool tcp_connect_with_timeout(SOCKET socket, const sockaddr* address, socklen_t address_len, unsigned long timeout_ms) {
+bool tcp_connect_with_timeout(
+    SOCKET socket,
+    const sockaddr* address,
+    socklen_t address_len,
+    unsigned long timeout_ms
+) {
     set_socket_nonblocking(socket, true);
     if (connect_socket(socket, address, address_len) == 0) {
         set_socket_nonblocking(socket, false);
@@ -190,7 +214,8 @@ std::string socket_local_endpoint(SOCKET socket) {
 }
 
 SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& protocol) {
-    const std::vector<SocketAddress> addresses = resolve_endpoint(endpoint, protocol, true, "invalid_endpoint");
+    const std::vector<SocketAddress> addresses =
+        resolve_endpoint(endpoint, protocol, true, "invalid_endpoint");
     SOCKET bound_socket = INVALID_SOCKET;
 
     for (std::size_t i = 0; i < addresses.size(); ++i) {
@@ -228,13 +253,19 @@ SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& 
     return bound_socket;
 }
 
-SOCKET connect_port_forward_socket(const std::string& endpoint, const std::string& protocol, unsigned long timeout_ms) {
-    const std::vector<SocketAddress> addresses = resolve_endpoint(endpoint, protocol, false, "invalid_endpoint");
+SOCKET connect_port_forward_socket(
+    const std::string& endpoint,
+    const std::string& protocol,
+    unsigned long timeout_ms
+) {
+    const std::vector<SocketAddress> addresses =
+        resolve_endpoint(endpoint, protocol, false, "invalid_endpoint");
     SOCKET connected_socket = INVALID_SOCKET;
 
     for (std::size_t i = 0; i < addresses.size(); ++i) {
         const SocketAddress& current = addresses[i];
-        connected_socket = create_socket_cloexec(current.family, current.socktype, current.protocol);
+        connected_socket =
+            create_socket_cloexec(current.family, current.socktype, current.protocol);
         if (connected_socket == INVALID_SOCKET) {
             continue;
         }
@@ -242,10 +273,16 @@ SOCKET connect_port_forward_socket(const std::string& endpoint, const std::strin
         bool connected = false;
         try {
             if (protocol == "tcp") {
-                connected =
-                    tcp_connect_with_timeout(connected_socket, current.sockaddr_ptr(), current.address_len, timeout_ms);
+                connected = tcp_connect_with_timeout(
+                    connected_socket,
+                    current.sockaddr_ptr(),
+                    current.address_len,
+                    timeout_ms
+                );
             } else {
-                connected = connect_socket(connected_socket, current.sockaddr_ptr(), current.address_len) == 0;
+                connected =
+                    connect_socket(connected_socket, current.sockaddr_ptr(), current.address_len)
+                    == 0;
             }
         } catch (...) {
             close_socket(connected_socket);
@@ -278,9 +315,14 @@ void send_all_socket(SOCKET socket, const std::string& data) {
 }
 
 SocketAddress parse_port_forward_peer(const std::string& peer) {
-    const std::vector<SocketAddress> addresses = resolve_endpoint(peer, "udp", false, "invalid_endpoint");
+    const std::vector<SocketAddress> addresses =
+        resolve_endpoint(peer, "udp", false, "invalid_endpoint");
     if (addresses.empty()) {
-        throw PortForwardError(400, "invalid_endpoint", "unable to resolve UDP peer `" + peer + "`");
+        throw PortForwardError(
+            400,
+            "invalid_endpoint",
+            "unable to resolve UDP peer `" + peer + "`"
+        );
     }
     return addresses.front();
 }

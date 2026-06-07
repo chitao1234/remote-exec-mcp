@@ -26,7 +26,11 @@ std::string required_header(const HttpRequest& request, const char* name) {
     return it->second;
 }
 
-std::string optional_header_or(const HttpRequest& request, const char* name, const std::string& fallback) {
+std::string optional_header_or(
+    const HttpRequest& request,
+    const char* name,
+    const std::string& fallback
+) {
     const std::map<std::string, std::string>::const_iterator it = request.headers.find(name);
     if (it == request.headers.end()) {
         return fallback;
@@ -34,8 +38,13 @@ std::string optional_header_or(const HttpRequest& request, const char* name, con
     return it->second;
 }
 
-void require_one_of(const char* name, const std::string& value, std::initializer_list<const char*> allowed_values) {
-    for (std::initializer_list<const char*>::const_iterator it = allowed_values.begin(); it != allowed_values.end();
+void require_one_of(
+    const char* name,
+    const std::string& value,
+    std::initializer_list<const char*> allowed_values
+) {
+    for (std::initializer_list<const char*>::const_iterator it = allowed_values.begin();
+         it != allowed_values.end();
          ++it) {
         if (value == *it) {
             return;
@@ -56,7 +65,10 @@ bool parse_create_parent(const std::string& value) {
     }
     throw TransferFailure(
         TransferRpcCode::BadRequest,
-        invalid_header_message(server_contract::TRANSFER_CREATE_PARENT_HEADER, "expected `true` or `false`")
+        invalid_header_message(
+            server_contract::TRANSFER_CREATE_PARENT_HEADER,
+            "expected `true` or `false`"
+        )
     );
 }
 
@@ -86,7 +98,8 @@ void require_uncompressed_transfer(const std::string& compression) {
 }
 
 void require_transfer_stream_version(const HttpRequest& request) {
-    const std::string version = required_header(request, server_contract::TRANSFER_STREAM_VERSION_HEADER);
+    const std::string version =
+        required_header(request, server_contract::TRANSFER_STREAM_VERSION_HEADER);
     if (version != server_contract::TRANSFER_STREAM_VERSION_VALUE) {
         throw TransferFailure(
             TransferRpcCode::BadRequest,
@@ -107,18 +120,25 @@ void require_transfer_stream_content_type(const HttpRequest& request) {
 
 TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request) {
     TransferImportMetadata metadata;
-    metadata.destination_path =
-        decode_destination_path_header(required_header(request, server_contract::TRANSFER_DESTINATION_PATH_HEADER));
-    const std::string overwrite = required_header(request, server_contract::TRANSFER_OVERWRITE_HEADER);
+    metadata.destination_path = decode_destination_path_header(
+        required_header(request, server_contract::TRANSFER_DESTINATION_PATH_HEADER)
+    );
+    const std::string overwrite =
+        required_header(request, server_contract::TRANSFER_OVERWRITE_HEADER);
     if (!parse_transfer_overwrite_wire_value(overwrite, &metadata.overwrite)) {
         throw TransferFailure(
             TransferRpcCode::BadRequest,
-            invalid_header_message(server_contract::TRANSFER_OVERWRITE_HEADER, "unsupported value `" + overwrite + "`")
+            invalid_header_message(
+                server_contract::TRANSFER_OVERWRITE_HEADER,
+                "unsupported value `" + overwrite + "`"
+            )
         );
     }
     metadata.create_parent =
-        parse_create_parent(required_header(request, server_contract::TRANSFER_CREATE_PARENT_HEADER));
-    const std::string source_type = required_header(request, server_contract::TRANSFER_SOURCE_TYPE_HEADER);
+        parse_create_parent(required_header(request, server_contract::TRANSFER_CREATE_PARENT_HEADER)
+        );
+    const std::string source_type =
+        required_header(request, server_contract::TRANSFER_SOURCE_TYPE_HEADER);
     if (!parse_transfer_source_type_wire_value(source_type, &metadata.source_type)) {
         throw TransferFailure(
             TransferRpcCode::BadRequest,
@@ -128,8 +148,13 @@ TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request
             )
         );
     }
-    metadata.compression = optional_header_or(request, server_contract::TRANSFER_COMPRESSION_HEADER, "none");
-    require_one_of(server_contract::TRANSFER_COMPRESSION_HEADER, metadata.compression, {"none", "zstd"});
+    metadata.compression =
+        optional_header_or(request, server_contract::TRANSFER_COMPRESSION_HEADER, "none");
+    require_one_of(
+        server_contract::TRANSFER_COMPRESSION_HEADER,
+        metadata.compression,
+        {"none", "zstd"}
+    );
     const std::string symlink_mode =
         optional_header_or(request, server_contract::TRANSFER_SYMLINK_MODE_HEADER, "preserve");
     if (!parse_transfer_symlink_mode_wire_value(symlink_mode, &metadata.symlink_mode)) {
@@ -146,7 +171,8 @@ TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request
 
 void write_transfer_export_headers(HttpResponse& response, const ExportedPayload& payload) {
     response.headers["Content-Type"] = server_contract::TRANSFER_EXPORT_CONTENT_TYPE;
-    response.headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] = server_contract::TRANSFER_STREAM_VERSION_VALUE;
+    response.headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] =
+        server_contract::TRANSFER_STREAM_VERSION_VALUE;
     response.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] =
         transfer_source_type_wire_value(payload.source_type);
     response.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
@@ -174,7 +200,10 @@ Json transfer_summary_json(const ImportSummary& summary) {
     };
 }
 
-void log_transfer_import_summary(const std::string& destination_path, const ImportSummary& summary) {
+void log_transfer_import_summary(
+    const std::string& destination_path,
+    const ImportSummary& summary
+) {
     LogMessageBuilder message("transfer/import");
     message.quoted_field("destination", destination_path)
         .field("bytes_copied", summary.bytes_copied)

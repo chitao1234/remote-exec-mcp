@@ -9,10 +9,18 @@ ServerRouteContext make_server_route_context(
     const HttpGateContext gate(config.http_auth_bearer_token);
     const PathResolutionContext paths(config.default_workdir, sandbox.active());
     const HealthRouteContext health(metadata.daemon_instance_id);
-    const TargetInfoRouteContext
-        target_info(config.target, metadata.daemon_instance_id, metadata.hostname, metadata.capabilities);
-    const ExecRequestContext
-        exec_request(paths, metadata.capabilities, metadata.default_shell, config.allow_login_shell);
+    const TargetInfoRouteContext target_info(
+        config.target,
+        metadata.daemon_instance_id,
+        metadata.hostname,
+        metadata.capabilities
+    );
+    const ExecRequestContext exec_request(
+        paths,
+        metadata.capabilities,
+        metadata.default_shell,
+        config.allow_login_shell
+    );
     const ExecRouteContext exec(
         exec_request,
         config.target,
@@ -27,7 +35,10 @@ ServerRouteContext make_server_route_context(
     return ServerRouteContext(gate, health, target_info, exec, patch, image, transfer);
 }
 
-PortTunnelRouteContext make_port_tunnel_route_context(const DaemonConfig& config, AppServices& services) {
+PortTunnelRouteContext make_port_tunnel_route_context(
+    const DaemonConfig& config,
+    AppServices& services
+) {
     return PortTunnelRouteContext(
         HttpGateContext(config.http_auth_bearer_token),
         config.port_forward_limits,

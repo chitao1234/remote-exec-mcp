@@ -18,11 +18,17 @@ PathInfo path_info(const std::string& absolute_path) {
         if (error_code == ENOENT || error_code == ENOTDIR) {
             return PathInfo{false, false};
         }
-        throw TransferFailure(TransferRpcCode::Internal, errno_error::message_from_errno(error_code));
+        throw TransferFailure(
+            TransferRpcCode::Internal,
+            errno_error::message_from_errno(error_code)
+        );
     }
 
     if (metadata.is_symlink) {
-        throw TransferFailure(TransferRpcCode::DestinationUnsupported, "destination path contains unsupported symlink");
+        throw TransferFailure(
+            TransferRpcCode::DestinationUnsupported,
+            "destination path contains unsupported symlink"
+        );
     }
     return PathInfo{true, metadata.is_directory};
 }

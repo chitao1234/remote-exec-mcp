@@ -41,8 +41,10 @@ public:
     PortTunnelBudgetLease();
     ~PortTunnelBudgetLease();
 
-    static PortTunnelBudgetLease
-    adopt(const std::shared_ptr<PortTunnelBudgetState>& budget_state, PortTunnelBudgetKind kind);
+    static PortTunnelBudgetLease adopt(
+        const std::shared_ptr<PortTunnelBudgetState>& budget_state,
+        PortTunnelBudgetKind kind
+    );
 
     PortTunnelBudgetLease(PortTunnelBudgetLease&& other);
     PortTunnelBudgetLease& operator=(PortTunnelBudgetLease&& other);
@@ -61,7 +63,8 @@ private:
 struct TunnelTcpStream {
     TunnelTcpStream(SOCKET socket_value, PortTunnelBudgetLease active_stream_budget_value)
         : socket(socket_value), active_stream_budget(std::move(active_stream_budget_value)),
-          resource_state(PortTunnelResourceState::Open), writer_closed(false), writer_shutdown_requested(false) {}
+          resource_state(PortTunnelResourceState::Open), writer_closed(false),
+          writer_shutdown_requested(false) {}
 
     void close();
     bool is_closed();

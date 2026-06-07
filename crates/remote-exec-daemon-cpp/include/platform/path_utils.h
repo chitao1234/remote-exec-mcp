@@ -9,8 +9,8 @@ namespace path_utils {
 
 struct PathMetadata {
     PathMetadata()
-        : exists(false), is_regular_file(false), is_directory(false), is_symlink(false), size(0), mode_bits(0),
-          has_mode_bits(false) {}
+        : exists(false), is_regular_file(false), is_directory(false), is_symlink(false), size(0),
+          mode_bits(0), has_mode_bits(false) {}
 
     bool exists;
     bool is_regular_file;

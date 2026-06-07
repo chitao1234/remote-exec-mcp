@@ -34,13 +34,21 @@ void initialize_state_with_port_forward_limits(
     const fs::path& root,
     const PortForwardLimitConfig& limits
 );
-void initialize_state_with_worker_limit(TestDaemonState& state, const fs::path& root, unsigned long max_workers);
+void initialize_state_with_worker_limit(
+    TestDaemonState& state,
+    const fs::path& root,
+    unsigned long max_workers
+);
 void initialize_state(TestDaemonState& state, const fs::path& root);
 void enable_sandbox(TestDaemonState& state);
 
 const char* tunnel_frame_type_name(PortTunnelFrameType type);
 PortTunnelFrame read_tunnel_frame(SOCKET socket);
-PortTunnelFrame read_tunnel_frame_for_phase(SOCKET socket, const char* phase, unsigned long timeout_ms);
+PortTunnelFrame read_tunnel_frame_for_phase(
+    SOCKET socket,
+    const char* phase,
+    unsigned long timeout_ms
+);
 PortTunnelFrame expect_tunnel_frame(
     SOCKET socket,
     PortTunnelFrameType expected_type,
@@ -48,16 +56,28 @@ PortTunnelFrame expect_tunnel_frame(
     unsigned long timeout_ms = kTunnelFrameReadTimeoutMs
 );
 void send_tunnel_frame(SOCKET socket, const PortTunnelFrame& frame);
-bool try_read_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms, PortTunnelFrame* frame);
+bool try_read_tunnel_frame_with_timeout(
+    SOCKET socket,
+    unsigned long timeout_ms,
+    PortTunnelFrame* frame
+);
 bool socket_readable_within(SOCKET socket, unsigned long timeout_ms);
 void assert_socket_closed_within(SOCKET socket, unsigned long timeout_ms);
 bool tcp_listener_has_pending_connection(SOCKET socket, unsigned long timeout_ms);
 
 void assert_tunnel_error_code(const PortTunnelFrame& frame, const std::string& code);
-void assert_forward_drop(const PortTunnelFrame& frame, const std::string& kind, const std::string& reason);
+void assert_forward_drop(
+    const PortTunnelFrame& frame,
+    const std::string& kind,
+    const std::string& reason
+);
 
 PortTunnelFrame json_frame(PortTunnelFrameType type, uint32_t stream_id, const Json& meta);
-PortTunnelFrame data_frame(PortTunnelFrameType type, uint32_t stream_id, const std::vector<unsigned char>& data);
+PortTunnelFrame data_frame(
+    PortTunnelFrameType type,
+    uint32_t stream_id,
+    const std::vector<unsigned char>& data
+);
 PortTunnelFrame empty_frame(PortTunnelFrameType type, uint32_t stream_id);
 Json tunnel_open_meta(
     const std::string& role,

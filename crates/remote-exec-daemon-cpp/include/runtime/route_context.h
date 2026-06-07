@@ -44,8 +44,8 @@ struct TargetInfoRouteContext {
         const std::string& hostname_value,
         const DaemonCapabilities& capabilities_value
     )
-        : target(target_value), daemon_instance_id(daemon_instance_id_value), hostname(hostname_value),
-          capabilities(capabilities_value) {}
+        : target(target_value), daemon_instance_id(daemon_instance_id_value),
+          hostname(hostname_value), capabilities(capabilities_value) {}
 
     const std::string& target;
     const std::string& daemon_instance_id;
@@ -78,8 +78,9 @@ struct ExecRouteContext {
         unsigned long max_open_sessions_value,
         const std::string& daemon_instance_id_value
     )
-        : request(request_value), target(target_value), sessions(sessions_value), yield_time(yield_time_value),
-          max_open_sessions(max_open_sessions_value), daemon_instance_id(daemon_instance_id_value) {}
+        : request(request_value), target(target_value), sessions(sessions_value),
+          yield_time(yield_time_value), max_open_sessions(max_open_sessions_value),
+          daemon_instance_id(daemon_instance_id_value) {}
 
     ExecRequestContext request;
     const std::string& target;
@@ -90,7 +91,10 @@ struct ExecRouteContext {
 };
 
 struct PatchRouteContext {
-    PatchRouteContext(const PathResolutionContext& paths_value, const std::string& daemon_instance_id_value)
+    PatchRouteContext(
+        const PathResolutionContext& paths_value,
+        const std::string& daemon_instance_id_value
+    )
         : paths(paths_value), daemon_instance_id(daemon_instance_id_value) {}
 
     PathResolutionContext paths;
@@ -139,8 +143,8 @@ struct ServerRouteContext {
         const ImageRouteContext& image_value,
         const TransferRouteContext& transfer_value
     )
-        : gate(gate_value), health(health_value), target_info(target_info_value), exec(exec_value), patch(patch_value),
-          image(image_value), transfer(transfer_value) {}
+        : gate(gate_value), health(health_value), target_info(target_info_value), exec(exec_value),
+          patch(patch_value), image(image_value), transfer(transfer_value) {}
 
     HttpGateContext gate;
     HealthRouteContext health;

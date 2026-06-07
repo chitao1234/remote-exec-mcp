@@ -23,8 +23,9 @@ bool request_connection_close_requested(const HttpRequest& request) {
     std::size_t offset = 0;
     while (offset <= value.size()) {
         const std::size_t comma = value.find(',', offset);
-        const std::string token =
-            trim_ascii(comma == std::string::npos ? value.substr(offset) : value.substr(offset, comma - offset));
+        const std::string token = trim_ascii(
+            comma == std::string::npos ? value.substr(offset) : value.substr(offset, comma - offset)
+        );
         if (token == "close") {
             return true;
         }
@@ -39,7 +40,11 @@ bool request_connection_close_requested(const HttpRequest& request) {
 
 bool log_send_failure(const SocketSendError& ex) {
     if (ex.peer_disconnected()) {
-        log_message(LOG_WARN, "server", std::string("client disconnected during send: ") + ex.what());
+        log_message(
+            LOG_WARN,
+            "server",
+            std::string("client disconnected during send: ") + ex.what()
+        );
         return true;
     }
 
@@ -110,18 +115,26 @@ int handle_client_request(
     assign_request_id(request);
     *close_after_response = request_connection_close_requested(request);
     const HttpRequestBodyFraming framing = parse_request_body_framing_or_throw_bad_request(request);
-    const RpcRouteBodyPolicy body_policy = rpc_route_body_policy(request, context.max_request_body_bytes);
+    const RpcRouteBodyPolicy body_policy =
+        rpc_route_body_policy(request, context.max_request_body_bytes);
     HttpReadControl body_read_control = read_control;
     if (body_policy.min_idle_timeout_ms > body_read_control.idle_timeout_ms) {
         body_read_control.idle_timeout_ms =
             std::max(body_read_control.idle_timeout_ms, body_policy.min_idle_timeout_ms);
         set_socket_timeout_ms(client, body_read_control.idle_timeout_ms);
     }
-    HttpRequestBodyStream
-        body(client, request_head.initial_body, framing, body_policy.max_body_bytes, &body_read_control);
+    HttpRequestBodyStream body(
+        client,
+        request_head.initial_body,
+        framing,
+        body_policy.max_body_bytes,
+        &body_read_control
+    );
 
-    const RpcRouteExecution execution = execute_rpc_route(context.routes, context.port_tunnel, request, &body);
-    if (execution.kind == RPC_ROUTE_EXECUTION_STREAMING_IMPORT_RESPONSE && execution.close_after_response) {
+    const RpcRouteExecution execution =
+        execute_rpc_route(context.routes, context.port_tunnel, request, &body);
+    if (execution.kind == RPC_ROUTE_EXECUTION_STREAMING_IMPORT_RESPONSE
+        && execution.close_after_response) {
         (void)body.discard_remaining_bounded(
             HTTP_STREAMING_TRANSFER_DRAIN_TIMEOUT_MS,
             std::numeric_limits<std::size_t>::max()
@@ -143,7 +156,11 @@ int handle_client_request(
     if (execution.kind == RPC_ROUTE_EXECUTION_UPGRADE_HANDLER) {
         log_request_result(request, execution.response.status, started_at_ms);
         *close_after_response = true;
-        if (!try_send_upgrade_response(client, execution.upgrade_token, execution.upgrade_headers)) {
+        if (!try_send_upgrade_response(
+                client,
+                execution.upgrade_token,
+                execution.upgrade_headers
+            )) {
             return execution.response.status;
         }
         execution.run_upgrade(client);
@@ -183,7 +200,13 @@ void handle_client(const HttpConnectionContext& context, UniqueSocket client) {
             set_socket_timeout_ms(client.get(), context.http_connection_idle_timeout_ms);
 
             bool close_after_response = false;
-            handle_client_request(context, client.get(), request_head, read_control, &close_after_response);
+            handle_client_request(
+                context,
+                client.get(),
+                request_head,
+                read_control,
+                &close_after_response
+            );
             if (close_after_response) {
                 return;
             }

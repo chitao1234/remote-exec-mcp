@@ -43,7 +43,8 @@ Json exec_session_result_json(const ExecSessionResult& result, unsigned long max
     const std::string trimmed = render_output(result.output, max_output_tokens);
     const unsigned long original_token_count = approximate_output_token_count(result.output.size());
     return Json{
-        {"daemon_session_id", result.has_daemon_session_id ? Json(result.daemon_session_id) : Json(nullptr)},
+        {"daemon_session_id",
+         result.has_daemon_session_id ? Json(result.daemon_session_id) : Json(nullptr)},
         {"running", result.running},
         {"chunk_id", make_chunk_id()},
         {"wall_time_seconds", wall_time_seconds(result.started_at_ms)},

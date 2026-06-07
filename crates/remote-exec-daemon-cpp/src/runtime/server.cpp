@@ -51,8 +51,8 @@ bool install_shutdown_signal_handlers() {
         return false;
     }
 
-    if (posix_signal::install_handler(SIGTERM, shutdown_signal_handler, 0) != 0 ||
-        posix_signal::install_handler(SIGINT, shutdown_signal_handler, 0) != 0) {
+    if (posix_signal::install_handler(SIGTERM, shutdown_signal_handler, 0) != 0
+        || posix_signal::install_handler(SIGINT, shutdown_signal_handler, 0) != 0) {
         posix_fd::close_ignoring_errors(fds[0]);
         posix_fd::close_ignoring_errors(fds[1]);
         g_shutdown_pipe_read = -1;
@@ -68,7 +68,8 @@ void wait_for_shutdown_signal() {
     pfd.events = POLLIN;
     pfd.revents = 0;
     while (!g_shutdown_requested) {
-        const int result = posix_eintr::poll_forever_until(&pfd, 1, []() { return g_shutdown_requested != 0; });
+        const int result =
+            posix_eintr::poll_forever_until(&pfd, 1, []() { return g_shutdown_requested != 0; });
         if (result > 0) {
             return;
         }
@@ -84,7 +85,8 @@ namespace {
 ServerRuntime* g_runtime_for_shutdown = nullptr;
 
 BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
-    if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT || ctrl_type == CTRL_CLOSE_EVENT) {
+    if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT
+        || ctrl_type == CTRL_CLOSE_EVENT) {
         ServerRuntime* runtime = g_runtime_for_shutdown;
         if (runtime != nullptr) {
             runtime->request_shutdown();

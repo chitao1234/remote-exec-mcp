@@ -26,12 +26,14 @@ std::uint64_t monotonic_ms() {
 #ifdef CLOCK_MONOTONIC
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-        return static_cast<std::uint64_t>(ts.tv_sec) * 1000ULL + static_cast<std::uint64_t>(ts.tv_nsec / 1000000L);
+        return static_cast<std::uint64_t>(ts.tv_sec) * 1000ULL
+               + static_cast<std::uint64_t>(ts.tv_nsec / 1000000L);
     }
 #endif
     struct timeval tv;
     gettimeofday(&tv, nullptr);
-    return static_cast<std::uint64_t>(tv.tv_sec) * 1000ULL + static_cast<std::uint64_t>(tv.tv_usec / 1000L);
+    return static_cast<std::uint64_t>(tv.tv_sec) * 1000ULL
+           + static_cast<std::uint64_t>(tv.tv_usec / 1000L);
 #endif
 }
 
@@ -108,9 +110,9 @@ bool is_windows() {
 
 bool is_absolute_path(const std::string& path) {
 #ifdef _WIN32
-    return (path.size() >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) != 0 && path[1] == ':' &&
-            (path[2] == '\\' || path[2] == '/')) ||
-           path.rfind("\\\\", 0) == 0 || path.rfind("//", 0) == 0;
+    return (path.size() >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) != 0
+            && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
+           || path.rfind("\\\\", 0) == 0 || path.rfind("//", 0) == 0;
 #else
     return !path.empty() && path[0] == '/';
 #endif

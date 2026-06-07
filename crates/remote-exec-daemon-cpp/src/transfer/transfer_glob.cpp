@@ -10,7 +10,10 @@
 namespace {
 
 TransferFailure invalid_pattern(const std::string& pattern, const std::string& reason) {
-    return TransferFailure(TransferRpcCode::TransferFailed, "invalid exclude pattern `" + pattern + "`: " + reason);
+    return TransferFailure(
+        TransferRpcCode::TransferFailed,
+        "invalid exclude pattern `" + pattern + "`: " + reason
+    );
 }
 
 std::size_t character_class_end(const std::string& pattern, std::size_t open_index) {
@@ -94,7 +97,8 @@ bool match_pattern(
                         return true;
                     }
                     for (std::size_t index = text_index; index < text.size(); ++index) {
-                        if (text[index] == '/' && match_pattern(pattern, next_index + 1U, text, index + 1U)) {
+                        if (text[index] == '/'
+                            && match_pattern(pattern, next_index + 1U, text, index + 1U)) {
                             return true;
                         }
                     }
@@ -114,7 +118,8 @@ bool match_pattern(
             if (match_pattern(pattern, pattern_index + 1U, text, text_index)) {
                 return true;
             }
-            for (std::size_t index = text_index; index < text.size() && text[index] != '/'; ++index) {
+            for (std::size_t index = text_index; index < text.size() && text[index] != '/';
+                 ++index) {
                 if (match_pattern(pattern, pattern_index + 1U, text, index + 1U)) {
                     return true;
                 }

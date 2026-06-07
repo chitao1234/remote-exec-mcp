@@ -18,7 +18,11 @@ static void assert_tunnel_close_releases_tcp_listener(TestDaemonState& state) {
         json_frame(
             PortTunnelFrameType::TunnelClose,
             0U,
-            Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", kTunnelCloseReasonOperatorClose}}
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 1ULL},
+                {"reason", kTunnelCloseReasonOperatorClose}
+            }
         )
     );
     TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TunnelClosed);
@@ -59,7 +63,11 @@ static void assert_terminal_tunnel_error_releases_tcp_listener_immediately(TestD
         0U,
         0U,
     };
-    send_all_bytes(client_socket.get(), reinterpret_cast<const char*>(invalid_frame), sizeof(invalid_frame));
+    send_all_bytes(
+        client_socket.get(),
+        reinterpret_cast<const char*>(invalid_frame),
+        sizeof(invalid_frame)
+    );
 
     const PortTunnelFrame error = read_tunnel_frame(client_socket.get());
     TEST_ASSERT(error.type == PortTunnelFrameType::Error);
@@ -96,7 +104,11 @@ static void assert_tunnel_close_releases_retained_listener_immediately(TestDaemo
         json_frame(
             PortTunnelFrameType::TunnelClose,
             0U,
-            Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", kTunnelCloseReasonOperatorClose}}
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 1ULL},
+                {"reason", kTunnelCloseReasonOperatorClose}
+            }
         )
     );
     const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());

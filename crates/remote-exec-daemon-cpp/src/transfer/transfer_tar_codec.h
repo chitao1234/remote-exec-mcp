@@ -24,18 +24,29 @@ struct TarHeaderView {
 
 void append_archive_terminator(TransferArchiveSink* archive);
 void append_directory_entry(TransferArchiveSink* archive, const std::string& rel_path);
-void append_file_entry(TransferArchiveSink* archive, const std::string& rel_path, const std::string& body);
+void append_file_entry(
+    TransferArchiveSink* archive,
+    const std::string& rel_path,
+    const std::string& body
+);
 void append_file_entry_from_path(
     TransferArchiveSink* archive,
     const std::string& rel_path,
     const std::string& source_path
 );
 #ifndef _WIN32
-void append_symlink_entry(TransferArchiveSink* archive, const std::string& rel_path, const std::string& target);
+void append_symlink_entry(
+    TransferArchiveSink* archive,
+    const std::string& rel_path,
+    const std::string& target
+);
 #endif
 bool is_zero_block(const char* block);
 bool is_transfer_summary_path(const std::string& path);
-void append_transfer_summary_entry(TransferArchiveSink* archive, const std::vector<TransferWarning>& warnings);
+void append_transfer_summary_entry(
+    TransferArchiveSink* archive,
+    const std::vector<TransferWarning>& warnings
+);
 TarHeaderView parse_header(const char* block);
 void ensure_u64_fits_size_t(std::uint64_t value, const std::string& label);
 void ensure_transfer_entry_within_limits(
@@ -53,7 +64,10 @@ std::string read_limited_metadata_string(
     const TransferLimitConfig& limits,
     const std::string& error_message
 );
-std::string
-read_gnu_long_name_from_reader(TransferArchiveReader& reader, std::uint64_t size, const TransferLimitConfig& limits);
+std::string read_gnu_long_name_from_reader(
+    TransferArchiveReader& reader,
+    std::uint64_t size,
+    const TransferLimitConfig& limits
+);
 
 } // namespace transfer_tar_codec

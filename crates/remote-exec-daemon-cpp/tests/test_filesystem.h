@@ -150,7 +150,8 @@ inline void write_file_bytes(const path& target, const std::string& contents) {
     if (!file.valid()) {
         throw std::runtime_error("unable to open file " + target.string());
     }
-    if (!contents.empty() && std::fwrite(contents.data(), 1, contents.size(), file.get()) != contents.size()) {
+    if (!contents.empty()
+        && std::fwrite(contents.data(), 1, contents.size(), file.get()) != contents.size()) {
         throw std::runtime_error("unable to write file " + target.string());
     }
     if (file.close() != 0) {
@@ -213,8 +214,8 @@ inline bool is_directory(const path& target) {
 
 inline void throw_last_error(const std::string& operation, const path& target) {
     throw std::runtime_error(
-        operation + " failed for `" + target.string() +
-        "`: " + error_message_from_code(operation.c_str(), GetLastError())
+        operation + " failed for `" + target.string()
+        + "`: " + error_message_from_code(operation.c_str(), GetLastError())
     );
 }
 
@@ -222,7 +223,8 @@ inline void create_directory_if_missing(const path& target) {
     if (target.string().empty() || exists(target)) {
         return;
     }
-    if (!CreateDirectoryW(wide_from_utf8(target.string()).c_str(), NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
+    if (!CreateDirectoryW(wide_from_utf8(target.string()).c_str(), NULL)
+        && GetLastError() != ERROR_ALREADY_EXISTS) {
         throw_last_error("CreateDirectoryW", target);
     }
 }
@@ -288,7 +290,8 @@ inline void remove_all(const path& target) {
 
 inline void throw_errno(const std::string& operation, const path& target, int error) {
     throw std::runtime_error(
-        operation + " failed for `" + target.string() + "`: " + errno_error::message_from_errno(error)
+        operation + " failed for `" + target.string()
+        + "`: " + errno_error::message_from_errno(error)
     );
 }
 
@@ -469,7 +472,9 @@ public:
         return *this;
     }
 
-    bool operator==(const directory_iterator& other) const { return dir_ == NULL && other.dir_ == NULL; }
+    bool operator==(const directory_iterator& other) const {
+        return dir_ == NULL && other.dir_ == NULL;
+    }
 
     bool operator!=(const directory_iterator& other) const { return !(*this == other); }
 

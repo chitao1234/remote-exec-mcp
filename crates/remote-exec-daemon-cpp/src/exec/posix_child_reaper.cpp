@@ -93,7 +93,8 @@ void reap_registered_children() {
 
 void drain_signal_pipe() {
     unsigned char buffer[64];
-    while (g_signal_pipe_read >= 0 && posix_fd::read_retry(g_signal_pipe_read, buffer, sizeof(buffer)) > 0) {
+    while (g_signal_pipe_read >= 0
+           && posix_fd::read_retry(g_signal_pipe_read, buffer, sizeof(buffer)) > 0) {
     }
 }
 
@@ -190,7 +191,11 @@ bool poll_posix_child_exit(pid_t pid, int* status) {
             return true;
         }
         g_registered.erase(pid);
-        log_message(LOG_WARN, "posix_child_reaper", "lost child status after ECHILD; assuming zero exit status");
+        log_message(
+            LOG_WARN,
+            "posix_child_reaper",
+            "lost child status after ECHILD; assuming zero exit status"
+        );
         *status = 0;
         return true;
     }

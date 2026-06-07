@@ -14,9 +14,9 @@ namespace transfer_filesystem {
 
 bool is_absolute_path(const std::string& path) {
 #ifdef _WIN32
-    return (path.size() >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) != 0 && path[1] == ':' &&
-            (path[2] == '\\' || path[2] == '/')) ||
-           path.rfind("\\\\", 0) == 0 || path.rfind("//", 0) == 0;
+    return (path.size() >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) != 0
+            && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
+           || path.rfind("\\\\", 0) == 0 || path.rfind("//", 0) == 0;
 #else
     return !path.empty() && path[0] == '/';
 #endif
@@ -50,14 +50,20 @@ void authorize_existing_path_recursive(
     if (is_directory(path)) {
         const std::vector<DirectoryEntry> entries = list_directory_entries(path);
         for (std::size_t i = 0; i < entries.size(); ++i) {
-            authorize_existing_path_recursive(join_path(path, entries[i].name), authorizer, depth + 1);
+            authorize_existing_path_recursive(
+                join_path(path, entries[i].name),
+                authorizer,
+                depth + 1
+            );
         }
     }
 }
 
 void remove_existing_path_recursive(const std::string& path, std::size_t depth) {
     if (depth > MAX_REMOVE_DEPTH) {
-        throw std::runtime_error("remove_existing_path exceeded maximum depth of " + std::to_string(MAX_REMOVE_DEPTH));
+        throw std::runtime_error(
+            "remove_existing_path exceeded maximum depth of " + std::to_string(MAX_REMOVE_DEPTH)
+        );
     }
 
     if (!path_exists(path)) {
@@ -134,7 +140,10 @@ void ensure_parent_directory(const std::string& path, bool create_parent) {
     }
     if (!create_parent) {
         if (!is_directory(parent)) {
-            throw TransferFailure(TransferRpcCode::ParentMissing, "destination parent does not exist");
+            throw TransferFailure(
+                TransferRpcCode::ParentMissing,
+                "destination parent does not exist"
+            );
         }
         return;
     }
@@ -144,19 +153,28 @@ void ensure_parent_directory(const std::string& path, bool create_parent) {
 
 void ensure_not_existing_symlink(const std::string& path) {
     if (path_exists(path) && is_symlink_path(path)) {
-        throw TransferFailure(TransferRpcCode::DestinationUnsupported, "destination path contains unsupported symlink");
+        throw TransferFailure(
+            TransferRpcCode::DestinationUnsupported,
+            "destination path contains unsupported symlink"
+        );
     }
 }
 
 void write_symlink(const std::string& target, const std::string& path) {
 #ifdef _WIN32
     (void)target;
-    throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive contains unsupported symlink " + path);
+    throw TransferFailure(
+        TransferRpcCode::SourceUnsupported,
+        "archive contains unsupported symlink " + path
+    );
 #else
     ensure_parent_directory(path, true);
     if (path_exists(path)) {
         if (is_directory(path)) {
-            throw TransferFailure(TransferRpcCode::DestinationUnsupported, "destination path is a directory");
+            throw TransferFailure(
+                TransferRpcCode::DestinationUnsupported,
+                "destination path is a directory"
+            );
         }
         if (!path_utils::remove_path(path)) {
             throw std::runtime_error("unable to remove existing file " + path);
@@ -170,15 +188,22 @@ void write_symlink(const std::string& target, const std::string& path) {
 
 std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
     std::vector<DirectoryEntry> entries;
-    const std::vector<path_utils::DirectoryEntryInfo> platform_entries = path_utils::read_directory_entries(path);
+    const std::vector<path_utils::DirectoryEntryInfo> platform_entries =
+        path_utils::read_directory_entries(path);
     for (std::size_t i = 0; i < platform_entries.size(); ++i) {
         const path_utils::DirectoryEntryInfo& entry = platform_entries[i];
-        entries.push_back(DirectoryEntry{entry.name, entry.is_directory, entry.is_regular_file, entry.is_symlink});
+        entries.push_back(
+            DirectoryEntry{entry.name, entry.is_directory, entry.is_regular_file, entry.is_symlink}
+        );
     }
 
-    std::sort(entries.begin(), entries.end(), [](const DirectoryEntry& left, const DirectoryEntry& right) {
-        return left.name < right.name;
-    });
+    std::sort(
+        entries.begin(),
+        entries.end(),
+        [](const DirectoryEntry& left, const DirectoryEntry& right) {
+            return left.name < right.name;
+        }
+    );
     return entries;
 }
 
@@ -200,7 +225,10 @@ bool prepare_destination_path(
     authorize_path_if_present(authorizer, absolute_path);
     const bool existed = path_exists(absolute_path);
     if (existed && overwrite == TransferOverwrite::Fail) {
-        throw TransferFailure(TransferRpcCode::DestinationExists, "destination path already exists");
+        throw TransferFailure(
+            TransferRpcCode::DestinationExists,
+            "destination path already exists"
+        );
     }
 
     ensure_parent_directory(absolute_path, create_parent);
@@ -209,7 +237,10 @@ bool prepare_destination_path(
         ensure_not_existing_symlink(absolute_path);
         if (source_type == TransferSourceType::File) {
             if (is_directory(absolute_path)) {
-                throw TransferFailure(TransferRpcCode::DestinationUnsupported, "destination path is a directory");
+                throw TransferFailure(
+                    TransferRpcCode::DestinationUnsupported,
+                    "destination path is a directory"
+                );
             }
             if (!is_regular_file(absolute_path)) {
                 throw TransferFailure(
@@ -217,12 +248,19 @@ bool prepare_destination_path(
                     "destination path is not a regular file"
                 );
             }
-        } else if (source_type == TransferSourceType::Directory || source_type == TransferSourceType::Multiple) {
+        } else if (source_type == TransferSourceType::Directory
+                   || source_type == TransferSourceType::Multiple) {
             if (!is_directory(absolute_path)) {
-                throw TransferFailure(TransferRpcCode::DestinationUnsupported, "destination path is not a directory");
+                throw TransferFailure(
+                    TransferRpcCode::DestinationUnsupported,
+                    "destination path is not a directory"
+                );
             }
         } else {
-            throw TransferFailure(TransferRpcCode::SourceUnsupported, "unsupported transfer source type");
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "unsupported transfer source type"
+            );
         }
     }
 
@@ -230,7 +268,10 @@ bool prepare_destination_path(
         if (source_type == TransferSourceType::Multiple) {
             ensure_not_existing_symlink(absolute_path);
             if (!is_directory(absolute_path)) {
-                throw TransferFailure(TransferRpcCode::DestinationUnsupported, "destination path is not a directory");
+                throw TransferFailure(
+                    TransferRpcCode::DestinationUnsupported,
+                    "destination path is not a directory"
+                );
             }
             return true;
         }

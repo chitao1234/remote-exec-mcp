@@ -29,8 +29,21 @@ private:
     std::string* output_;
 };
 
-void read_exact_or_throw(TransferArchiveReader& reader, char* data, std::size_t size, const std::string& error_message);
-std::string read_exact_string(TransferArchiveReader& reader, std::uint64_t size, const std::string& error_message);
-void skip_exact(TransferArchiveReader& reader, std::uint64_t size, const std::string& error_message);
+void read_exact_or_throw(
+    TransferArchiveReader& reader,
+    char* data,
+    std::size_t size,
+    const std::string& error_message
+);
+std::string read_exact_string(
+    TransferArchiveReader& reader,
+    std::uint64_t size,
+    const std::string& error_message
+);
+void skip_exact(
+    TransferArchiveReader& reader,
+    std::uint64_t size,
+    const std::string& error_message
+);
 
 } // namespace transfer_archive

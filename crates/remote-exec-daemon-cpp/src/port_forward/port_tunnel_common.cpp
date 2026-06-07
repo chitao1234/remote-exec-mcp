@@ -18,7 +18,11 @@ void log_tunnel_exception(const char* operation, const std::exception& ex) {
 }
 
 void log_unknown_tunnel_exception(const char* operation) {
-    log_message(LOG_WARN, "port_tunnel", std::string(operation) + " failed with an unknown exception");
+    log_message(
+        LOG_WARN,
+        "port_tunnel",
+        std::string(operation) + " failed with an unknown exception"
+    );
 }
 
 const char* port_tunnel_close_mode_name(PortTunnelCloseMode mode) {

@@ -17,9 +17,16 @@ public:
     void run();
     void tcp_read_loop(uint32_t stream_id, std::shared_ptr<TunnelTcpStream> stream);
     void tcp_write_loop(uint32_t stream_id, std::shared_ptr<TunnelTcpStream> stream);
-    void udp_read_loop_connection_local(uint32_t stream_id, std::shared_ptr<TunnelUdpSocket> socket_value);
+    void udp_read_loop_connection_local(
+        uint32_t stream_id,
+        std::shared_ptr<TunnelUdpSocket> socket_value
+    );
     void send_error(uint32_t stream_id, const std::string& code, const std::string& message);
-    void send_terminal_error(uint32_t stream_id, const std::string& code, const std::string& message);
+    void send_terminal_error(
+        uint32_t stream_id,
+        const std::string& code,
+        const std::string& message
+    );
     void send_forward_drop(
         uint32_t stream_id,
         const std::string& kind,
@@ -84,8 +91,9 @@ private:
     void close_connection_local_state();
     std::shared_ptr<PortTunnelSession> current_session();
     std::shared_ptr<PortTunnelSessionAttachment> current_session_attachment();
-    std::shared_ptr<PortTunnelSessionAttachment>
-    session_attachment_for(const std::shared_ptr<PortTunnelSession>& session);
+    std::shared_ptr<PortTunnelSessionAttachment> session_attachment_for(
+        const std::shared_ptr<PortTunnelSession>& session
+    );
     std::shared_ptr<TunnelTcpStream> get_active_tcp_stream(uint32_t stream_id);
     std::shared_ptr<TunnelTcpStream> remove_active_tcp_stream(uint32_t stream_id);
     PortTunnelMode current_mode();

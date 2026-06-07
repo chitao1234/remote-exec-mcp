@@ -9,12 +9,17 @@
 HttpResponse handle_exec_start(const ExecRouteContext& context, const HttpRequest& request) {
     return handle_exec_rpc_route("exec/start", ExecRouteKind::Start, [&](HttpResponse& response) {
         const ExecStartRequestSpec parsed = prepare_exec_start_request(context.request, request);
-        const ExecSessionResult exec_result =
-            context.sessions.start_command(context.target, parsed, context.yield_time, context.max_open_sessions);
+        const ExecSessionResult exec_result = context.sessions.start_command(
+            context.target,
+            parsed,
+            context.yield_time,
+            context.max_open_sessions
+        );
         log_message(
             LOG_INFO,
             "server",
-            "exec/start target=`" + context.target + "` cmd_preview=`" + preview_text(parsed.cmd, 120) + "`"
+            "exec/start target=`" + context.target + "` cmd_preview=`"
+                + preview_text(parsed.cmd, 120) + "`"
         );
         Json exec_response = exec_session_result_json(exec_result, parsed.max_output_tokens);
         exec_response["daemon_instance_id"] = context.daemon_instance_id;
@@ -27,7 +32,8 @@ HttpResponse handle_exec_write(const ExecRouteContext& context, const HttpReques
         const ExecWriteRequestSpec parsed = prepare_exec_write_request(request);
         {
             LogMessageBuilder message("exec/write");
-            message.quoted_field("daemon_session_id", parsed.daemon_session_id).field("chars_len", parsed.chars.size());
+            message.quoted_field("daemon_session_id", parsed.daemon_session_id)
+                .field("chars_len", parsed.chars.size());
             log_message(LOG_INFO, "server", message.str());
         }
         const ExecSessionResult exec_result = context.sessions.write_stdin(

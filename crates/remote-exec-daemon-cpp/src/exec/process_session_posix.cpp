@@ -64,7 +64,8 @@ struct PosixPtyPair {
 
 void set_fd_cloexec_or_throw(int fd, const std::string& label) {
     if (!posix_fd::set_cloexec(fd)) {
-        throw std::runtime_error(errno_error::operation_failed(label + " fcntl(FD_CLOEXEC)", errno));
+        throw std::runtime_error(errno_error::operation_failed(label + " fcntl(FD_CLOEXEC)", errno)
+        );
     }
 }
 
@@ -105,7 +106,9 @@ PosixPtyPair create_posix_pty() {
     }
     set_fd_cloexec_or_throw(master.get(), "pty master");
     if (!posix_fd::set_nonblocking(master.get())) {
-        throw std::runtime_error(errno_error::operation_failed("fcntl(O_NONBLOCK on pty master)", errno));
+        throw std::runtime_error(
+            errno_error::operation_failed("fcntl(O_NONBLOCK on pty master)", errno)
+        );
     }
     if (posix_fd::grant_pty(master.get()) != 0) {
         throw std::runtime_error(errno_error::operation_failed("grantpt", errno));
@@ -130,7 +133,9 @@ void verify_posix_pty_launch_setup(const PosixPtyPair& pair) {
         throw std::runtime_error(errno_error::operation_failed("open(pty slave)", errno));
     }
     if (!posix_fd::set_pty_window_size(slave.get(), DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS)) {
-        throw std::runtime_error(errno_error::operation_failed("ioctl(TIOCSWINSZ on pty slave)", errno));
+        throw std::runtime_error(
+            errno_error::operation_failed("ioctl(TIOCSWINSZ on pty slave)", errno)
+        );
     }
 }
 
@@ -280,8 +285,8 @@ void record_exit_status(int status, int* exit_code) {
 class PosixProcessSession : public ProcessSession {
 public:
     PosixProcessSession(pid_t pid, bool tty, UniqueFd input_write, UniqueFd output_read)
-        : pid_(pid), tty_(tty), input_write_(std::move(input_write)), output_read_(std::move(output_read)),
-          reaped_(false), exit_code_(0) {
+        : pid_(pid), tty_(tty), input_write_(std::move(input_write)),
+          output_read_(std::move(output_read)), reaped_(false), exit_code_(0) {
         register_posix_child(pid_);
     }
 
@@ -289,9 +294,8 @@ public:
 
     void write_stdin(const std::string& chars) override {
         if (!input_write_.valid()) {
-            throw std::runtime_error(
-                "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
-            );
+            throw std::runtime_error("stdin is closed for this session; rerun exec_command with "
+                                     "tty=true to keep stdin open");
         }
 
         const char* data = chars.data();
@@ -300,13 +304,13 @@ public:
             const ssize_t written = posix_fd::write_retry(input_write_.get(), data, remaining);
             if (written < 0) {
                 if (errno == EPIPE || errno == EIO) {
-                    throw ProcessStdinClosedError(
-                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
-                    );
+                    throw ProcessStdinClosedError("stdin is closed for this session; rerun "
+                                                  "exec_command with tty=true to keep stdin open");
                 }
                 if (tty_ && (errno == EAGAIN || errno == EWOULDBLOCK)) {
                     if (posix_fd::wait_until_writable_or_hangup(input_write_.get()) != 0) {
-                        throw std::runtime_error(errno_error::operation_failed("poll(stdin)", errno));
+                        throw std::runtime_error(errno_error::operation_failed("poll(stdin)", errno)
+                        );
                     }
                     continue;
                 }
@@ -435,7 +439,8 @@ private:
 
         for (;;) {
             bool readable = false;
-            if (posix_fd::poll_readable_or_hangup(read_fd, PTY_READ_POLL_INTERVAL_MS, &readable) != 0) {
+            if (posix_fd::poll_readable_or_hangup(read_fd, PTY_READ_POLL_INTERVAL_MS, &readable)
+                != 0) {
                 throw std::runtime_error(errno_error::operation_failed("poll", errno));
             }
             if (readable) {
@@ -523,8 +528,9 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
             if (!posix_fd::set_pty_window_size(slave_fd, DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS)) {
                 _exit(126);
             }
-            if (posix_fd::dup_to(slave_fd, STDIN_FILENO) < 0 || posix_fd::dup_to(slave_fd, STDOUT_FILENO) < 0 ||
-                posix_fd::dup_to(slave_fd, STDERR_FILENO) < 0) {
+            if (posix_fd::dup_to(slave_fd, STDIN_FILENO) < 0
+                || posix_fd::dup_to(slave_fd, STDOUT_FILENO) < 0
+                || posix_fd::dup_to(slave_fd, STDERR_FILENO) < 0) {
                 _exit(126);
             }
             if (slave_fd > STDERR_FILENO) {
@@ -534,7 +540,9 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
             exec_shell_child(exec_argv, executable_path, exec_environment, workdir);
         }
 
-        return std::unique_ptr<ProcessSession>(new PosixProcessSession(pid, true, std::move(pty.master), UniqueFd()));
+        return std::unique_ptr<ProcessSession>(
+            new PosixProcessSession(pid, true, std::move(pty.master), UniqueFd())
+        );
     }
 
     PosixPipePair stdout_pipe = create_posix_pipe("pipe(stdout)");
@@ -549,9 +557,9 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         if (posix_process::set_process_group(0, 0) != 0) {
             _exit(126);
         }
-        if (posix_fd::dup_to(stdin_null.get(), STDIN_FILENO) < 0 ||
-            posix_fd::dup_to(stdout_pipe.write_end.get(), STDOUT_FILENO) < 0 ||
-            posix_fd::dup_to(stdout_pipe.write_end.get(), STDERR_FILENO) < 0) {
+        if (posix_fd::dup_to(stdin_null.get(), STDIN_FILENO) < 0
+            || posix_fd::dup_to(stdout_pipe.write_end.get(), STDOUT_FILENO) < 0
+            || posix_fd::dup_to(stdout_pipe.write_end.get(), STDERR_FILENO) < 0) {
             _exit(126);
         }
 

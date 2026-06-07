@@ -32,7 +32,11 @@ ExecPtySizeSpec requested_pty_size(const Json& body) {
         const unsigned long rows = pty_size.at("rows").get<unsigned long>();
         const unsigned long cols = pty_size.at("cols").get<unsigned long>();
         if (rows == 0UL || cols == 0UL || rows > 65535UL || cols > 65535UL) {
-            throw ExecRequestFailure(400, "invalid_pty_size", "PTY rows and cols must be between 1 and 65535");
+            throw ExecRequestFailure(
+                400,
+                "invalid_pty_size",
+                "PTY rows and cols must be between 1 and 65535"
+            );
         }
         result.present = true;
         result.rows = static_cast<unsigned short>(rows);
@@ -41,7 +45,11 @@ ExecPtySizeSpec requested_pty_size(const Json& body) {
     } catch (const ExecRequestFailure&) {
         throw;
     } catch (const Json::exception& ex) {
-        throw ExecRequestFailure(400, "invalid_pty_size", std::string("invalid PTY size: ") + ex.what());
+        throw ExecRequestFailure(
+            400,
+            "invalid_pty_size",
+            std::string("invalid PTY size: ") + ex.what()
+        );
     }
 }
 
@@ -52,10 +60,14 @@ ExecRequestFailure::ExecRequestFailure(
     const std::string& code_value,
     const std::string& message_value
 )
-    : std::runtime_error(message_value), status(status_value), code(code_value), message(message_value) {
+    : std::runtime_error(message_value), status(status_value), code(code_value),
+      message(message_value) {
 }
 
-ExecStartRequestSpec prepare_exec_start_request(const ExecRequestContext& context, const HttpRequest& request) {
+ExecStartRequestSpec prepare_exec_start_request(
+    const ExecRequestContext& context,
+    const HttpRequest& request
+) {
     try {
         const Json body = parse_json_body(request);
         ExecStartRequestSpec parsed;
@@ -71,12 +83,20 @@ ExecStartRequestSpec prepare_exec_start_request(const ExecRequestContext& contex
 
         parsed.login_requested = body.value("login", context.allow_login_shell);
         if (parsed.login_requested && !context.allow_login_shell) {
-            throw ExecRequestFailure(400, "login_shell_disabled", "login shells are disabled by daemon config");
+            throw ExecRequestFailure(
+                400,
+                "login_shell_disabled",
+                "login shells are disabled by daemon config"
+            );
         }
 
         const std::string shell_override = body.value("shell", std::string());
         if (!shell_override.empty() && !platform::shell_supported(shell_override)) {
-            throw ExecRequestFailure(400, "unsupported_shell", "requested shell is not supported on this target");
+            throw ExecRequestFailure(
+                400,
+                "unsupported_shell",
+                "requested shell is not supported on this target"
+            );
         }
         parsed.shell = platform::selected_shell(shell_override, context.default_shell);
         parsed.workdir = resolve_authorized_workdir(context.paths, body, SANDBOX_EXEC_CWD);

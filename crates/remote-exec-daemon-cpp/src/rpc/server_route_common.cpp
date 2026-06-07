@@ -55,7 +55,12 @@ HttpResponse handle_image_rpc_route(const std::string& route_name, const RpcRout
         log_message(LOG_WARN, "server", route_name + " failed: " + ex.what());
         HttpResponse response;
         response.status = 400;
-        write_rpc_error(response, 400, image_error_code_name(ImageRpcCode::SandboxDenied), ex.what());
+        write_rpc_error(
+            response,
+            400,
+            image_error_code_name(ImageRpcCode::SandboxDenied),
+            ex.what()
+        );
         return response;
     } catch (const ImageFailure& failure) {
         log_message(LOG_WARN, "server", route_name + " failed: " + failure.message);
@@ -83,7 +88,11 @@ HttpResponse handle_image_rpc_route(const std::string& route_name, const RpcRout
     }
 }
 
-HttpResponse handle_exec_rpc_route(const std::string& route_name, ExecRouteKind kind, const RpcRouteBody& body) {
+HttpResponse handle_exec_rpc_route(
+    const std::string& route_name,
+    ExecRouteKind kind,
+    const RpcRouteBody& body
+) {
     try {
         return run_rpc_route(body);
     } catch (const SessionLimitError& ex) {
@@ -151,7 +160,11 @@ HttpResponse handle_patch_rpc_route(const RpcRouteBody& body) {
     }
 }
 
-HttpResponse make_rpc_error_response(int status, const std::string& code, const std::string& message) {
+HttpResponse make_rpc_error_response(
+    int status,
+    const std::string& code,
+    const std::string& message
+) {
     HttpResponse response;
     response.status = status;
     write_rpc_error(response, status, code, message);
@@ -191,7 +204,8 @@ HttpResponse handle_patch_apply(const PatchRouteContext& context, const HttpRequ
         const Json body = parse_json_body(request);
         const std::string workdir = resolve_workdir(context.paths, body);
         const std::string patch_text = body.at("patch").get<std::string>();
-        const PatchApplyResult result = apply_patch(workdir, patch_text, make_patch_path_authorizer(context.paths));
+        const PatchApplyResult result =
+            apply_patch(workdir, patch_text, make_patch_path_authorizer(context.paths));
         LogMessageBuilder summary("patch/apply");
         summary.field("patch_len", patch_text.size());
         log_message(LOG_INFO, "server", summary.str());

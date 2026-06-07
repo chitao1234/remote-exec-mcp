@@ -41,4 +41,8 @@ struct CompiledFilesystemSandbox {
 
 CompiledFilesystemSandbox compile_filesystem_sandbox(const FilesystemSandbox& sandbox);
 
-void authorize_path(const CompiledFilesystemSandbox* sandbox, SandboxAccess access, const std::string& path);
+void authorize_path(
+    const CompiledFilesystemSandbox* sandbox,
+    SandboxAccess access,
+    const std::string& path
+);

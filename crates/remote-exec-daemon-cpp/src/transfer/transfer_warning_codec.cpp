@@ -37,7 +37,10 @@ std::vector<TransferWarning> read_transfer_summary(const std::string& body) {
     return warnings;
 }
 
-void append_warnings(std::vector<TransferWarning>* destination, const std::vector<TransferWarning>& source) {
+void append_warnings(
+    std::vector<TransferWarning>* destination,
+    const std::vector<TransferWarning>& source
+) {
     destination->insert(destination->end(), source.begin(), source.end());
 }
 

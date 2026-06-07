@@ -34,7 +34,11 @@ TunnelOpenMetadata parse_tunnel_open_metadata(const PortTunnelFrame& frame) {
         }
         return parsed;
     } catch (const Json::exception& ex) {
-        throw PortForwardError(400, "invalid_port_tunnel", std::string("invalid tunnel open metadata: ") + ex.what());
+        throw PortForwardError(
+            400,
+            "invalid_port_tunnel",
+            std::string("invalid tunnel open metadata: ") + ex.what()
+        );
     }
 }
 
@@ -45,7 +49,11 @@ TunnelCloseMetadata parse_tunnel_close_metadata(const PortTunnelFrame& frame) {
         parsed.generation = meta.at("generation").get<std::uint64_t>();
         return parsed;
     } catch (const Json::exception& ex) {
-        throw PortForwardError(400, "invalid_port_tunnel", std::string("invalid tunnel close metadata: ") + ex.what());
+        throw PortForwardError(
+            400,
+            "invalid_port_tunnel",
+            std::string("invalid tunnel close metadata: ") + ex.what()
+        );
     }
 }
 
@@ -88,9 +96,12 @@ void run_port_tunnel_connection(
     tunnel->run();
 }
 
-PortTunnelConnection::PortTunnelConnection(SOCKET client, const std::shared_ptr<PortTunnelService>& service)
-    : client_(client), service_(service), sender_(new PortTunnelSender(client, service)), generation_(0ULL),
-      mode_(PortTunnelMode::Unopened), protocol_(PortTunnelProtocol::None) {
+PortTunnelConnection::PortTunnelConnection(
+    SOCKET client,
+    const std::shared_ptr<PortTunnelService>& service
+)
+    : client_(client), service_(service), sender_(new PortTunnelSender(client, service)),
+      generation_(0ULL), mode_(PortTunnelMode::Unopened), protocol_(PortTunnelProtocol::None) {
 }
 
 bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
@@ -124,7 +135,8 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
             mark_closed();
             return false;
         }
-        const unsigned long wait_ms = deadline.remaining_ms_bounded(RETAINED_SOCKET_POLL_TIMEOUT_MS);
+        const unsigned long wait_ms =
+            deadline.remaining_ms_bounded(RETAINED_SOCKET_POLL_TIMEOUT_MS);
         const int ready = wait_socket_readable(client_, wait_ms);
         if (ready < 0) {
             log_message(
@@ -142,7 +154,8 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
         if (ready == 0) {
             continue;
         }
-        const int received = recv_bounded(client_, reinterpret_cast<char*>(data + offset), size - offset, 0);
+        const int received =
+            recv_bounded(client_, reinterpret_cast<char*>(data + offset), size - offset, 0);
         if (received == 0) {
             log_message(
                 LOG_DEBUG,
@@ -177,8 +190,8 @@ bool PortTunnelConnection::read_preface() {
     if (!read_exact(bytes.data(), bytes.size())) {
         return false;
     }
-    return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()) ==
-           std::string(port_tunnel_preface(), port_tunnel_preface_size());
+    return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size())
+           == std::string(port_tunnel_preface(), port_tunnel_preface_size());
 }
 
 bool PortTunnelConnection::read_frame(PortTunnelFrame* frame) {
@@ -186,15 +199,18 @@ bool PortTunnelConnection::read_frame(PortTunnelFrame* frame) {
     if (!read_exact(bytes.data(), bytes.size())) {
         return false;
     }
-    const uint32_t meta_len = (static_cast<uint32_t>(bytes[8]) << 24) | (static_cast<uint32_t>(bytes[9]) << 16) |
-                              (static_cast<uint32_t>(bytes[10]) << 8) | static_cast<uint32_t>(bytes[11]);
-    const uint32_t data_len = (static_cast<uint32_t>(bytes[12]) << 24) | (static_cast<uint32_t>(bytes[13]) << 16) |
-                              (static_cast<uint32_t>(bytes[14]) << 8) | static_cast<uint32_t>(bytes[15]);
+    const uint32_t meta_len =
+        (static_cast<uint32_t>(bytes[8]) << 24) | (static_cast<uint32_t>(bytes[9]) << 16)
+        | (static_cast<uint32_t>(bytes[10]) << 8) | static_cast<uint32_t>(bytes[11]);
+    const uint32_t data_len =
+        (static_cast<uint32_t>(bytes[12]) << 24) | (static_cast<uint32_t>(bytes[13]) << 16)
+        | (static_cast<uint32_t>(bytes[14]) << 8) | static_cast<uint32_t>(bytes[15]);
     if (meta_len > PORT_TUNNEL_MAX_META_LEN || data_len > PORT_TUNNEL_MAX_DATA_LEN) {
         throw PortTunnelFrameError("port tunnel frame exceeds maximum length");
     }
     bytes.resize(PORT_TUNNEL_HEADER_LEN + meta_len + data_len);
-    if (meta_len + data_len > 0U && !read_exact(bytes.data() + PORT_TUNNEL_HEADER_LEN, meta_len + data_len)) {
+    if (meta_len + data_len > 0U
+        && !read_exact(bytes.data() + PORT_TUNNEL_HEADER_LEN, meta_len + data_len)) {
         return false;
     }
     *frame = decode_port_tunnel_frame(bytes);
@@ -314,7 +330,11 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
     {
         BasicLockGuard lock(state_mutex_);
         if (mode_ != PortTunnelMode::Unopened || session_.get() != nullptr) {
-            throw PortForwardError(400, "port_tunnel_already_attached", "port tunnel is already open");
+            throw PortForwardError(
+                400,
+                "port_tunnel_already_attached",
+                "port tunnel is already open"
+            );
         }
     }
 
@@ -350,7 +370,11 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
             const std::string session_id = meta.resume_session_id;
             session = service_->find_session(session_id);
             if (session.get() == nullptr) {
-                throw PortForwardError(400, "unknown_port_tunnel_session", "unknown port tunnel session");
+                throw PortForwardError(
+                    400,
+                    "unknown_port_tunnel_session",
+                    "unknown port tunnel session"
+                );
             }
         } else {
             session = service_->create_session();
@@ -363,8 +387,12 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
             protocol_ = tunnel_protocol;
         }
         if (meta.has_resume_session_id) {
-            resume_result =
-                service_->attach_resumed_session(session, shared_from_this(), generation, platform::monotonic_ms());
+            resume_result = service_->attach_resumed_session(
+                session,
+                shared_from_this(),
+                generation,
+                platform::monotonic_ms()
+            );
             if (resume_result != PortTunnelSessionResumeResult::Ready) {
                 {
                     BasicLockGuard lock(state_mutex_);
@@ -375,7 +403,11 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
                     }
                 }
                 if (resume_result == PortTunnelSessionResumeResult::Unknown) {
-                    throw PortForwardError(400, "unknown_port_tunnel_session", "unknown port tunnel session");
+                    throw PortForwardError(
+                        400,
+                        "unknown_port_tunnel_session",
+                        "unknown port tunnel session"
+                    );
                 }
                 if (resume_result == PortTunnelSessionResumeResult::AlreadyAttached) {
                     throw PortForwardError(
@@ -386,7 +418,11 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
                 }
                 if (resume_result == PortTunnelSessionResumeResult::Expired) {
                     service_->close_session(session);
-                    throw PortForwardError(400, "port_tunnel_resume_expired", "port tunnel resume expired");
+                    throw PortForwardError(
+                        400,
+                        "port_tunnel_resume_expired",
+                        "port tunnel resume expired"
+                    );
                 }
             }
         } else if (!service_->attach_new_session(session, shared_from_this(), generation)) {
@@ -399,12 +435,17 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
                 }
             }
             service_->close_session(session);
-            throw PortForwardError(400, "invalid_port_tunnel", "port tunnel session could not be attached");
+            throw PortForwardError(
+                400,
+                "invalid_port_tunnel",
+                "port tunnel session could not be attached"
+            );
         }
 
         const PortForwardLimitConfig& limits = service_->limits();
         const unsigned long resume_timeout_ms = RESUME_TIMEOUT_MS;
-        PortTunnelFrame ready = make_tunnel_ready_frame(limits, generation, &session->session_id, &resume_timeout_ms);
+        PortTunnelFrame ready =
+            make_tunnel_ready_frame(limits, generation, &session->session_id, &resume_timeout_ms);
         send_frame(ready);
         return;
     }

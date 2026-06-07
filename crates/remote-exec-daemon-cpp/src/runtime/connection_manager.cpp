@@ -35,9 +35,13 @@ private:
 } // namespace
 
 struct ConnectionManager::WorkerRecord {
-    WorkerRecord(unsigned long worker_id_value, SOCKET socket_value, std::function<void(SOCKET)> worker_main_value)
-        : worker_id(worker_id_value), socket(socket_value), worker_main(std::move(worker_main_value)), finished(false),
-          thread() {}
+    WorkerRecord(
+        unsigned long worker_id_value,
+        SOCKET socket_value,
+        std::function<void(SOCKET)> worker_main_value
+    )
+        : worker_id(worker_id_value), socket(socket_value),
+          worker_main(std::move(worker_main_value)), finished(false), thread() {}
 
     unsigned long worker_id;
     SOCKET socket;
@@ -153,7 +157,8 @@ void ConnectionManager::begin_shutdown() {
         BasicLockGuard lock(mutex_);
         shutting_down_ = true;
         state_changed_.broadcast();
-        for (std::map<unsigned long, std::shared_ptr<WorkerRecord>>::const_iterator it = workers_.begin();
+        for (std::map<unsigned long, std::shared_ptr<WorkerRecord>>::const_iterator it =
+                 workers_.begin();
              it != workers_.end();
              ++it) {
             snapshot.push_back(it->second);

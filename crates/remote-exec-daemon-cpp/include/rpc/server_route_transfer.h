@@ -10,9 +10,18 @@ struct StreamingTransferExport {
     ExportedPayload response_payload;
 };
 
-HttpResponse handle_transfer_export(const TransferRouteContext& context, const HttpRequest& request);
-HttpResponse handle_transfer_path_info(const TransferRouteContext& context, const HttpRequest& request);
-HttpResponse handle_transfer_import(const TransferRouteContext& context, const HttpRequest& request);
+HttpResponse handle_transfer_export(
+    const TransferRouteContext& context,
+    const HttpRequest& request
+);
+HttpResponse handle_transfer_path_info(
+    const TransferRouteContext& context,
+    const HttpRequest& request
+);
+HttpResponse handle_transfer_import(
+    const TransferRouteContext& context,
+    const HttpRequest& request
+);
 HttpResponse handle_streaming_transfer_import(
     const TransferRouteContext& context,
     const HttpRequest& request,
@@ -24,4 +33,7 @@ HttpResponse prepare_streaming_transfer_export(
     HttpRequestBodyStream* body,
     StreamingTransferExport* transfer
 );
-void run_streaming_transfer_export(const StreamingTransferExport& transfer, HttpChunkedResponseWriter* chunks);
+void run_streaming_transfer_export(
+    const StreamingTransferExport& transfer,
+    HttpChunkedResponseWriter* chunks
+);

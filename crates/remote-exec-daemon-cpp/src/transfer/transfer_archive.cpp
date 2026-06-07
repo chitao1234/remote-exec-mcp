@@ -6,7 +6,8 @@
 
 namespace transfer_archive {
 
-StringArchiveReader::StringArchiveReader(const std::string* archive) : archive_(archive), offset_(0) {
+StringArchiveReader::StringArchiveReader(const std::string* archive)
+    : archive_(archive), offset_(0) {
 }
 
 bool StringArchiveReader::read_exact_or_eof(char* data, std::size_t size) {
@@ -42,7 +43,11 @@ void read_exact_or_throw(
     }
 }
 
-std::string read_exact_string(TransferArchiveReader& reader, std::uint64_t size, const std::string& error_message) {
+std::string read_exact_string(
+    TransferArchiveReader& reader,
+    std::uint64_t size,
+    const std::string& error_message
+) {
     transfer_tar_codec::ensure_u64_fits_size_t(size, "tar entry size");
     std::string body(static_cast<std::size_t>(size), '\0');
     if (!body.empty()) {
@@ -51,11 +56,16 @@ std::string read_exact_string(TransferArchiveReader& reader, std::uint64_t size,
     return body;
 }
 
-void skip_exact(TransferArchiveReader& reader, std::uint64_t size, const std::string& error_message) {
+void skip_exact(
+    TransferArchiveReader& reader,
+    std::uint64_t size,
+    const std::string& error_message
+) {
     char buffer[8192];
     std::uint64_t remaining = size;
     while (remaining > 0U) {
-        const std::size_t requested = remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
+        const std::size_t requested =
+            remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
         read_exact_or_throw(reader, buffer, requested, error_message);
         remaining -= static_cast<std::uint64_t>(requested);
     }

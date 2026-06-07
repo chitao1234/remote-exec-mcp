@@ -53,8 +53,8 @@ std::string validate_relative_archive_path(const std::string& raw_path) {
     if (normalized[0] == '/') {
         throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive path must be relative");
     }
-    if (normalized.size() >= 2 && std::isalpha(static_cast<unsigned char>(normalized[0])) != 0 &&
-        normalized[1] == ':') {
+    if (normalized.size() >= 2 && std::isalpha(static_cast<unsigned char>(normalized[0])) != 0
+        && normalized[1] == ':') {
         throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive path must be relative");
     }
     if (normalized.rfind("//", 0) == 0) {
@@ -66,10 +66,16 @@ std::string validate_relative_archive_path(const std::string& raw_path) {
     for (std::size_t i = 0; i < parts.size(); ++i) {
         const std::string& part = parts[i];
         if (part.empty()) {
-            throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive path contains empty component");
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "archive path contains empty component"
+            );
         }
         if (part == "." || part == "..") {
-            throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive path escapes destination");
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "archive path escapes destination"
+            );
         }
         cleaned.push_back(part);
     }
@@ -87,23 +93,35 @@ std::string validate_relative_archive_path(const std::string& raw_path) {
 std::string validate_relative_symlink_target(const std::string& raw_target) {
     const std::string normalized = normalize_archive_separators(raw_target);
     if (normalized.empty() || normalized[0] == '/' || normalized.rfind("//", 0) == 0) {
-        throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive symlink target must be relative");
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "archive symlink target must be relative"
+        );
     }
-    if (normalized.size() >= 2 && std::isalpha(static_cast<unsigned char>(normalized[0])) != 0 &&
-        normalized[1] == ':') {
-        throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive symlink target must be relative");
+    if (normalized.size() >= 2 && std::isalpha(static_cast<unsigned char>(normalized[0])) != 0
+        && normalized[1] == ':') {
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "archive symlink target must be relative"
+        );
     }
 
     const std::vector<std::string> parts = split_archive_path(normalized);
     for (std::size_t i = 0; i < parts.size(); ++i) {
         if (parts[i].empty() || parts[i] == "." || parts[i] == "..") {
-            throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive symlink target escapes destination");
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "archive symlink target escapes destination"
+            );
         }
     }
     return normalized;
 }
 
-std::string materialize_archive_path(const std::string& destination_root, const std::string& relative_archive_path) {
+std::string materialize_archive_path(
+    const std::string& destination_root,
+    const std::string& relative_archive_path
+) {
     if (relative_archive_path == ".") {
         return destination_root;
     }
@@ -125,7 +143,10 @@ std::string top_level_archive_component(const std::string& relative_archive_path
     return parts.empty() ? "" : parts[0];
 }
 
-std::string resolved_symlink_target_path(const std::string& symlink_path, const std::string& relative_target) {
+std::string resolved_symlink_target_path(
+    const std::string& symlink_path,
+    const std::string& relative_target
+) {
     const std::string parent = path_utils::parent_directory(symlink_path);
     if (parent.empty()) {
         return relative_target;

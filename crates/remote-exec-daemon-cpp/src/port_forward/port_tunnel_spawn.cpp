@@ -87,13 +87,16 @@ bool spawn_tcp_write_thread(
     const std::shared_ptr<TunnelTcpStream>& stream,
     PortTunnelWorkerLease worker_lease
 ) {
-    return service
-        ->spawn_tracked_worker("spawn tcp write thread", std::move(worker_lease), [tunnel, stream_id, stream]() {
+    return service->spawn_tracked_worker(
+        "spawn tcp write thread",
+        std::move(worker_lease),
+        [tunnel, stream_id, stream]() {
 #ifdef REMOTE_EXEC_CPP_TESTING
             maybe_apply_forced_tcp_write_thread_start_delay();
 #endif
             tunnel->tcp_write_loop(stream_id, stream);
-        });
+        }
+    );
 }
 
 bool spawn_udp_read_thread(
@@ -106,6 +109,8 @@ bool spawn_udp_read_thread(
     return service->spawn_tracked_worker(
         "spawn udp read thread",
         std::move(worker_lease),
-        [tunnel, stream_id, socket_value]() { tunnel->udp_read_loop_connection_local(stream_id, socket_value); }
+        [tunnel, stream_id, socket_value]() {
+            tunnel->udp_read_loop_connection_local(stream_id, socket_value);
+        }
     );
 }

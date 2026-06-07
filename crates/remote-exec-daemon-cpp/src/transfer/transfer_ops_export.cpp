@@ -29,7 +29,11 @@ struct ExportContext {
 
 const unsigned int MAX_EXPORT_RECURSION_DEPTH = 256U;
 
-void add_warning(std::vector<TransferWarning>* warnings, const std::string& code, const std::string& message) {
+void add_warning(
+    std::vector<TransferWarning>* warnings,
+    const std::string& code,
+    const std::string& message
+) {
     warnings->push_back(TransferWarning{code, message});
 }
 
@@ -95,7 +99,10 @@ bool append_followed_symlink_entry(
         }
         path_utils::FileIdentity identity;
         if (path_utils::file_identity(child_path, &identity) && identity.valid) {
-            const std::pair<unsigned long long, unsigned long long> inode_key(identity.device, identity.file);
+            const std::pair<unsigned long long, unsigned long long> inode_key(
+                identity.device,
+                identity.file
+            );
             if (context->followed_inodes.count(inode_key) != 0) {
                 handle_skipped_symlink(context, child_path);
                 return true;
@@ -126,7 +133,8 @@ void append_directory_contents(
     for (std::size_t i = 0; i < entries.size(); ++i) {
         const DirectoryEntry& entry = entries[i];
         const std::string child_path = join_path(current_path, entry.name);
-        const std::string child_rel = current_rel.empty() ? entry.name : current_rel + "/" + entry.name;
+        const std::string child_rel =
+            current_rel.empty() ? entry.name : current_rel + "/" + entry.name;
 
         if (entry.is_directory) {
             if (exclude_matcher.is_excluded_directory(child_rel)) {
@@ -149,8 +157,14 @@ void append_directory_contents(
                 continue;
             }
 #ifdef _WIN32
-            if (context->options.symlink_mode == TransferSymlinkMode::Follow &&
-                append_followed_symlink_entry(archive, child_path, child_rel, exclude_matcher, context)) {
+            if (context->options.symlink_mode == TransferSymlinkMode::Follow
+                && append_followed_symlink_entry(
+                    archive,
+                    child_path,
+                    child_rel,
+                    exclude_matcher,
+                    context
+                )) {
                 continue;
             }
             handle_skipped_symlink(context, child_path);
@@ -161,7 +175,13 @@ void append_directory_contents(
                 continue;
             }
             if (context->options.symlink_mode == TransferSymlinkMode::Follow) {
-                if (append_followed_symlink_entry(archive, child_path, child_rel, exclude_matcher, context)) {
+                if (append_followed_symlink_entry(
+                        archive,
+                        child_path,
+                        child_rel,
+                        exclude_matcher,
+                        context
+                    )) {
                     continue;
                 }
                 handle_unsupported_entry(context, child_path);
@@ -194,7 +214,11 @@ void export_directory_as_tar(
     append_archive_terminator(archive);
 }
 
-void export_file_as_tar(TransferArchiveSink* archive, const std::string& absolute_path, const ExportOptions& options) {
+void export_file_as_tar(
+    TransferArchiveSink* archive,
+    const std::string& absolute_path,
+    const ExportOptions& options
+) {
 #ifdef _WIN32
     (void)options;
     append_file_entry_from_path(archive, SINGLE_FILE_ENTRY, absolute_path);
@@ -217,7 +241,10 @@ void export_file_as_tar(TransferArchiveSink* archive, const std::string& absolut
     append_archive_terminator(archive);
 }
 
-ExportOptions normalized_options(TransferSymlinkMode symlink_mode, const std::vector<std::string>& exclude) {
+ExportOptions normalized_options(
+    TransferSymlinkMode symlink_mode,
+    const std::vector<std::string>& exclude
+) {
     ExportOptions options;
     options.symlink_mode = symlink_mode;
     options.exclude = exclude;
@@ -253,7 +280,10 @@ void validate_export_path(const std::string& absolute_path, const ExportOptions&
 
 } // namespace
 
-TransferSourceType export_path_source_type(const std::string& absolute_path, TransferSymlinkMode symlink_mode) {
+TransferSourceType export_path_source_type(
+    const std::string& absolute_path,
+    TransferSymlinkMode symlink_mode
+) {
     const ExportOptions options = normalized_options(symlink_mode, std::vector<std::string>());
     validate_export_path(absolute_path, options);
 #ifndef _WIN32
@@ -261,17 +291,20 @@ TransferSourceType export_path_source_type(const std::string& absolute_path, Tra
         return TransferSourceType::File;
     }
 #endif
-    if (is_regular_file(absolute_path) ||
-        (is_symlink_path(absolute_path) && options.symlink_mode == TransferSymlinkMode::Follow &&
-         is_regular_file_follow(absolute_path))) {
+    if (is_regular_file(absolute_path)
+        || (is_symlink_path(absolute_path) && options.symlink_mode == TransferSymlinkMode::Follow
+            && is_regular_file_follow(absolute_path))) {
         return TransferSourceType::File;
     }
-    if (is_directory(absolute_path) ||
-        (is_symlink_path(absolute_path) && options.symlink_mode == TransferSymlinkMode::Follow &&
-         is_directory_follow(absolute_path))) {
+    if (is_directory(absolute_path)
+        || (is_symlink_path(absolute_path) && options.symlink_mode == TransferSymlinkMode::Follow
+            && is_directory_follow(absolute_path))) {
         return TransferSourceType::Directory;
     }
-    throw TransferFailure(TransferRpcCode::SourceUnsupported, "transfer source must be a regular file or directory");
+    throw TransferFailure(
+        TransferRpcCode::SourceUnsupported,
+        "transfer source must be a regular file or directory"
+    );
 }
 
 void export_path_to_sink_as(
@@ -295,9 +328,15 @@ void export_path_to_sink_as(
     } else if (source_type == TransferSourceType::Directory) {
         export_directory_as_tar(&sink, absolute_path, exclude_matcher, &context);
     } else if (source_type == TransferSourceType::Multiple) {
-        throw TransferFailure(TransferRpcCode::SourceUnsupported, "multiple source type is only supported for import");
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "multiple source type is only supported for import"
+        );
     } else {
-        throw TransferFailure(TransferRpcCode::SourceUnsupported, "unsupported transfer source type");
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "unsupported transfer source type"
+        );
     }
 }
 
@@ -321,6 +360,7 @@ ExportedPayload export_path(
 ) {
     std::string archive;
     StringArchiveSink sink(&archive);
-    const TransferSourceType source_type = export_path_to_sink(sink, absolute_path, symlink_mode, exclude, authorizer);
+    const TransferSourceType source_type =
+        export_path_to_sink(sink, absolute_path, symlink_mode, exclude, authorizer);
     return ExportedPayload{source_type, archive};
 }

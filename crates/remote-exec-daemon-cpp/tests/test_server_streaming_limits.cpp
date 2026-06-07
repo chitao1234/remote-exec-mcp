@@ -91,7 +91,8 @@ static void assert_tcp_accept_read_thread_failure_drops_before_accept(const fs::
     close_tunnel(&client_socket, &server_thread);
 }
 
-static void assert_retained_tcp_accept_read_thread_failure_drops_before_accept(const fs::path& root) {
+static void assert_retained_tcp_accept_read_thread_failure_drops_before_accept(const fs::path& root
+) {
     TestDaemonState state;
     initialize_state(state, root);
 
@@ -214,11 +215,18 @@ static void assert_retained_tcp_accept_pressure_is_local_drop(const fs::path& ro
     close_tunnel(&connect_client, &connect_thread);
 }
 
-static std::thread accept_and_send_tcp_payload(SOCKET listener_socket, const std::vector<unsigned char>& payload) {
+static std::thread accept_and_send_tcp_payload(
+    SOCKET listener_socket,
+    const std::vector<unsigned char>& payload
+) {
     return std::thread([listener_socket, payload]() {
         UniqueSocket accepted(accept(listener_socket, NULL, NULL));
         TEST_ASSERT(accepted.valid());
-        send_all_bytes(accepted.get(), reinterpret_cast<const char*>(payload.data()), payload.size());
+        send_all_bytes(
+            accepted.get(),
+            reinterpret_cast<const char*>(payload.data()),
+            payload.size()
+        );
         platform::sleep_ms(TCP_PAYLOAD_DRAIN_MARGIN_MS);
     });
 }
@@ -246,7 +254,11 @@ static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::pa
 
     send_tunnel_frame(
         client_socket.get(),
-        json_frame(PortTunnelFrameType::TcpConnect, 7U, Json{{"endpoint", closed_loopback_tcp_endpoint()}})
+        json_frame(
+            PortTunnelFrameType::TcpConnect,
+            7U,
+            Json{{"endpoint", closed_loopback_tcp_endpoint()}}
+        )
     );
     assert_tunnel_error_code(read_tunnel_frame(client_socket.get()), "port_connect_failed");
 
@@ -308,7 +320,10 @@ static void assert_active_tcp_accept_limit_is_enforced_and_released(const fs::pa
     assert_forward_drop(drop_report, "tcp_stream", "port_tunnel_limit_exceeded");
     refused_peer.reset();
 
-    send_tunnel_frame(client_socket.get(), empty_frame(PortTunnelFrameType::Close, first_accept.stream_id));
+    send_tunnel_frame(
+        client_socket.get(),
+        empty_frame(PortTunnelFrameType::Close, first_accept.stream_id)
+    );
     TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
     first_peer.reset();
 
@@ -375,7 +390,8 @@ static void assert_udp_queued_byte_pressure_reports_drop(const fs::path& root) {
             0,
             destination.sockaddr_ptr(),
             destination.address_len
-        ) == static_cast<int>(payload.size())
+        )
+        == static_cast<int>(payload.size())
     );
 
     PortTunnelFrame drop_report;
@@ -400,7 +416,11 @@ static void assert_partial_tunnel_frame_times_out(const fs::path& root) {
         static_cast<unsigned char>(PortTunnelFrameType::TcpData),
         0U,
     };
-    send_all_bytes(client_socket.get(), reinterpret_cast<const char*>(partial_header), sizeof(partial_header));
+    send_all_bytes(
+        client_socket.get(),
+        reinterpret_cast<const char*>(partial_header),
+        sizeof(partial_header)
+    );
 
     server_thread.join();
     client_socket.reset();
@@ -463,7 +483,10 @@ static void assert_tcp_data_write_pressure_does_not_block_control_frames(TestDae
     PortTunnelFrame heartbeat = empty_frame(PortTunnelFrameType::TunnelHeartbeat, 0U);
     heartbeat.meta = Json{{"nonce", 1}}.dump();
     for (int i = 0; i < 8; ++i) {
-        send_tunnel_frame(client_socket.get(), data_frame(PortTunnelFrameType::TcpData, 1U, payload));
+        send_tunnel_frame(
+            client_socket.get(),
+            data_frame(PortTunnelFrameType::TcpData, 1U, payload)
+        );
     }
     send_tunnel_frame(client_socket.get(), heartbeat);
 

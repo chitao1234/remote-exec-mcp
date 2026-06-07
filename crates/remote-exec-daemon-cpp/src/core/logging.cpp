@@ -80,8 +80,8 @@ static LogLevel parse_filter_value(const char* raw) {
 
         const std::string key = lowercase_ascii(trim_ascii(token.substr(0, equals)));
         const std::string value = token.substr(equals + 1);
-        if (key == "remote_exec_daemon_cpp" || key == "daemon_cpp" || key == "remote_exec_daemon_xp" ||
-            key == "daemon_xp") {
+        if (key == "remote_exec_daemon_cpp" || key == "daemon_cpp" || key == "remote_exec_daemon_xp"
+            || key == "daemon_xp") {
             LogLevel parsed = LOG_INFO;
             if (parse_level_token(value, &parsed)) {
                 component_level = parsed;
@@ -207,7 +207,10 @@ LogMessageBuilder& LogMessageBuilder::raw(const std::string& token) {
     return *this;
 }
 
-LogMessageBuilder& LogMessageBuilder::quoted_field(const std::string& name, const std::string& value) {
+LogMessageBuilder& LogMessageBuilder::quoted_field(
+    const std::string& name,
+    const std::string& value
+) {
     append_separator();
     out_ << name << "=`" << value << "`";
     return *this;

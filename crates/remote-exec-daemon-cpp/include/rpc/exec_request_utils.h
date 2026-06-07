@@ -41,5 +41,8 @@ struct ExecWriteRequestSpec {
     ExecPtySizeSpec pty_size;
 };
 
-ExecStartRequestSpec prepare_exec_start_request(const ExecRequestContext& context, const HttpRequest& request);
+ExecStartRequestSpec prepare_exec_start_request(
+    const ExecRequestContext& context,
+    const HttpRequest& request
+);
 ExecWriteRequestSpec prepare_exec_write_request(const HttpRequest& request);

@@ -26,7 +26,8 @@ struct ExecSessionWarning {
 
 struct ExecSessionResult {
     ExecSessionResult()
-        : has_daemon_session_id(false), running(false), started_at_ms(0), has_exit_code(false), exit_code(0) {}
+        : has_daemon_session_id(false), running(false), started_at_ms(0), has_exit_code(false),
+          exit_code(0) {}
 
     std::string daemon_session_id;
     bool has_daemon_session_id;

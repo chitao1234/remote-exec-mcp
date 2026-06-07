@@ -12,31 +12,39 @@
 #include <exception>
 #include <memory>
 
-static PortTunnelFrame read_required_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms) {
+static PortTunnelFrame read_required_tunnel_frame_with_timeout(
+    SOCKET socket,
+    unsigned long timeout_ms
+) {
     PortTunnelFrame frame;
     TEST_ASSERT(try_read_tunnel_frame_with_timeout(socket, timeout_ms, &frame));
     return frame;
 }
 
-static std::shared_ptr<PortTunnelConnection>
-make_test_tunnel_connection(const std::shared_ptr<PortTunnelService>& service) {
+static std::shared_ptr<PortTunnelConnection> make_test_tunnel_connection(
+    const std::shared_ptr<PortTunnelService>& service
+) {
     return std::shared_ptr<PortTunnelConnection>(new PortTunnelConnection(INVALID_SOCKET, service));
 }
 
 static void assert_session_transition_rules_are_strict() {
-    std::shared_ptr<PortTunnelService> service = create_port_tunnel_service(PortForwardLimitConfig());
+    std::shared_ptr<PortTunnelService> service =
+        create_port_tunnel_service(PortForwardLimitConfig());
     std::shared_ptr<PortTunnelSession> session = service->create_session();
     std::shared_ptr<PortTunnelConnection> first_connection = make_test_tunnel_connection(service);
     std::shared_ptr<PortTunnelConnection> second_connection = make_test_tunnel_connection(service);
 
     bool detached = true;
-    TEST_ASSERT(session->detach_until(platform::monotonic_deadline_after_ms(1000UL), &detached).get() == nullptr);
+    TEST_ASSERT(
+        session->detach_until(platform::monotonic_deadline_after_ms(1000UL), &detached).get()
+        == nullptr
+    );
     TEST_ASSERT(!detached);
     TEST_ASSERT(session->state == PortTunnelSessionState::New);
 
     TEST_ASSERT(
-        session->attach_resumed(first_connection, 1ULL, platform::monotonic_ms()) ==
-        PortTunnelSessionResumeResult::Unknown
+        session->attach_resumed(first_connection, 1ULL, platform::monotonic_ms())
+        == PortTunnelSessionResumeResult::Unknown
     );
     TEST_ASSERT(session->state == PortTunnelSessionState::New);
 
@@ -47,8 +55,8 @@ static void assert_session_transition_rules_are_strict() {
 
     TEST_ASSERT(!session->attach_new(second_connection, 2ULL));
     TEST_ASSERT(
-        session->attach_resumed(second_connection, 2ULL, platform::monotonic_ms()) ==
-        PortTunnelSessionResumeResult::AlreadyAttached
+        session->attach_resumed(second_connection, 2ULL, platform::monotonic_ms())
+        == PortTunnelSessionResumeResult::AlreadyAttached
     );
     TEST_ASSERT(session->state == PortTunnelSessionState::Attached);
     TEST_ASSERT(session->generation == 1ULL);
@@ -60,14 +68,17 @@ static void assert_session_transition_rules_are_strict() {
     TEST_ASSERT(session->state == PortTunnelSessionState::Detached);
     TEST_ASSERT(session->current_attachment().get() == nullptr);
 
-    TEST_ASSERT(session->detach_until(platform::monotonic_deadline_after_ms(1000UL), &detached).get() == nullptr);
+    TEST_ASSERT(
+        session->detach_until(platform::monotonic_deadline_after_ms(1000UL), &detached).get()
+        == nullptr
+    );
     TEST_ASSERT(!detached);
     TEST_ASSERT(!session->attach_new(first_connection, 3ULL));
     TEST_ASSERT(session->state == PortTunnelSessionState::Detached);
 
     TEST_ASSERT(
-        session->attach_resumed(second_connection, 2ULL, platform::monotonic_ms()) ==
-        PortTunnelSessionResumeResult::Ready
+        session->attach_resumed(second_connection, 2ULL, platform::monotonic_ms())
+        == PortTunnelSessionResumeResult::Ready
     );
     TEST_ASSERT(session->state == PortTunnelSessionState::Attached);
     TEST_ASSERT(session->generation == 2ULL);
@@ -76,8 +87,8 @@ static void assert_session_transition_rules_are_strict() {
     TEST_ASSERT(teardown.transitioned);
     TEST_ASSERT(session->state == PortTunnelSessionState::Closed);
     TEST_ASSERT(
-        session->attach_resumed(first_connection, 3ULL, platform::monotonic_ms()) ==
-        PortTunnelSessionResumeResult::Unknown
+        session->attach_resumed(first_connection, 3ULL, platform::monotonic_ms())
+        == PortTunnelSessionResumeResult::Unknown
     );
 
     service->shutdown();
@@ -86,7 +97,8 @@ static void assert_session_transition_rules_are_strict() {
 static void assert_attached_session_rejects_second_resume(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
-    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+    const PortTunnelFrame ready =
+        open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
     const std::string session_id = Json::parse(ready.meta).at("session_id").get<std::string>();
 
     close_tunnel(&client_socket, &server_thread);
@@ -98,7 +110,11 @@ static void assert_attached_session_rejects_second_resume(TestDaemonState& state
     open_tunnel(state, &second_client, &second_thread);
     send_tunnel_frame(
         second_client.get(),
-        json_frame(PortTunnelFrameType::TunnelOpen, 0U, tunnel_open_meta("listen", "tcp", 3ULL, session_id))
+        json_frame(
+            PortTunnelFrameType::TunnelOpen,
+            0U,
+            tunnel_open_meta("listen", "tcp", 3ULL, session_id)
+        )
     );
     assert_tunnel_error_code(
         read_required_tunnel_frame_with_timeout(second_client.get(), 1000UL),
@@ -110,11 +126,16 @@ static void assert_attached_session_rejects_second_resume(TestDaemonState& state
         json_frame(
             PortTunnelFrameType::TunnelClose,
             0U,
-            Json{{"forward_id", "fwd_cpp_test"}, {"generation", 2ULL}, {"reason", kTunnelCloseReasonOperatorClose}}
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 2ULL},
+                {"reason", kTunnelCloseReasonOperatorClose}
+            }
         )
     );
     TEST_ASSERT(
-        read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL).type == PortTunnelFrameType::TunnelClosed
+        read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL).type
+        == PortTunnelFrameType::TunnelClosed
     );
 
     close_tunnel(&second_client, &second_thread);
@@ -127,7 +148,8 @@ static void assert_detached_session_expiry_does_not_consume_worker_budget(const 
 
     UniqueSocket listen_client;
     std::thread listen_thread;
-    const PortTunnelFrame ready = open_v4_tunnel(state, &listen_client, &listen_thread, "listen", "tcp", 1ULL);
+    const PortTunnelFrame ready =
+        open_v4_tunnel(state, &listen_client, &listen_thread, "listen", "tcp", 1ULL);
     const Json ready_meta = Json::parse(ready.meta);
     const std::string session_id = ready_meta.at("session_id").get<std::string>();
 
@@ -155,10 +177,13 @@ static void assert_detached_session_expiry_does_not_consume_worker_budget(const 
     close_tunnel(&resumed_client, &resumed_thread);
 }
 
-static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(TestDaemonState& state) {
+static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(
+    TestDaemonState& state
+) {
     UniqueSocket client_socket;
     std::thread server_thread;
-    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+    const PortTunnelFrame ready =
+        open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
     const Json ready_meta = Json::parse(ready.meta);
     const std::string session_id = ready_meta.at("session_id").get<std::string>();
 
@@ -184,7 +209,11 @@ static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(T
         json_frame(
             PortTunnelFrameType::TunnelClose,
             0U,
-            Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", kTunnelCloseReasonOperatorClose}}
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 1ULL},
+                {"reason", kTunnelCloseReasonOperatorClose}
+            }
         )
     );
     const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
@@ -197,7 +226,8 @@ static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(T
 static void assert_tunnel_udp_bind_session_can_resume_after_transport_drop(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
-    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
+    const PortTunnelFrame ready =
+        open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
     const Json ready_meta = Json::parse(ready.meta);
     const std::string session_id = ready_meta.at("session_id").get<std::string>();
 
@@ -219,7 +249,17 @@ static void assert_tunnel_udp_bind_session_can_resume_after_transport_drop(TestD
     PortTunnelFrame datagram;
     bool received = false;
     for (int attempt = 0; attempt < 20 && !received; ++attempt) {
-        TEST_ASSERT(sendto(peer.get(), "resume-udp", 10, 0, destination.sockaddr_ptr(), destination.address_len) == 10);
+        TEST_ASSERT(
+            sendto(
+                peer.get(),
+                "resume-udp",
+                10,
+                0,
+                destination.sockaddr_ptr(),
+                destination.address_len
+            )
+            == 10
+        );
         received = try_read_tunnel_frame_with_timeout(client_socket.get(), 100UL, &datagram);
     }
     TEST_ASSERT(received);
@@ -231,7 +271,11 @@ static void assert_tunnel_udp_bind_session_can_resume_after_transport_drop(TestD
         json_frame(
             PortTunnelFrameType::TunnelClose,
             0U,
-            Json{{"forward_id", "fwd_cpp_test"}, {"generation", 2ULL}, {"reason", kTunnelCloseReasonOperatorClose}}
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 2ULL},
+                {"reason", kTunnelCloseReasonOperatorClose}
+            }
         )
     );
     const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
@@ -244,7 +288,8 @@ static void assert_tunnel_udp_bind_session_can_resume_after_transport_drop(TestD
 static void assert_resumed_session_rejects_stale_generation_close(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
-    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+    const PortTunnelFrame ready =
+        open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
     const Json ready_meta = Json::parse(ready.meta);
     const std::string session_id = ready_meta.at("session_id").get<std::string>();
 
@@ -265,14 +310,19 @@ static void assert_resumed_session_rejects_stale_generation_close(TestDaemonStat
         json_frame(
             PortTunnelFrameType::TunnelClose,
             0U,
-            Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", kTunnelCloseReasonOperatorClose}}
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 1ULL},
+                {"reason", kTunnelCloseReasonOperatorClose}
+            }
         )
     );
     PortTunnelFrame error = read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL);
     assert_tunnel_error_code(error, "port_tunnel_generation_mismatch");
 
     UniqueSocket peer(connect_port_forward_socket(endpoint, "tcp"));
-    const PortTunnelFrame accepted = read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL);
+    const PortTunnelFrame accepted =
+        read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL);
     TEST_ASSERT(accepted.type == PortTunnelFrameType::TcpAccept);
 
     send_tunnel_frame(
@@ -280,10 +330,15 @@ static void assert_resumed_session_rejects_stale_generation_close(TestDaemonStat
         json_frame(
             PortTunnelFrameType::TunnelClose,
             0U,
-            Json{{"forward_id", "fwd_cpp_test"}, {"generation", 2ULL}, {"reason", kTunnelCloseReasonOperatorClose}}
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 2ULL},
+                {"reason", kTunnelCloseReasonOperatorClose}
+            }
         )
     );
-    const PortTunnelFrame closed = read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL);
+    const PortTunnelFrame closed =
+        read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL);
     TEST_ASSERT(closed.type == PortTunnelFrameType::TunnelClosed);
     TEST_ASSERT(Json::parse(closed.meta).at("generation").get<uint64_t>() == 2ULL);
 
@@ -308,11 +363,16 @@ static void assert_retained_tcp_listener_closes_while_accept_worker_waits(TestDa
         json_frame(
             PortTunnelFrameType::TunnelClose,
             0U,
-            Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", kTunnelCloseReasonOperatorClose}}
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 1ULL},
+                {"reason", kTunnelCloseReasonOperatorClose}
+            }
         )
     );
 
-    const PortTunnelFrame closed = read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL);
+    const PortTunnelFrame closed =
+        read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL);
     TEST_ASSERT(closed.type == PortTunnelFrameType::TunnelClosed);
     TEST_ASSERT(Json::parse(closed.meta).at("generation").get<uint64_t>() == 1ULL);
 
@@ -337,11 +397,16 @@ static void assert_retained_udp_bind_closes_while_read_worker_waits(TestDaemonSt
         json_frame(
             PortTunnelFrameType::TunnelClose,
             0U,
-            Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", kTunnelCloseReasonOperatorClose}}
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 1ULL},
+                {"reason", kTunnelCloseReasonOperatorClose}
+            }
         )
     );
 
-    const PortTunnelFrame closed = read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL);
+    const PortTunnelFrame closed =
+        read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL);
     TEST_ASSERT(closed.type == PortTunnelFrameType::TunnelClosed);
     TEST_ASSERT(Json::parse(closed.meta).at("generation").get<uint64_t>() == 1ULL);
 
@@ -357,7 +422,8 @@ void assert_detached_session_releases_active_tcp_accept_budget(const fs::path& r
 
     UniqueSocket client_socket;
     std::thread server_thread;
-    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+    const PortTunnelFrame ready =
+        open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
     const Json ready_meta = Json::parse(ready.meta);
     const std::string session_id = ready_meta.at("session_id").get<std::string>();
 
@@ -406,7 +472,8 @@ static void assert_service_shutdown_releases_detached_retained_listener(TestDaem
     wait_until_bindable(endpoint);
 }
 
-static void assert_service_shutdown_closes_retained_listener_with_active_stream(const fs::path& root) {
+static void assert_service_shutdown_closes_retained_listener_with_active_stream(const fs::path& root
+) {
     TestDaemonState state;
     initialize_state(state, root);
 
@@ -439,7 +506,8 @@ static void assert_service_shutdown_closes_retained_listener_with_active_stream(
 }
 
 static void assert_service_shutdown_rejects_new_sessions() {
-    std::shared_ptr<PortTunnelService> service = create_port_tunnel_service(PortForwardLimitConfig());
+    std::shared_ptr<PortTunnelService> service =
+        create_port_tunnel_service(PortForwardLimitConfig());
     service->shutdown();
     service->shutdown();
 
@@ -453,9 +521,11 @@ static void assert_service_shutdown_rejects_new_sessions() {
 }
 
 static void assert_resource_close_paths_are_idempotent() {
-    std::shared_ptr<RetainedTcpListener> listener(
-        new RetainedTcpListener(1U, bind_port_forward_socket("127.0.0.1:0", "tcp"), PortTunnelBudgetLease())
-    );
+    std::shared_ptr<RetainedTcpListener> listener(new RetainedTcpListener(
+        1U,
+        bind_port_forward_socket("127.0.0.1:0", "tcp"),
+        PortTunnelBudgetLease()
+    ));
     TEST_ASSERT(listener->resource_state_snapshot() == PortTunnelResourceState::Open);
     listener->close();
     listener->close();
@@ -472,7 +542,9 @@ static void assert_resource_close_paths_are_idempotent() {
     TEST_ASSERT(udp_bind->resource_state_snapshot() == PortTunnelResourceState::Closed);
 
     ConnectedSocketPair sockets = make_connected_socket_pair();
-    std::shared_ptr<TunnelTcpStream> stream(new TunnelTcpStream(sockets.first.release(), PortTunnelBudgetLease()));
+    std::shared_ptr<TunnelTcpStream> stream(
+        new TunnelTcpStream(sockets.first.release(), PortTunnelBudgetLease())
+    );
     TEST_ASSERT(stream->resource_state_snapshot() == PortTunnelResourceState::Open);
     stream->close();
     stream->close();
@@ -486,7 +558,9 @@ static void assert_sender_close_handles_queued_control_frames() {
     ConnectedSocketPair sockets = make_connected_socket_pair();
     UniqueSocket server_socket(std::move(sockets.first));
     UniqueSocket peer_socket(std::move(sockets.second));
-    std::shared_ptr<PortTunnelConnection> connection(new PortTunnelConnection(server_socket.get(), service));
+    std::shared_ptr<PortTunnelConnection> connection(
+        new PortTunnelConnection(server_socket.get(), service)
+    );
 
     for (int i = 0; i < 4096; ++i) {
         connection->send_error(1U, "queued_close_test", "queued close test frame");
@@ -501,7 +575,8 @@ static void assert_sender_close_handles_queued_control_frames() {
 static void assert_expired_tunnel_session_is_released(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
-    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+    const PortTunnelFrame ready =
+        open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
     const Json ready_meta = Json::parse(ready.meta);
     const std::string session_id = ready_meta.at("session_id").get<std::string>();
     const unsigned long resume_timeout_ms = ready_meta.at("resume_timeout_ms").get<unsigned long>();
@@ -517,8 +592,8 @@ static void assert_expired_tunnel_session_is_released(TestDaemonState& state) {
     close_tunnel(&client_socket, &server_thread);
     wait_past_resume_timeout(resume_timeout_ms);
     const std::uint64_t removal_deadline = platform::monotonic_ms() + 2000ULL;
-    while (state.services.port_tunnel->find_session(session_id).get() != nullptr &&
-           platform::monotonic_ms() < removal_deadline) {
+    while (state.services.port_tunnel->find_session(session_id).get() != nullptr
+           && platform::monotonic_ms() < removal_deadline) {
         platform::sleep_ms(10UL);
     }
     TEST_ASSERT(state.services.port_tunnel->find_session(session_id).get() == nullptr);
@@ -526,7 +601,11 @@ static void assert_expired_tunnel_session_is_released(TestDaemonState& state) {
     open_tunnel(state, &client_socket, &server_thread);
     send_tunnel_frame(
         client_socket.get(),
-        json_frame(PortTunnelFrameType::TunnelOpen, 0U, tunnel_open_meta("listen", "tcp", 1ULL, session_id))
+        json_frame(
+            PortTunnelFrameType::TunnelOpen,
+            0U,
+            tunnel_open_meta("listen", "tcp", 1ULL, session_id)
+        )
     );
     const PortTunnelFrame error = read_tunnel_frame(client_socket.get());
     TEST_ASSERT(error.type == PortTunnelFrameType::Error);
@@ -539,13 +618,15 @@ static void assert_expired_tunnel_session_is_released(TestDaemonState& state) {
     TEST_ASSERT(rebound.valid());
 }
 
-static void assert_detached_listener_expiry_survives_last_external_service_ref(const fs::path& root) {
+static void assert_detached_listener_expiry_survives_last_external_service_ref(const fs::path& root
+) {
     TestDaemonState state;
     initialize_state(state, root);
 
     UniqueSocket client_socket;
     std::thread server_thread;
-    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+    const PortTunnelFrame ready =
+        open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
     const Json ready_meta = Json::parse(ready.meta);
     const unsigned long resume_timeout_ms = ready_meta.at("resume_timeout_ms").get<unsigned long>();
 
@@ -578,13 +659,15 @@ static void wait_until_udp_bindable(const std::string& endpoint) {
     std::abort();
 }
 
-static void assert_detached_udp_bind_expiry_survives_last_external_service_ref(const fs::path& root) {
+static void assert_detached_udp_bind_expiry_survives_last_external_service_ref(const fs::path& root
+) {
     TestDaemonState state;
     initialize_state(state, root);
 
     UniqueSocket client_socket;
     std::thread server_thread;
-    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
+    const PortTunnelFrame ready =
+        open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
     const Json ready_meta = Json::parse(ready.meta);
     const unsigned long resume_timeout_ms = ready_meta.at("resume_timeout_ms").get<unsigned long>();
 

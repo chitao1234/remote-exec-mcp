@@ -31,7 +31,11 @@ constexpr unsigned long DEFAULT_MAX_OPEN_SESSIONS = 64UL;
 struct YieldTimeOperationConfig {
     YieldTimeOperationConfig() : default_ms(0UL), max_ms(0UL), min_ms(0UL) {}
 
-    YieldTimeOperationConfig(unsigned long default_ms_value, unsigned long max_ms_value, unsigned long min_ms_value)
+    YieldTimeOperationConfig(
+        unsigned long default_ms_value,
+        unsigned long max_ms_value,
+        unsigned long min_ms_value
+    )
         : default_ms(default_ms_value), max_ms(max_ms_value), min_ms(min_ms_value) {}
 
     unsigned long default_ms;
@@ -103,7 +107,10 @@ struct DaemonConfig {
     FilesystemSandbox sandbox;
 };
 
-unsigned long
-resolve_yield_time_ms(const YieldTimeOperationConfig& config, bool has_requested_ms, unsigned long requested_ms);
+unsigned long resolve_yield_time_ms(
+    const YieldTimeOperationConfig& config,
+    bool has_requested_ms,
+    unsigned long requested_ms
+);
 
 DaemonConfig load_config(const std::string& path);

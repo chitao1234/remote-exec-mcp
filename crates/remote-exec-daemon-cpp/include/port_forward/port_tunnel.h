@@ -12,8 +12,9 @@ void run_port_tunnel_connection(
     std::shared_ptr<PortTunnelService>& service,
     const PortForwardLimitConfig& limits
 );
-std::shared_ptr<PortTunnelService>
-create_port_tunnel_service(const PortForwardLimitConfig& limits = PortForwardLimitConfig());
+std::shared_ptr<PortTunnelService> create_port_tunnel_service(
+    const PortForwardLimitConfig& limits = PortForwardLimitConfig()
+);
 
 #ifdef REMOTE_EXEC_CPP_TESTING
 void set_forced_tcp_read_thread_failures(unsigned long count);

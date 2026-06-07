@@ -36,7 +36,9 @@ namespace posix_fd {
 
 inline bool set_cloexec(int fd) {
     const int flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFD, 0); });
-    return flags >= 0 && posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFD, flags | FD_CLOEXEC); }) == 0;
+    return flags >= 0 && posix_eintr::retry<int>([&]() {
+                             return fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+                         }) == 0;
 }
 
 inline bool set_nonblocking(int fd, bool enabled = true) {
@@ -142,7 +144,8 @@ inline int dup_to(int source_fd, int target_fd) {
 
 inline int ioctl_retry_no_arg(int fd, unsigned long request) {
 #ifdef __HAIKU__
-    return posix_eintr::retry<int>([&]() { return ioctl(fd, request, static_cast<void*>(nullptr)); });
+    return posix_eintr::retry<int>([&]() { return ioctl(fd, request, static_cast<void*>(nullptr)); }
+    );
 #else
     return posix_eintr::retry<int>([&]() { return ioctl(fd, request, 0); });
 #endif
@@ -161,8 +164,9 @@ inline int change_directory(const char* path) {
 }
 
 inline bool pty_api_available() {
-    return REMOTE_EXEC_CPP_HAVE_POSIX_OPENPT && REMOTE_EXEC_CPP_HAVE_GRANTPT && REMOTE_EXEC_CPP_HAVE_UNLOCKPT &&
-           (REMOTE_EXEC_CPP_HAVE_PTSNAME_R || REMOTE_EXEC_CPP_HAVE_PTSNAME);
+    return REMOTE_EXEC_CPP_HAVE_POSIX_OPENPT && REMOTE_EXEC_CPP_HAVE_GRANTPT
+           && REMOTE_EXEC_CPP_HAVE_UNLOCKPT
+           && (REMOTE_EXEC_CPP_HAVE_PTSNAME_R || REMOTE_EXEC_CPP_HAVE_PTSNAME);
 }
 
 inline int open_pty_master(int flags) {

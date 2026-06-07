@@ -9,7 +9,10 @@ ServerRouteContext make_server_route_context(
     const AppSandboxState& sandbox,
     AppServices& services
 );
-PortTunnelRouteContext make_port_tunnel_route_context(const DaemonConfig& config, AppServices& services);
+PortTunnelRouteContext make_port_tunnel_route_context(
+    const DaemonConfig& config,
+    AppServices& services
+);
 HttpConnectionContext make_http_connection_context(
     const DaemonConfig& config,
     const AppMetadata& metadata,

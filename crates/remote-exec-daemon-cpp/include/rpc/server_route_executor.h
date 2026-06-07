@@ -16,7 +16,8 @@ enum RpcRouteBodyHandling {
 };
 
 struct RpcRouteBodyPolicy {
-    RpcRouteBodyPolicy() : handling(RPC_ROUTE_BODY_BUFFERED), max_body_bytes(0U), min_idle_timeout_ms(0UL) {}
+    RpcRouteBodyPolicy()
+        : handling(RPC_ROUTE_BODY_BUFFERED), max_body_bytes(0U), min_idle_timeout_ms(0UL) {}
 
     RpcRouteBodyHandling handling;
     std::size_t max_body_bytes;
@@ -47,11 +48,17 @@ struct RpcRouteExecution {
     RpcUpgradeHandler run_upgrade;
 };
 
-RpcRouteBodyPolicy rpc_route_body_policy(const HttpRequest& request, std::size_t default_max_body_bytes);
+RpcRouteBodyPolicy rpc_route_body_policy(
+    const HttpRequest& request,
+    std::size_t default_max_body_bytes
+);
 RpcRouteExecution execute_rpc_route(
     const ServerRouteContext& routes,
     const PortTunnelRouteContext& port_tunnel,
     const HttpRequest& request,
     HttpRequestBodyStream* body
 );
-HttpResponse execute_buffered_rpc_route(const ServerRouteContext& context, const HttpRequest& request);
+HttpResponse execute_buffered_rpc_route(
+    const ServerRouteContext& context,
+    const HttpRequest& request
+);

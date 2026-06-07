@@ -47,7 +47,8 @@ std::string build_windows_drive_path(char drive, const std::string& rest) {
 }
 
 bool translate_windows_posix_drive_path(const std::string& raw, std::string* output) {
-    if (raw.size() >= 2 && raw[0] == '/' && is_ascii_alpha(raw[1]) && (raw.size() == 2 || raw[2] == '/')) {
+    if (raw.size() >= 2 && raw[0] == '/' && is_ascii_alpha(raw[1])
+        && (raw.size() == 2 || raw[2] == '/')) {
         *output = build_windows_drive_path(raw[1], raw.substr(raw.size() == 2 ? 2 : 3));
         return true;
     }
@@ -98,7 +99,8 @@ bool is_absolute_for_policy(PathPolicy policy, const std::string& raw) {
         return !raw.empty() && raw[0] == '/';
     }
 
-    if (raw.size() >= 3 && is_ascii_alpha(raw[0]) && raw[1] == ':' && (raw[2] == '\\' || raw[2] == '/')) {
+    if (raw.size() >= 3 && is_ascii_alpha(raw[0]) && raw[1] == ':'
+        && (raw[2] == '\\' || raw[2] == '/')) {
         return true;
     }
     if (raw.rfind("\\\\", 0) == 0 || raw.rfind("//", 0) == 0) {
@@ -168,7 +170,8 @@ bool basename_for_policy(PathPolicy policy, const std::string& raw, std::string*
     }
     if (rest.empty()) {
         std::string segment = prefix;
-        while (!segment.empty() && (segment[segment.size() - 1] == ':' || segment[segment.size() - 1] == '\\')) {
+        while (!segment.empty()
+               && (segment[segment.size() - 1] == ':' || segment[segment.size() - 1] == '\\')) {
             segment.erase(segment.size() - 1);
         }
         while (!segment.empty() && segment[0] == '\\') {

@@ -19,7 +19,9 @@ bool PortTunnelService::spawn_udp_bind_loop(
     return spawn_tracked_worker(
         "spawn udp bind thread",
         std::move(worker_lease),
-        [self, session, stream_id, socket_value]() { self->udp_read_loop(session, stream_id, socket_value); }
+        [self, session, stream_id, socket_value]() {
+            self->udp_read_loop(session, stream_id, socket_value);
+        }
     );
 }
 
@@ -34,7 +36,8 @@ void PortTunnelService::udp_read_loop(
         if (attachment.get() == nullptr) {
             return;
         }
-        std::shared_ptr<PortTunnelConnection> connection = session->connection_for_attachment(attachment);
+        std::shared_ptr<PortTunnelConnection> connection =
+            session->connection_for_attachment(attachment);
         if (connection.get() == nullptr) {
             continue;
         }
@@ -60,7 +63,8 @@ void PortTunnelService::udp_read_loop(
             }
             connection = session->connection_for_attachment(attachment);
             if (connection.get() != nullptr) {
-                connection->send_error(stream_id, "port_read_failed", socket_error_message("select"));
+                connection
+                    ->send_error(stream_id, "port_read_failed", socket_error_message("select"));
             }
             return;
         }
@@ -95,7 +99,8 @@ void PortTunnelService::udp_read_loop(
             }
             connection = session->connection_for_attachment(attachment);
             if (connection.get() != nullptr) {
-                connection->send_error(stream_id, "port_read_failed", socket_error_message("recvfrom"));
+                connection
+                    ->send_error(stream_id, "port_read_failed", socket_error_message("recvfrom"));
             }
             return;
         }
@@ -110,7 +115,10 @@ void PortTunnelService::udp_read_loop(
         if (!connection->emit_session_udp_datagram(
                 attachment,
                 stream_id,
-                printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len),
+                printable_port_forward_endpoint(
+                    reinterpret_cast<sockaddr*>(&peer_address),
+                    peer_len
+                ),
                 payload
             )) {
             if (session_is_unavailable(session)) {
@@ -123,15 +131,28 @@ void PortTunnelService::udp_read_loop(
 void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
     const PortTunnelMode mode = current_mode();
     if (mode == PortTunnelMode::Listen) {
-        require_mode(PortTunnelMode::Listen, PortTunnelProtocol::Udp, "udp bind requires an open udp listen tunnel");
+        require_mode(
+            PortTunnelMode::Listen,
+            PortTunnelProtocol::Udp,
+            "udp bind requires an open udp listen tunnel"
+        );
     } else {
-        require_mode(PortTunnelMode::Connect, PortTunnelProtocol::Udp, "udp bind requires an open udp connect tunnel");
+        require_mode(
+            PortTunnelMode::Connect,
+            PortTunnelProtocol::Udp,
+            "udp bind requires an open udp connect tunnel"
+        );
     }
 
-    const std::string endpoint = normalize_port_forward_endpoint(frame_meta_string(frame, "endpoint"));
+    const std::string endpoint =
+        normalize_port_forward_endpoint(frame_meta_string(frame, "endpoint"));
     PortTunnelBudgetLease udp_bind_budget;
     if (!service_->try_acquire_udp_bind(&udp_bind_budget)) {
-        throw PortForwardError(400, "port_tunnel_limit_exceeded", "port tunnel udp bind limit reached");
+        throw PortForwardError(
+            400,
+            "port_tunnel_limit_exceeded",
+            "port tunnel udp bind limit reached"
+        );
     }
 
     std::shared_ptr<TunnelUdpSocket> socket_value;
@@ -161,11 +182,20 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
         if (install_result != SessionRetainedInstallResult::Installed) {
             socket_value->close();
             if (install_result == SessionRetainedInstallResult::Conflict) {
-                throw PortForwardError(400, "invalid_port_tunnel", "listen session already has a retained resource");
+                throw PortForwardError(
+                    400,
+                    "invalid_port_tunnel",
+                    "listen session already has a retained resource"
+                );
             }
             throw PortForwardError(400, "invalid_port_tunnel", "listen session is unavailable");
         }
-        if (!service_->spawn_udp_bind_loop(session, frame.stream_id, socket_value, std::move(worker_lease))) {
+        if (!service_->spawn_udp_bind_loop(
+                session,
+                frame.stream_id,
+                socket_value,
+                std::move(worker_lease)
+            )) {
             service_->close_session_retained_resource(session, frame.stream_id);
             send_worker_limit(frame.stream_id);
             return;
@@ -185,7 +215,8 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
                 socket_value,
                 std::move(worker_lease)
             )) {
-            std::shared_ptr<TunnelUdpSocket> removed_socket = connection_local_streams_.remove_udp(frame.stream_id);
+            std::shared_ptr<TunnelUdpSocket> removed_socket =
+                connection_local_streams_.remove_udp(frame.stream_id);
             if (removed_socket.get() != nullptr) {
                 removed_socket->close();
             } else {
@@ -260,9 +291,10 @@ void PortTunnelConnection::udp_read_loop_connection_local(
             return;
         }
         PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::UdpDatagram, stream_id);
-        frame.meta =
-            Json{{"peer", printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)}
-            }.dump();
+        frame.meta = Json{
+            {"peer",
+             printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)}
+        }.dump();
         frame.data.assign(buffer.begin(), buffer.begin() + received);
         if (!send_data_frame_or_drop_on_limit(frame)) {
             continue;
@@ -273,9 +305,17 @@ void PortTunnelConnection::udp_read_loop_connection_local(
 void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
     const PortTunnelMode mode = current_mode();
     if (mode == PortTunnelMode::Listen) {
-        require_mode(PortTunnelMode::Listen, PortTunnelProtocol::Udp, "udp datagram requires an open udp tunnel");
+        require_mode(
+            PortTunnelMode::Listen,
+            PortTunnelProtocol::Udp,
+            "udp datagram requires an open udp tunnel"
+        );
     } else {
-        require_mode(PortTunnelMode::Connect, PortTunnelProtocol::Udp, "udp datagram requires an open udp tunnel");
+        require_mode(
+            PortTunnelMode::Connect,
+            PortTunnelProtocol::Udp,
+            "udp datagram requires an open udp tunnel"
+        );
     }
 
     std::shared_ptr<TunnelUdpSocket> socket_value;

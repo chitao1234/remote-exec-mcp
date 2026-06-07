@@ -32,7 +32,11 @@ ParsedPortForwardEndpoint parse_port_forward_endpoint(const std::string& endpoin
     if (!endpoint.empty() && endpoint[0] == '[') {
         const std::size_t close = endpoint.find(']');
         if (close == std::string::npos) {
-            throw PortForwardError(400, "invalid_endpoint", "invalid endpoint `" + endpoint + "`; missing `]`");
+            throw PortForwardError(
+                400,
+                "invalid_endpoint",
+                "invalid endpoint `" + endpoint + "`; missing `]`"
+            );
         }
         if (close + 1U >= endpoint.size() || endpoint[close + 1U] != ':') {
             throw PortForwardError(

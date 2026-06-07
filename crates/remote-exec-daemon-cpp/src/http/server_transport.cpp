@@ -61,11 +61,14 @@ bool deadline_expired(std::uint64_t deadline_ms) {
     return deadline_ms != 0U && platform::monotonic_deadline_expired(deadline_ms);
 }
 
-unsigned long controlled_read_wait_ms(const HttpReadControl& read_control, std::uint64_t deadline_ms) {
+unsigned long controlled_read_wait_ms(
+    const HttpReadControl& read_control,
+    std::uint64_t deadline_ms
+) {
     unsigned long wait_ms = read_control.poll_timeout_ms;
     if (wait_ms == 0UL) {
-        wait_ms =
-            has_idle_deadline(read_control) ? read_control.idle_timeout_ms : DEFAULT_CONTROLLED_READ_POLL_TIMEOUT_MS;
+        wait_ms = has_idle_deadline(read_control) ? read_control.idle_timeout_ms
+                                                  : DEFAULT_CONTROLLED_READ_POLL_TIMEOUT_MS;
     }
     if (has_idle_deadline(read_control)) {
         const unsigned long remaining_ms = platform::monotonic_deadline_remaining_ms(deadline_ms);
@@ -74,7 +77,11 @@ unsigned long controlled_read_wait_ms(const HttpReadControl& read_control, std::
     return wait_ms == 0UL ? 1UL : wait_ms;
 }
 
-bool wait_for_controlled_read(SOCKET client, const HttpReadControl& read_control, std::uint64_t deadline_ms) {
+bool wait_for_controlled_read(
+    SOCKET client,
+    const HttpReadControl& read_control,
+    std::uint64_t deadline_ms
+) {
     for (;;) {
         if (read_control.should_stop()) {
             return false;
@@ -83,7 +90,8 @@ bool wait_for_controlled_read(SOCKET client, const HttpReadControl& read_control
             return true;
         }
 
-        const int ready = wait_socket_readable(client, controlled_read_wait_ms(read_control, deadline_ms));
+        const int ready =
+            wait_socket_readable(client, controlled_read_wait_ms(read_control, deadline_ms));
         if (ready > 0) {
             return true;
         }
@@ -99,7 +107,11 @@ bool wait_for_controlled_read(SOCKET client, const HttpReadControl& read_control
 
 } // namespace
 
-bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, HttpRequestHead* head) {
+bool try_read_http_request_head(
+    SOCKET client,
+    std::size_t max_header_bytes,
+    HttpRequestHead* head
+) {
     std::string data;
     char buffer[HTTP_READ_BUFFER_SIZE];
     std::size_t search_offset = 0;
@@ -233,9 +245,11 @@ HttpRequestBodyStream::HttpRequestBodyStream(
     std::size_t max_body_bytes,
     const HttpReadControl* read_control
 )
-    : client_(client), read_control_(read_control), read_deadline_ms_(read_deadline_after(read_control)),
-      raw_(initial_body), raw_offset_(0), framing_(framing), decoded_size_(0), max_body_bytes_(max_body_bytes),
-      remaining_content_length_(framing.content_length), remaining_chunk_size_(0), chunked_finished_(false) {
+    : client_(client), read_control_(read_control),
+      read_deadline_ms_(read_deadline_after(read_control)), raw_(initial_body), raw_offset_(0),
+      framing_(framing), decoded_size_(0), max_body_bytes_(max_body_bytes),
+      remaining_content_length_(framing.content_length), remaining_chunk_size_(0),
+      chunked_finished_(false) {
     if (!framing_.chunked && remaining_content_length_ > max_body_bytes_) {
         throw BadHttpRequest("http request body too large");
     }
@@ -262,12 +276,16 @@ bool HttpRequestBodyStream::has_remaining_body() const {
     return remaining_content_length_ != 0U;
 }
 
-bool HttpRequestBodyStream::discard_remaining_bounded(unsigned long timeout_ms, std::size_t max_bytes) {
+bool HttpRequestBodyStream::discard_remaining_bounded(
+    unsigned long timeout_ms,
+    std::size_t max_bytes
+) {
     if (!has_remaining_body()) {
         return true;
     }
 
-    const std::uint64_t deadline_ms = timeout_ms == 0UL ? 0U : platform::monotonic_deadline_after_ms(timeout_ms);
+    const std::uint64_t deadline_ms =
+        timeout_ms == 0UL ? 0U : platform::monotonic_deadline_after_ms(timeout_ms);
     if (framing_.chunked) {
         return try_discard_chunked_body(max_bytes, deadline_ms);
     }
@@ -279,7 +297,8 @@ std::size_t HttpRequestBodyStream::read_content_length_body(char* data, std::siz
         return 0;
     }
 
-    const std::size_t requested = remaining_content_length_ < max_size ? remaining_content_length_ : max_size;
+    const std::size_t requested =
+        remaining_content_length_ < max_size ? remaining_content_length_ : max_size;
     ensure_raw_available(1);
     const std::size_t available = raw_.size() - raw_offset_;
     const std::size_t copied = requested < available ? requested : available;
@@ -298,7 +317,8 @@ std::size_t HttpRequestBodyStream::read_chunked_body(char* data, std::size_t max
     while (remaining_chunk_size_ == 0U) {
         ensure_raw_line();
         const std::size_t line_end = raw_.find("\r\n", raw_offset_);
-        const std::size_t chunk_size = parse_chunk_size_line(raw_.substr(raw_offset_, line_end - raw_offset_));
+        const std::size_t chunk_size =
+            parse_chunk_size_line(raw_.substr(raw_offset_, line_end - raw_offset_));
         consume_raw(line_end + 2U - raw_offset_);
 
         if (chunk_size == 0U) {
@@ -403,7 +423,10 @@ void HttpRequestBodyStream::consume_chunk_trailers() {
     }
 }
 
-bool HttpRequestBodyStream::try_discard_content_length_body(std::size_t max_bytes, std::uint64_t deadline_ms) {
+bool HttpRequestBodyStream::try_discard_content_length_body(
+    std::size_t max_bytes,
+    std::uint64_t deadline_ms
+) {
     std::size_t discarded = 0U;
     while (remaining_content_length_ != 0U) {
         if (discarded >= max_bytes || deadline_expired(deadline_ms)) {
@@ -414,7 +437,8 @@ bool HttpRequestBodyStream::try_discard_content_length_body(std::size_t max_byte
         }
 
         const std::size_t available = raw_.size() - raw_offset_;
-        std::size_t step = remaining_content_length_ < available ? remaining_content_length_ : available;
+        std::size_t step =
+            remaining_content_length_ < available ? remaining_content_length_ : available;
         const std::size_t remaining_budget = max_bytes - discarded;
         if (step > remaining_budget) {
             step = remaining_budget;
@@ -431,7 +455,10 @@ bool HttpRequestBodyStream::try_discard_content_length_body(std::size_t max_byte
     return true;
 }
 
-bool HttpRequestBodyStream::try_discard_chunked_body(std::size_t max_bytes, std::uint64_t deadline_ms) {
+bool HttpRequestBodyStream::try_discard_chunked_body(
+    std::size_t max_bytes,
+    std::uint64_t deadline_ms
+) {
     std::size_t discarded = 0U;
     while (!chunked_finished_) {
         while (remaining_chunk_size_ == 0U) {
@@ -439,7 +466,8 @@ bool HttpRequestBodyStream::try_discard_chunked_body(std::size_t max_bytes, std:
                 return false;
             }
             const std::size_t line_end = raw_.find("\r\n", raw_offset_);
-            const std::size_t chunk_size = parse_chunk_size_line(raw_.substr(raw_offset_, line_end - raw_offset_));
+            const std::size_t chunk_size =
+                parse_chunk_size_line(raw_.substr(raw_offset_, line_end - raw_offset_));
             consume_raw(line_end + 2U - raw_offset_);
 
             if (chunk_size == 0U) {
@@ -461,7 +489,8 @@ bool HttpRequestBodyStream::try_discard_chunked_body(std::size_t max_bytes, std:
             }
 
             const std::size_t available = raw_.size() - raw_offset_;
-            std::size_t step = remaining_chunk_size_ < available ? remaining_chunk_size_ : available;
+            std::size_t step =
+                remaining_chunk_size_ < available ? remaining_chunk_size_ : available;
             const std::size_t remaining_budget = max_bytes - discarded;
             if (step > remaining_budget) {
                 step = remaining_budget;
@@ -493,8 +522,9 @@ bool HttpRequestBodyStream::try_append_from_socket_until(std::uint64_t deadline_
         return false;
     }
 
-    const unsigned long wait_ms = deadline_ms == 0U ? DEFAULT_CONTROLLED_READ_POLL_TIMEOUT_MS
-                                                    : platform::monotonic_deadline_remaining_ms(deadline_ms);
+    const unsigned long wait_ms = deadline_ms == 0U
+                                      ? DEFAULT_CONTROLLED_READ_POLL_TIMEOUT_MS
+                                      : platform::monotonic_deadline_remaining_ms(deadline_ms);
     const int ready = wait_socket_readable(client_, wait_ms == 0UL ? 1UL : wait_ms);
     if (ready <= 0) {
         return false;
@@ -510,7 +540,10 @@ bool HttpRequestBodyStream::try_append_from_socket_until(std::uint64_t deadline_
     return true;
 }
 
-bool HttpRequestBodyStream::try_ensure_raw_available_until(std::size_t size, std::uint64_t deadline_ms) {
+bool HttpRequestBodyStream::try_ensure_raw_available_until(
+    std::size_t size,
+    std::uint64_t deadline_ms
+) {
     while (raw_.size() - raw_offset_ < size) {
         if (!try_append_from_socket_until(deadline_ms)) {
             return false;
@@ -588,7 +621,10 @@ void send_all_bytes(SOCKET client, const char* data, std::size_t size) {
         const int sent = send_bounded(client, data + offset, size - offset, 0);
         if (sent <= 0) {
             const int error = last_socket_error();
-            throw SocketSendError(socket_error_message("send"), peer_disconnected_send_error(error));
+            throw SocketSendError(
+                socket_error_message("send"),
+                peer_disconnected_send_error(error)
+            );
         }
         offset += static_cast<std::size_t>(sent);
     }
@@ -622,7 +658,13 @@ SOCKET create_listener(const DaemonConfig& config) {
 
     std::vector<SocketAddress> addresses;
     std::string resolve_error;
-    if (!resolve_socket_addresses(config.listen_host.c_str(), port_buffer, query, &addresses, &resolve_error)) {
+    if (!resolve_socket_addresses(
+            config.listen_host.c_str(),
+            port_buffer,
+            query,
+            &addresses,
+            &resolve_error
+        )) {
         throw std::runtime_error("resolve listen address failed: " + resolve_error);
     }
 
