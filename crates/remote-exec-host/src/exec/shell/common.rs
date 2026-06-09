@@ -38,6 +38,7 @@ fn shell_command_with_login_flag(shell: &str, login: bool, cmd: &str) -> SpawnCo
         program: shell.to_string(),
         argv0: None,
         args,
+        windows_raw_arg_tail: None,
     }
 }
 
@@ -46,6 +47,7 @@ fn unix_shell_command(shell: &str, login: bool, cmd: &str) -> SpawnCommand {
         program: shell.to_string(),
         argv0: login.then(|| format!("-{}", shell_basename(shell))),
         args: vec!["-c".to_string(), cmd.to_string()],
+        windows_raw_arg_tail: None,
     }
 }
 
@@ -68,6 +70,7 @@ pub(super) fn shell_command_for_platform(
             program: shell.to_string(),
             argv0: None,
             args,
+            windows_raw_arg_tail: None,
         };
     }
 
@@ -78,15 +81,23 @@ pub(super) fn shell_command_for_platform(
     if is_windows {
         let mut args = Vec::new();
         if is_windows_cmd_family(&lower) {
+            let mut raw_arg_tail = String::new();
             if !login {
                 args.push("/D".to_string());
+                raw_arg_tail.push_str("/D ");
             }
             args.push("/C".to_string());
+            raw_arg_tail.push_str("/C");
+            if !cmd.is_empty() {
+                raw_arg_tail.push(' ');
+                raw_arg_tail.push_str(cmd);
+            }
             args.push(cmd.to_string());
             return SpawnCommand {
                 program: shell.to_string(),
                 argv0: None,
                 args,
+                windows_raw_arg_tail: Some(raw_arg_tail),
             };
         }
         args.push("/C".to_string());
@@ -95,6 +106,7 @@ pub(super) fn shell_command_for_platform(
             program: shell.to_string(),
             argv0: None,
             args,
+            windows_raw_arg_tail: None,
         };
     }
 
@@ -196,6 +208,7 @@ mod tests {
                 program: "/bin/sh".to_string(),
                 argv0: None,
                 args: vec!["-c".to_string(), "printf ok".to_string()],
+                windows_raw_arg_tail: None,
             }
         );
     }
@@ -209,6 +222,7 @@ mod tests {
                 program: "/bin/sh".to_string(),
                 argv0: Some("-sh".to_string()),
                 args: vec!["-c".to_string(), "printf ok".to_string()],
+                windows_raw_arg_tail: None,
             }
         );
     }
@@ -225,6 +239,7 @@ mod tests {
                     "-Command".to_string(),
                     "Write-Output ok".to_string(),
                 ],
+                windows_raw_arg_tail: None,
             }
         );
         assert_eq!(
@@ -233,6 +248,7 @@ mod tests {
                 program: "pwsh.exe".to_string(),
                 argv0: None,
                 args: vec!["-Command".to_string(), "Write-Output ok".to_string()],
+                windows_raw_arg_tail: None,
             }
         );
         assert_eq!(
@@ -241,6 +257,7 @@ mod tests {
                 program: "cmd.exe".to_string(),
                 argv0: None,
                 args: vec!["/D".to_string(), "/C".to_string(), "echo ok".to_string()],
+                windows_raw_arg_tail: Some("/D /C echo ok".to_string()),
             }
         );
         assert_eq!(
@@ -249,7 +266,18 @@ mod tests {
                 program: "cmd.exe".to_string(),
                 argv0: None,
                 args: vec!["/C".to_string(), "echo ok".to_string()],
+                windows_raw_arg_tail: Some("/C echo ok".to_string()),
             }
+        );
+        assert_eq!(
+            shell_command_for_platform(
+                true,
+                "C:\\Program Files\\cmd.exe",
+                false,
+                r#"echo "A & B""#
+            )
+            .windows_command_line(),
+            r#""C:\Program Files\cmd.exe" /D /C echo "A & B""#
         );
         assert_eq!(
             shell_command_for_platform(true, "bash.exe", false, "printf ok"),
@@ -257,6 +285,7 @@ mod tests {
                 program: "bash.exe".to_string(),
                 argv0: None,
                 args: vec!["-c".to_string(), "printf ok".to_string()],
+                windows_raw_arg_tail: None,
             }
         );
         assert_eq!(
@@ -265,6 +294,7 @@ mod tests {
                 program: "bash.exe".to_string(),
                 argv0: None,
                 args: vec!["-l".to_string(), "-c".to_string(), "printf ok".to_string()],
+                windows_raw_arg_tail: None,
             }
         );
     }

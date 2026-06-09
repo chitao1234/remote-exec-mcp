@@ -1,6 +1,8 @@
 use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 
 use portable_pty::{CommandBuilder, NativePtySystem, PtySystem};
@@ -21,6 +23,7 @@ pub struct SpawnCommand {
     pub program: String,
     pub argv0: Option<String>,
     pub args: Vec<String>,
+    pub windows_raw_arg_tail: Option<String>,
 }
 
 impl SpawnCommand {
@@ -30,6 +33,7 @@ impl SpawnCommand {
             program: argv[0].clone(),
             argv0: None,
             args: argv[1..].to_vec(),
+            windows_raw_arg_tail: None,
         })
     }
 
@@ -38,6 +42,58 @@ impl SpawnCommand {
             .chain(self.args.iter().cloned())
             .collect()
     }
+
+    pub fn windows_command_line(&self) -> String {
+        if let Some(raw_arg_tail) = &self.windows_raw_arg_tail {
+            let mut line = quote_windows_argument(&self.program);
+            if !raw_arg_tail.is_empty() {
+                line.push(' ');
+                line.push_str(raw_arg_tail);
+            }
+            line
+        } else {
+            command_line_from_argv(&self.argv())
+        }
+    }
+}
+
+fn command_line_from_argv(args: &[String]) -> String {
+    args.iter()
+        .map(|arg| quote_windows_argument(arg))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn quote_windows_argument(arg: &str) -> String {
+    if arg.is_empty() {
+        return "\"\"".to_string();
+    }
+    if !arg.chars().any(|ch| matches!(ch, ' ' | '\t' | '"')) {
+        return arg.to_string();
+    }
+
+    let mut quoted = String::from("\"");
+    let mut backslashes = 0;
+
+    for ch in arg.chars() {
+        match ch {
+            '\\' => backslashes += 1,
+            '"' => {
+                quoted.push_str(&"\\".repeat(backslashes * 2 + 1));
+                quoted.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                quoted.push_str(&"\\".repeat(backslashes));
+                backslashes = 0;
+                quoted.push(ch);
+            }
+        }
+    }
+
+    quoted.push_str(&"\\".repeat(backslashes * 2));
+    quoted.push('"');
+    quoted
 }
 
 pub fn spawn_with_windows_pty_backend_override(
@@ -89,8 +145,19 @@ pub(super) fn spawn_pty(
     if let Some(argv0) = &cmd.argv0 {
         builder.arg0(argv0);
     }
-    for arg in &cmd.args {
-        builder.arg(arg);
+    #[cfg(windows)]
+    if let Some(raw_arg_tail) = &cmd.windows_raw_arg_tail {
+        builder.raw_arg(raw_arg_tail);
+    } else {
+        for arg in &cmd.args {
+            builder.arg(arg);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        for arg in &cmd.args {
+            builder.arg(arg);
+        }
     }
     builder.cwd(cwd);
     super::environment::apply_overlay_builder(&mut builder, environment);
@@ -121,11 +188,18 @@ fn spawn_pipe(
     let stderr = writer.try_clone()?;
     let mut command = Command::new(&cmd.program);
     command
-        .args(&cmd.args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::from(writer))
         .stderr(Stdio::from(stderr));
+    #[cfg(windows)]
+    if let Some(raw_arg_tail) = &cmd.windows_raw_arg_tail {
+        command.raw_arg(raw_arg_tail);
+    } else {
+        command.args(&cmd.args);
+    }
+    #[cfg(not(windows))]
+    command.args(&cmd.args);
     #[cfg(unix)]
     if let Some(argv0) = &cmd.argv0 {
         command.arg0(argv0);
@@ -214,6 +288,79 @@ impl Utf8PipeDecoder {
         let output = String::from_utf8_lossy(&self.pending).into_owned();
         self.pending.clear();
         Some(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SpawnCommand, command_line_from_argv, quote_windows_argument};
+
+    #[test]
+    fn quote_windows_argument_leaves_simple_arguments_unchanged() {
+        assert_eq!(quote_windows_argument("plain"), "plain");
+        assert_eq!(quote_windows_argument(r#"C:\Tools\bin"#), r#"C:\Tools\bin"#);
+    }
+
+    #[test]
+    fn quote_windows_argument_quotes_whitespace_and_embedded_quotes() {
+        assert_eq!(quote_windows_argument("two words"), r#""two words""#);
+        assert_eq!(
+            quote_windows_argument(r#"quote "mark""#),
+            r#""quote \"mark\"""#
+        );
+    }
+
+    #[test]
+    fn quote_windows_argument_doubles_trailing_backslashes_before_closing_quote() {
+        assert_eq!(
+            quote_windows_argument(r#"C:\Program Files\Test Folder\"#),
+            r#""C:\Program Files\Test Folder\\""#,
+        );
+    }
+
+    #[test]
+    fn command_line_from_argv_quotes_each_argument_for_windows_spawn() {
+        assert_eq!(
+            command_line_from_argv(&[
+                "bash.exe".to_string(),
+                "-c".to_string(),
+                "printf ok".to_string(),
+            ]),
+            r#"bash.exe -c "printf ok""#
+        );
+    }
+
+    #[test]
+    fn command_line_from_argv_quotes_whole_argv_for_windows_spawn() {
+        assert_eq!(
+            command_line_from_argv(&[
+                "pwsh.exe".to_string(),
+                "plain".to_string(),
+                "two words".to_string(),
+                r#"quote "mark""#.to_string(),
+                r#"C:\Program Files\Test Folder\"#.to_string(),
+            ]),
+            r#"pwsh.exe plain "two words" "quote \"mark\"" "C:\Program Files\Test Folder\\""#,
+        );
+    }
+
+    #[test]
+    fn windows_command_line_appends_raw_arg_tail_verbatim() {
+        let cmd = SpawnCommand {
+            program: "cmd.exe".to_string(),
+            argv0: None,
+            args: vec![
+                "/D".to_string(),
+                "/C".to_string(),
+                r#"cmd /c "echo hello world""#.to_string(),
+            ],
+            windows_raw_arg_tail: Some(r#"/D /C cmd /c "echo hello world""#.to_string()),
+        };
+
+        assert_eq!(
+            cmd.windows_command_line(),
+            r#"cmd.exe /D /C cmd /c "echo hello world""#
+        );
     }
 }
 

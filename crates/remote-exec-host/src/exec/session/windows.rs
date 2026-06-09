@@ -83,7 +83,7 @@ fn compiled_winpty_probe() -> anyhow::Result<()> {
 
 #[cfg(feature = "winpty")]
 fn spawn_compiled_winpty_session(
-    cmd: &[String],
+    cmd: &SpawnCommand,
     cwd: &Path,
     environment: &ProcessEnvironment,
 ) -> anyhow::Result<LiveSession> {
@@ -98,7 +98,7 @@ fn spawn_compiled_winpty_session(
 
 #[cfg(not(feature = "winpty"))]
 fn spawn_compiled_winpty_session(
-    cmd: &[String],
+    cmd: &SpawnCommand,
     cwd: &Path,
     environment: &ProcessEnvironment,
 ) -> anyhow::Result<LiveSession> {
@@ -147,9 +147,7 @@ pub(super) fn spawn_tty_session(
         compiled_winpty_probe,
     ) {
         Some(PtyBackend::PortablePty) => spawn_pty(cmd, cwd, environment),
-        Some(PtyBackend::Winpty) => {
-            spawn_compiled_winpty_session(cmd.argv().as_slice(), cwd, environment)
-        }
+        Some(PtyBackend::Winpty) => spawn_compiled_winpty_session(cmd, cwd, environment),
         None => bail!("tty is not supported on this host"),
     }
 }
@@ -307,12 +305,10 @@ async fn smoke_test_windows_backend(
             Ok(session) => summarize_windows_backend_session(session, backend).await,
             Err(err) => format!("{} smoke test: spawn failed: {err}", backend.debug_name()),
         },
-        PtyBackend::Winpty => {
-            match spawn_compiled_winpty_session(cmd.argv().as_slice(), cwd, environment) {
-                Ok(session) => summarize_windows_backend_session(session, backend).await,
-                Err(err) => format!("{} smoke test: spawn failed: {err}", backend.debug_name()),
-            }
-        }
+        PtyBackend::Winpty => match spawn_compiled_winpty_session(cmd, cwd, environment) {
+            Ok(session) => summarize_windows_backend_session(session, backend).await,
+            Err(err) => format!("{} smoke test: spawn failed: {err}", backend.debug_name()),
+        },
     }
 }
 

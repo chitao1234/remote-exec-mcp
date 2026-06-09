@@ -8,6 +8,8 @@ use anyhow::Context;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use winptyrs::{AgentBuilder, AgentFlags, Child, EnvBlock, MouseMode, Pty, PtySize, SpawnConfig};
 
+use crate::exec::session::SpawnCommand;
+
 const WINPTY_LIVE_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const WINPTY_EXIT_DRAIN_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const WINPTY_DEFAULT_COLS: u16 = 120;
@@ -42,51 +44,6 @@ fn winpty_builder() -> AgentBuilder {
         .mouse_mode(MouseMode::None)
         .timeout_ms(WINPTY_OPEN_TIMEOUT_MS)
         .agent_flags(AgentFlags::COLOR_ESCAPES)
-}
-
-fn quote_windows_argument(arg: &str) -> String {
-    if arg.is_empty() {
-        return "\"\"".to_string();
-    }
-    if !arg.chars().any(|ch| matches!(ch, ' ' | '\t' | '"')) {
-        return arg.to_string();
-    }
-
-    let mut quoted = String::from("\"");
-    let mut backslashes = 0;
-
-    for ch in arg.chars() {
-        match ch {
-            '\\' => backslashes += 1,
-            '"' => {
-                quoted.push_str(&"\\".repeat(backslashes * 2 + 1));
-                quoted.push('"');
-                backslashes = 0;
-            }
-            _ => {
-                quoted.push_str(&"\\".repeat(backslashes));
-                backslashes = 0;
-                quoted.push(ch);
-            }
-        }
-    }
-
-    quoted.push_str(&"\\".repeat(backslashes * 2));
-    quoted.push('"');
-    quoted
-}
-
-fn command_line(args: &[String]) -> Option<OsString> {
-    if args.is_empty() {
-        return None;
-    }
-
-    Some(OsString::from(
-        args.iter()
-            .map(|arg| quote_windows_argument(arg))
-            .collect::<Vec<_>>()
-            .join(" "),
-    ))
 }
 
 fn resolve_executable_for_winpty(program: &str) -> OsString {
@@ -140,19 +97,17 @@ pub(crate) fn supports_winpty() -> anyhow::Result<()> {
 }
 
 pub(crate) fn spawn_winpty(
-    cmd: &[String],
+    cmd: &SpawnCommand,
     cwd: &Path,
     environment: EnvBlock,
 ) -> anyhow::Result<(WinptySession, UnboundedReceiver<String>)> {
     let mut pty = winpty_builder().open().map_err(map_winpty_error)?;
-    let mut spawn = SpawnConfig::new(resolve_executable_for_winpty(&cmd[0]))
+    let spawn = SpawnConfig::new(resolve_executable_for_winpty(&cmd.program))
         .cwd(cwd.as_os_str().to_os_string());
     // Winpty forwards this string to CreateProcessW as lpCommandLine. Include argv[0]
     // so programs that rely on CRT-style argv parsing, such as Git Bash, still see
     // switches like `-c` and `-l` in argv[1..] instead of losing them into argv[0].
-    if let Some(cmdline) = command_line(cmd) {
-        spawn = spawn.cmdline(cmdline);
-    }
+    let spawn = spawn.cmdline(OsString::from(cmd.windows_command_line()));
     let child = pty
         .spawn(spawn.env(environment))
         .map_err(map_winpty_error)?;
@@ -247,61 +202,58 @@ impl WinptySession {
 mod tests {
     use std::ffi::OsString;
 
-    use super::{command_line, quote_windows_argument};
+    use crate::exec::session::SpawnCommand;
 
     #[test]
-    fn quote_windows_argument_leaves_simple_arguments_unchanged() {
-        assert_eq!(quote_windows_argument("plain"), "plain");
-        assert_eq!(quote_windows_argument(r#"C:\Tools\bin"#), r#"C:\Tools\bin"#);
-    }
+    fn spawn_command_line_quotes_each_argument_for_winpty_spawn() {
+        let cmd = SpawnCommand::from_argv(&[
+            "bash.exe".to_string(),
+            "-c".to_string(),
+            "printf ok".to_string(),
+        ])
+        .unwrap();
 
-    #[test]
-    fn quote_windows_argument_quotes_whitespace_and_embedded_quotes() {
-        assert_eq!(quote_windows_argument("two words"), r#""two words""#);
         assert_eq!(
-            quote_windows_argument(r#"quote "mark""#),
-            r#""quote \"mark\"""#
+            OsString::from(cmd.windows_command_line()),
+            OsString::from(r#"bash.exe -c "printf ok""#)
         );
     }
 
     #[test]
-    fn quote_windows_argument_doubles_trailing_backslashes_before_closing_quote() {
-        assert_eq!(
-            quote_windows_argument(r#"C:\Program Files\Test Folder\"#),
-            r#""C:\Program Files\Test Folder\\""#,
-        );
-    }
+    fn spawn_command_line_quotes_whole_argv_for_winpty_spawn() {
+        let cmd = SpawnCommand::from_argv(&[
+            "pwsh.exe".to_string(),
+            "plain".to_string(),
+            "two words".to_string(),
+            r#"quote "mark""#.to_string(),
+            r#"C:\Program Files\Test Folder\"#.to_string(),
+        ])
+        .unwrap();
 
-    #[test]
-    fn command_line_quotes_each_argument_for_winpty_spawn() {
         assert_eq!(
-            command_line(&[
-                "bash.exe".to_string(),
-                "-c".to_string(),
-                "printf ok".to_string(),
-            ]),
-            Some(OsString::from(r#"bash.exe -c "printf ok""#,))
-        );
-    }
-
-    #[test]
-    fn command_line_quotes_whole_argv_for_winpty_spawn() {
-        assert_eq!(
-            command_line(&[
-                "pwsh.exe".to_string(),
-                "plain".to_string(),
-                "two words".to_string(),
-                r#"quote "mark""#.to_string(),
-                r#"C:\Program Files\Test Folder\"#.to_string(),
-            ]),
-            Some(OsString::from(
+            OsString::from(cmd.windows_command_line()),
+            OsString::from(
                 r#"pwsh.exe plain "two words" "quote \"mark\"" "C:\Program Files\Test Folder\\""#,
-            ))
+            )
         );
     }
 
     #[test]
-    fn command_line_returns_none_for_empty_argv() {
-        assert_eq!(command_line(&[]), None);
+    fn spawn_command_line_appends_cmd_raw_tail_for_winpty_spawn() {
+        let cmd = SpawnCommand {
+            program: "cmd.exe".to_string(),
+            argv0: None,
+            args: vec![
+                "/D".to_string(),
+                "/C".to_string(),
+                r#"echo "A & B""#.to_string(),
+            ],
+            windows_raw_arg_tail: Some(r#"/D /C echo "A & B""#.to_string()),
+        };
+
+        assert_eq!(
+            OsString::from(cmd.windows_command_line()),
+            OsString::from(r#"cmd.exe /D /C echo "A & B""#)
+        );
     }
 }

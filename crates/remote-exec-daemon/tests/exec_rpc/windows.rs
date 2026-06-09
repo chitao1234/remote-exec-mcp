@@ -70,6 +70,33 @@ min_ms = 3000
 }
 
 #[tokio::test]
+async fn exec_start_preserves_cmd_command_quotes_in_pipe_mode_on_windows() {
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+
+    assert_windows_cmd_command_quoting(&fixture, false, "pipe").await;
+}
+
+#[tokio::test]
+async fn exec_start_preserves_default_powershell_nested_cmd_quotes_on_windows() {
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_start_request(
+                r#"cmd /c "echo hello world""#,
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
+        )
+        .await;
+
+    assert_eq!(response.output().exit_code, Some(0), "{response:#?}");
+    assert_eq!(response.output().output.replace('\r', ""), "hello world\n");
+}
+
+#[tokio::test]
 async fn exec_start_rejects_login_requests_on_windows_when_disabled_by_config() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
         DEFAULT_TEST_TARGET,
@@ -992,6 +1019,13 @@ async fn exec_write_bare_lf_advances_windows_pty_line_reader() {
 async fn exec_start_preserves_complex_powershell_command_quoting_across_windows_pty_backends() {
     for_each_windows_pty_backend!(backend, fixture, {
         assert_windows_powershell_command_quoting(&fixture, backend).await;
+    });
+}
+
+#[tokio::test]
+async fn exec_start_preserves_cmd_command_quoting_across_windows_pty_backends() {
+    for_each_windows_pty_backend!(backend, fixture, {
+        assert_windows_cmd_command_quoting(&fixture, true, backend.name()).await;
     });
 }
 

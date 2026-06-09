@@ -477,6 +477,47 @@ async fn assert_windows_powershell_command_quoting(
 }
 
 #[cfg(windows)]
+async fn assert_windows_cmd_command_quoting(
+    fixture: &support::fixture::DaemonFixture,
+    tty: bool,
+    backend_name: &str,
+) {
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_cmd_start_request(
+                r#"echo "A & B"&for /f "tokens=1,2" %A in ("alpha beta") do @echo for:%A:%B"#,
+                tty,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
+        )
+        .await;
+
+    assert_eq!(
+        response.output().exit_code,
+        Some(0),
+        "{backend_name} response: {response:#?}"
+    );
+    let output = strip_terminal_noise(&response.output().output).replace('\r', "");
+    assert!(
+        output.contains("\"A & B\"\n"),
+        "{backend_name} output: {:?}",
+        response.output().output
+    );
+    assert!(
+        output.contains("for:alpha:beta\n"),
+        "{backend_name} output: {:?}",
+        response.output().output
+    );
+    assert!(
+        !output.contains(r#"\""#),
+        "{backend_name} output still has escaped quotes: {:?}",
+        response.output().output
+    );
+}
+
+#[cfg(windows)]
 async fn assert_windows_git_bash_tty_read_line(
     fixture: &support::fixture::DaemonFixture,
     backend: WindowsPtyTestBackend,
