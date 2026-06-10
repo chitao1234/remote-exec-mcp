@@ -338,8 +338,10 @@ shared filter string such as
 Windows command stdout and stderr are captured as pipe bytes and normalized to
 UTF-8 before they are returned over RPC. The daemon decodes those bytes with the
 system OEM code page first and falls back to the ANSI code page if that decode
-fails, which covers legacy console encodings such as GBK, Shift-JIS, and Big5
-when the target Windows installation provides those code-page tables.
+fails. If both code-page decodes fail, the daemon falls back to UTF-8 replacement
+decoding. This covers legacy console encodings such as GBK, Shift-JIS, and Big5
+when the target Windows installation provides those code-page tables, while
+invalid final-fallback UTF-8 byte sequences are replaced with `U+FFFD`.
 
 Daemon-controlled UTF-8 inputs such as JSON paths and command strings are
 converted with a local UTF-8/UTF-16 implementation instead of relying on the

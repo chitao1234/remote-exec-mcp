@@ -18,10 +18,6 @@
 
 namespace {
 
-std::string replacement_utf8() {
-    return win32_utf8::replacement_utf8();
-}
-
 void log_console_decode_fallback_once(
     const char* fallback,
     const std::exception& ex,
@@ -129,17 +125,10 @@ std::string decode_console_output_with_code_pages(
         try {
             return utf8_from_code_page(fallback_code_page, raw);
         } catch (const std::exception& fallback_ex) {
-            log_console_decode_fallback_once("replacement characters", fallback_ex, false);
-            std::string fallback;
-            for (std::size_t index = 0; index < raw.size(); ++index) {
-                const unsigned char ch = static_cast<unsigned char>(raw[index]);
-                if (ch == '\r' || ch == '\n' || ch == '\t' || (ch >= 0x20 && ch < 0x7F)) {
-                    fallback.push_back(static_cast<char>(ch));
-                } else {
-                    fallback += replacement_utf8();
-                }
-            }
-            return fallback;
+            log_console_decode_fallback_once("UTF-8 replacement decoding", fallback_ex, false);
+            raw += *carry;
+            carry->clear();
+            return utf8_stream_decode::decode_utf8_stream_chunk(carry, raw, flush);
         }
     }
 }

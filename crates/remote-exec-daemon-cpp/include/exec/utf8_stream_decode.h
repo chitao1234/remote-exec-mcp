@@ -13,6 +13,36 @@ inline bool is_continuation_byte(unsigned char ch) {
     return (ch & 0xC0U) == 0x80U;
 }
 
+inline bool is_valid_sequence_byte(unsigned char lead, std::size_t offset, unsigned char ch) {
+    if (offset > 1U) {
+        return is_continuation_byte(ch);
+    }
+
+    if (lead == 0xE0U) {
+        return ch >= 0xA0U && ch <= 0xBFU;
+    }
+    if (lead >= 0xE1U && lead <= 0xECU) {
+        return is_continuation_byte(ch);
+    }
+    if (lead == 0xEDU) {
+        return ch >= 0x80U && ch <= 0x9FU;
+    }
+    if (lead >= 0xEEU && lead <= 0xEFU) {
+        return is_continuation_byte(ch);
+    }
+    if (lead == 0xF0U) {
+        return ch >= 0x90U && ch <= 0xBFU;
+    }
+    if (lead >= 0xF1U && lead <= 0xF3U) {
+        return is_continuation_byte(ch);
+    }
+    if (lead == 0xF4U) {
+        return ch >= 0x80U && ch <= 0x8FU;
+    }
+
+    return is_continuation_byte(ch);
+}
+
 inline std::string decode_utf8_stream_chunk(
     std::string* carry,
     const std::string& raw_chunk,
@@ -44,21 +74,31 @@ inline std::string decode_utf8_stream_chunk(
             continue;
         }
 
-        if (index + expected > raw.size()) {
+        bool valid = true;
+        bool incomplete = false;
+        for (std::size_t offset = 1U; offset < expected; ++offset) {
+            if (index + offset >= raw.size()) {
+                incomplete = true;
+                break;
+            }
+
+            if (!is_valid_sequence_byte(
+                    ch,
+                    offset,
+                    static_cast<unsigned char>(raw[index + offset])
+                )) {
+                valid = false;
+                break;
+            }
+        }
+
+        if (incomplete) {
             if (!flush) {
                 carry->assign(raw, index, raw.size() - index);
                 break;
             }
             output += replacement_utf8();
             break;
-        }
-
-        bool valid = true;
-        for (std::size_t offset = 1U; offset < expected; ++offset) {
-            if (!is_continuation_byte(static_cast<unsigned char>(raw[index + offset]))) {
-                valid = false;
-                break;
-            }
         }
 
         if (!valid) {

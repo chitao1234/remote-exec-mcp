@@ -188,8 +188,19 @@ void test_decode_complete_dbcs_character_does_not_carry_trail_byte() {
 
 void test_invalid_decode_fallback() {
     std::string carry;
+    if (code_page_available(1252U)) {
+        TEST_ASSERT(
+            decode_console_output_for_test(99999U, 1252U, &carry, "caf\xE9", true) == "caf\xC3\xA9"
+        );
+        TEST_ASSERT(carry.empty());
+    }
+
+    TEST_ASSERT(decode_console_output_for_test(99999U, 99999U, &carry, "\xE4\xBD", false).empty());
+    TEST_ASSERT(carry == "\xE4\xBD");
     TEST_ASSERT(
-        decode_console_output_for_test(99999U, 99999U, &carry, "ok\xFF", true) == "ok\xEF\xBF\xBD"
+        decode_console_output_for_test(99999U, 99999U, &carry, "\xA0 ok\xFF", true)
+        == "\xE4\xBD\xA0"
+           " ok\xEF\xBF\xBD"
     );
     TEST_ASSERT(carry.empty());
 }
@@ -207,6 +218,32 @@ void test_utf8_stream_decode_flush_replaces_incomplete_suffix() {
     TEST_ASSERT(decode_utf8_stream_for_test(&carry, "\xED\x95", false).empty());
     TEST_ASSERT(carry == "\xED\x95");
     TEST_ASSERT(decode_utf8_stream_for_test(&carry, "", true) == "\xEF\xBF\xBD");
+    TEST_ASSERT(carry.empty());
+}
+
+void test_utf8_stream_decode_replaces_invalid_scalar_sequences() {
+    std::string carry;
+    TEST_ASSERT(
+        decode_utf8_stream_for_test(&carry, "\xE0\x80\x80", false)
+        == "\xEF\xBF\xBD"
+           "\xEF\xBF\xBD"
+           "\xEF\xBF\xBD"
+    );
+    TEST_ASSERT(carry.empty());
+    TEST_ASSERT(
+        decode_utf8_stream_for_test(&carry, "\xED\xA0\x80", false)
+        == "\xEF\xBF\xBD"
+           "\xEF\xBF\xBD"
+           "\xEF\xBF\xBD"
+    );
+    TEST_ASSERT(carry.empty());
+    TEST_ASSERT(
+        decode_utf8_stream_for_test(&carry, "\xF4\x90\x80\x80", false)
+        == "\xEF\xBF\xBD"
+           "\xEF\xBF\xBD"
+           "\xEF\xBF\xBD"
+           "\xEF\xBF\xBD"
+    );
     TEST_ASSERT(carry.empty());
 }
 
@@ -352,6 +389,7 @@ int main() {
     test_invalid_decode_fallback();
     test_utf8_stream_decode_carry();
     test_utf8_stream_decode_flush_replaces_incomplete_suffix();
+    test_utf8_stream_decode_replaces_invalid_scalar_sequences();
     test_terminal_output_filter_strips_winpty_control_sequences();
     test_terminal_output_filter_strips_osc_title_sequences();
     test_terminal_output_filter_handles_split_escape_sequences();

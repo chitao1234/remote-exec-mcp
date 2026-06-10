@@ -4,9 +4,17 @@ use std::os::unix::process::CommandExt;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
+#[cfg(windows)]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use portable_pty::{CommandBuilder, NativePtySystem, PtySystem};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::ERROR_INVALID_FLAGS;
+#[cfg(windows)]
+use windows_sys::Win32::Globalization::{
+    CP_UTF8, GetACP, GetOEMCP, IsDBCSLeadByteEx, MB_ERR_INVALID_CHARS, MultiByteToWideChar,
+};
 
 use crate::config::{ProcessEnvironment, WindowsPtyBackendOverride};
 
@@ -231,7 +239,7 @@ where
 {
     std::thread::spawn(move || {
         let mut buffer = [0u8; PIPE_OUTPUT_READ_BUFFER_SIZE];
-        let mut decoder = Utf8PipeDecoder::new();
+        let mut decoder = PipeDecoder::new();
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => {
@@ -259,10 +267,18 @@ where
     });
 }
 
+#[cfg(not(windows))]
+type PipeDecoder = Utf8PipeDecoder;
+
+#[cfg(windows)]
+type PipeDecoder = WindowsPipeDecoder;
+
+#[cfg(any(not(windows), test))]
 struct Utf8PipeDecoder {
     pending: Vec<u8>,
 }
 
+#[cfg(any(not(windows), test))]
 impl Utf8PipeDecoder {
     fn new() -> Self {
         Self {
@@ -271,24 +287,202 @@ impl Utf8PipeDecoder {
     }
 
     fn push(&mut self, bytes: &[u8]) -> Option<String> {
-        self.pending.extend_from_slice(bytes);
-        let complete_len = complete_utf8_lossy_prefix_len(&self.pending);
-        if complete_len == 0 {
-            return None;
-        }
-        let output = String::from_utf8_lossy(&self.pending[..complete_len]).into_owned();
-        self.pending.drain(..complete_len);
-        Some(output)
+        decode_utf8_lossy_stream_chunk(&mut self.pending, bytes, false)
     }
 
     fn finish(&mut self) -> Option<String> {
+        decode_utf8_lossy_stream_chunk(&mut self.pending, &[], true)
+    }
+}
+
+#[cfg(windows)]
+struct WindowsPipeDecoder {
+    primary_code_page: u32,
+    fallback_code_page: u32,
+    pending: Vec<u8>,
+}
+
+#[cfg(windows)]
+impl WindowsPipeDecoder {
+    fn new() -> Self {
+        unsafe { Self::with_code_pages(GetOEMCP(), GetACP()) }
+    }
+
+    fn with_code_pages(primary_code_page: u32, fallback_code_page: u32) -> Self {
+        Self {
+            primary_code_page,
+            fallback_code_page,
+            pending: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, bytes: &[u8]) -> Option<String> {
+        self.decode_chunk(bytes, false)
+    }
+
+    fn finish(&mut self) -> Option<String> {
+        self.decode_chunk(&[], true)
+    }
+
+    fn decode_chunk(&mut self, bytes: &[u8], flush: bool) -> Option<String> {
+        self.pending.extend_from_slice(bytes);
         if self.pending.is_empty() {
             return None;
         }
-        let output = String::from_utf8_lossy(&self.pending).into_owned();
-        self.pending.clear();
+
+        let mut raw = std::mem::take(&mut self.pending);
+        if !flush {
+            carry_incomplete_windows_code_page_suffix(
+                self.primary_code_page,
+                &mut raw,
+                &mut self.pending,
+            );
+            if raw.is_empty() {
+                return None;
+            }
+        }
+
+        let output = match utf8_from_windows_code_page(self.primary_code_page, &raw) {
+            Ok(output) => output,
+            Err(primary_err) => {
+                log_windows_console_ansi_fallback_once(&primary_err);
+                match utf8_from_windows_code_page(self.fallback_code_page, &raw) {
+                    Ok(output) => output,
+                    Err(fallback_err) => {
+                        log_windows_console_utf8_fallback_once(&fallback_err);
+                        raw.extend_from_slice(&self.pending);
+                        self.pending.clear();
+                        return decode_utf8_lossy_stream_chunk(&mut self.pending, &raw, flush);
+                    }
+                }
+            }
+        };
         Some(output)
     }
+}
+
+#[cfg(windows)]
+fn carry_incomplete_windows_code_page_suffix(
+    code_page: u32,
+    raw: &mut Vec<u8>,
+    carry: &mut Vec<u8>,
+) {
+    if code_page == CP_UTF8 {
+        let complete_len = complete_utf8_lossy_prefix_len(raw);
+        if complete_len < raw.len() {
+            carry.extend_from_slice(&raw[complete_len..]);
+            raw.truncate(complete_len);
+        }
+        return;
+    }
+
+    let mut index = 0;
+    while index < raw.len() {
+        if unsafe { IsDBCSLeadByteEx(code_page, raw[index]) } == 0 {
+            index += 1;
+            continue;
+        }
+
+        if index + 1 == raw.len() {
+            carry.push(raw[index]);
+            raw.truncate(index);
+            return;
+        }
+
+        index += 2;
+    }
+}
+
+#[cfg(windows)]
+static LOGGED_WINDOWS_CONSOLE_ANSI_FALLBACK: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
+static LOGGED_WINDOWS_CONSOLE_UTF8_FALLBACK: AtomicBool = AtomicBool::new(false);
+
+#[cfg(windows)]
+fn log_windows_console_ansi_fallback_once(err: &std::io::Error) {
+    if LOGGED_WINDOWS_CONSOLE_ANSI_FALLBACK
+        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+    {
+        tracing::warn!(
+            error = %err,
+            "Windows pipe output OEM decode failed; falling back to ANSI code page"
+        );
+    }
+}
+
+#[cfg(windows)]
+fn log_windows_console_utf8_fallback_once(err: &std::io::Error) {
+    if LOGGED_WINDOWS_CONSOLE_UTF8_FALLBACK
+        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+    {
+        tracing::warn!(
+            error = %err,
+            "Windows pipe output ANSI decode failed; falling back to UTF-8 replacement decoding"
+        );
+    }
+}
+
+#[cfg(windows)]
+fn utf8_from_windows_code_page(code_page: u32, raw: &[u8]) -> std::io::Result<String> {
+    if raw.is_empty() {
+        return Ok(String::new());
+    }
+
+    match wide_from_windows_code_page(code_page, MB_ERR_INVALID_CHARS, raw) {
+        Ok(wide) => Ok(String::from_utf16_lossy(&wide)),
+        Err(err) if err.raw_os_error() == Some(ERROR_INVALID_FLAGS as i32) => {
+            let wide = wide_from_windows_code_page(code_page, 0, raw)?;
+            Ok(String::from_utf16_lossy(&wide))
+        }
+        Err(err) => Err(err),
+    }
+}
+
+#[cfg(windows)]
+fn wide_from_windows_code_page(
+    code_page: u32,
+    flags: u32,
+    raw: &[u8],
+) -> std::io::Result<Vec<u16>> {
+    let raw_len = i32::try_from(raw.len()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Windows pipe output chunk is too large to decode",
+        )
+    })?;
+
+    let wide_len = unsafe {
+        MultiByteToWideChar(
+            code_page,
+            flags,
+            raw.as_ptr(),
+            raw_len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if wide_len <= 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    let mut wide = vec![0u16; wide_len as usize];
+    let written = unsafe {
+        MultiByteToWideChar(
+            code_page,
+            flags,
+            raw.as_ptr(),
+            raw_len,
+            wide.as_mut_ptr(),
+            wide_len,
+        )
+    };
+    if written <= 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    wide.truncate(written as usize);
+    Ok(wide)
 }
 
 #[cfg(test)]
@@ -380,9 +574,37 @@ fn complete_utf8_lossy_prefix_len(bytes: &[u8]) -> usize {
     }
 }
 
+fn decode_utf8_lossy_stream_chunk(
+    pending: &mut Vec<u8>,
+    bytes: &[u8],
+    flush: bool,
+) -> Option<String> {
+    pending.extend_from_slice(bytes);
+    if pending.is_empty() {
+        return None;
+    }
+
+    let complete_len = if flush {
+        pending.len()
+    } else {
+        complete_utf8_lossy_prefix_len(pending)
+    };
+    if complete_len == 0 {
+        return None;
+    }
+
+    let output = String::from_utf8_lossy(&pending[..complete_len]).into_owned();
+    pending.drain(..complete_len);
+    Some(output)
+}
+
 #[cfg(test)]
 mod exec_pipe_decoder_tests {
     use super::Utf8PipeDecoder;
+    #[cfg(windows)]
+    use super::{WindowsPipeDecoder, utf8_from_windows_code_page};
+    #[cfg(windows)]
+    use windows_sys::Win32::Globalization::CP_UTF8;
 
     #[test]
     fn split_multibyte_codepoint_is_emitted_once() {
@@ -411,5 +633,69 @@ mod exec_pipe_decoder_tests {
 
         assert_eq!(decoder.push(&[b'a', 0xe4, 0xbd]), Some("a".to_string()));
         assert_eq!(decoder.finish(), Some("\u{fffd}".to_string()));
+    }
+
+    #[cfg(windows)]
+    fn code_page_available(code_page: u32) -> bool {
+        utf8_from_windows_code_page(code_page, b"x").is_ok()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pipe_decoder_carries_split_dbcs_character() {
+        if !code_page_available(936) {
+            return;
+        }
+
+        let mut decoder = WindowsPipeDecoder::with_code_pages(936, 1252);
+
+        assert_eq!(decoder.push(&[0xc4]), None);
+        assert_eq!(decoder.push(&[0xe3]), Some("你".to_string()));
+        assert_eq!(decoder.finish(), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pipe_decoder_carries_split_utf8_when_console_code_page_is_utf8() {
+        let mut decoder = WindowsPipeDecoder::with_code_pages(CP_UTF8, 1252);
+
+        assert_eq!(decoder.push(&[0xe4, 0xbd]), None);
+        assert_eq!(decoder.push(&[0xa0]), Some("你".to_string()));
+        assert_eq!(decoder.finish(), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pipe_decoder_falls_back_to_ansi_code_page() {
+        if !code_page_available(1252) {
+            return;
+        }
+
+        let mut decoder = WindowsPipeDecoder::with_code_pages(99999, 1252);
+
+        assert_eq!(decoder.push(b"caf\xe9"), Some("café".to_string()));
+        assert_eq!(decoder.finish(), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pipe_decoder_falls_back_to_utf8_with_replacement() {
+        let mut decoder = WindowsPipeDecoder::with_code_pages(99999, 99998);
+
+        assert_eq!(
+            decoder.push(b"caf\xc3\xa9 ok\xff"),
+            Some("café ok\u{fffd}".to_string())
+        );
+        assert_eq!(decoder.finish(), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pipe_decoder_carries_split_utf8_during_utf8_fallback() {
+        let mut decoder = WindowsPipeDecoder::with_code_pages(99999, 99998);
+
+        assert_eq!(decoder.push(&[0xe4, 0xbd]), None);
+        assert_eq!(decoder.push(&[0xa0]), Some("你".to_string()));
+        assert_eq!(decoder.finish(), None);
     }
 }
