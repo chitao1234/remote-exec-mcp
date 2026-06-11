@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -79,39 +80,52 @@ std::string utf8_from_code_page(UINT code_page, const std::string& raw) {
     return utf8_from_wide(wide);
 }
 
-bool is_dbcs_lead_byte(UINT code_page, BYTE byte) {
-    CPINFO info;
-    if (GetCPInfo(code_page, &info) == 0 || info.MaxCharSize <= 1U) {
+bool code_page_decodes(UINT code_page, const char* raw, std::size_t raw_size) {
+    if (raw_size == 0U) {
+        return true;
+    }
+    if (raw_size > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
         return false;
     }
 
-    for (std::size_t index = 0; index + 1U < sizeof(info.LeadByte); index += 2U) {
-        const BYTE first = info.LeadByte[index];
-        const BYTE last = info.LeadByte[index + 1U];
-        if (first == 0 && last == 0) {
-            break;
-        }
-        if (first <= byte && byte <= last) {
-            return true;
-        }
+    DWORD flags = MB_ERR_INVALID_CHARS;
+    int wide_length =
+        MultiByteToWideChar(code_page, flags, raw, static_cast<int>(raw_size), nullptr, 0);
+    if (wide_length <= 0 && GetLastError() == ERROR_INVALID_FLAGS) {
+        flags = 0;
+        wide_length =
+            MultiByteToWideChar(code_page, flags, raw, static_cast<int>(raw_size), nullptr, 0);
     }
-    return false;
+    return wide_length > 0;
 }
 
-void carry_incomplete_dbcs_suffix(UINT code_page, std::string* raw, std::string* carry) {
-    for (std::size_t index = 0; index < raw->size();) {
-        if (!is_dbcs_lead_byte(code_page, static_cast<BYTE>((*raw)[index]))) {
-            ++index;
-            continue;
-        }
+unsigned int max_code_page_char_size(UINT code_page) {
+    CPINFO info;
+    if (GetCPInfo(code_page, &info) == 0 || info.MaxCharSize <= 1U) {
+        return 1U;
+    }
+    return info.MaxCharSize;
+}
 
-        if (index + 1U == raw->size()) {
-            carry->assign(1U, (*raw)[index]);
-            raw->erase(index);
+void carry_incomplete_code_page_suffix(UINT code_page, std::string* raw, std::string* carry) {
+    const unsigned int max_char_size = max_code_page_char_size(code_page);
+    if (max_char_size <= 1U || raw->empty()) {
+        return;
+    }
+
+    if (code_page_decodes(code_page, raw->data(), raw->size())) {
+        return;
+    }
+
+    const std::size_t max_suffix =
+        std::min<std::size_t>(raw->size(), static_cast<std::size_t>(max_char_size - 1U));
+    for (std::size_t suffix_size = 1U; suffix_size <= max_suffix; ++suffix_size) {
+        const std::size_t prefix_size = raw->size() - suffix_size;
+        if (prefix_size == 0U || code_page_decodes(code_page, raw->data(), prefix_size)) {
+            carry->assign(*raw, prefix_size, suffix_size);
+            raw->erase(prefix_size);
             return;
         }
-
-        index += 2U;
     }
 }
 
@@ -131,7 +145,7 @@ std::string decode_console_output_with_code_pages(
     }
 
     if (!flush) {
-        carry_incomplete_dbcs_suffix(primary_code_page, &raw, carry);
+        carry_incomplete_code_page_suffix(primary_code_page, &raw, carry);
         if (raw.empty()) {
             return "";
         }

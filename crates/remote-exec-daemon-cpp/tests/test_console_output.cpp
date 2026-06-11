@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <windows.h>
 
@@ -26,6 +27,43 @@ bool code_page_available(unsigned int code_page) {
     } catch (const std::exception&) {
         return false;
     }
+}
+
+std::string raw_from_code_page(unsigned int code_page, const std::wstring& wide) {
+    if (wide.empty()) {
+        return "";
+    }
+
+    const int length = WideCharToMultiByte(
+        code_page,
+        0,
+        wide.data(),
+        static_cast<int>(wide.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr
+    );
+    if (length <= 0) {
+        throw std::runtime_error("WideCharToMultiByte length failed");
+    }
+
+    std::string raw;
+    raw.resize(static_cast<std::size_t>(length));
+    if (WideCharToMultiByte(
+            code_page,
+            0,
+            wide.data(),
+            static_cast<int>(wide.size()),
+            &raw[0],
+            length,
+            nullptr,
+            nullptr
+        )
+        <= 0) {
+        throw std::runtime_error("WideCharToMultiByte failed");
+    }
+    return raw;
 }
 
 bool is_wine_runtime() {
@@ -156,11 +194,64 @@ void assert_decode_split_carry(
     TEST_ASSERT(carry.empty());
 }
 
+void assert_decode_split_chunks(
+    unsigned int code_page,
+    const std::vector<std::string>& chunks,
+    const std::string& expected_utf8
+) {
+    if (!code_page_available(code_page)) {
+        return;
+    }
+    TEST_ASSERT(!chunks.empty());
+
+    std::string carry;
+    for (std::size_t index = 0; index + 1U < chunks.size(); ++index) {
+        TEST_ASSERT(
+            decode_console_output_for_test(code_page, 1252U, &carry, chunks[index], false).empty()
+        );
+        TEST_ASSERT(!carry.empty());
+    }
+
+    TEST_ASSERT(
+        decode_console_output_for_test(code_page, 1252U, &carry, chunks.back(), false)
+        == expected_utf8
+    );
+    TEST_ASSERT(carry.empty());
+}
+
 void test_decode_carry() {
     assert_decode_split_carry(936U, "\xC4", "\xE3", "\xE4\xBD\xA0");
     assert_decode_split_carry(932U, "\x82", "\xB1", "\xE3\x81\x93");
     assert_decode_split_carry(950U, "\xA4", "\xA4", "\xE4\xB8\xAD");
     assert_decode_split_carry(949U, "\xC7", "\xD1", "\xED\x95\x9C");
+}
+
+void test_decode_carries_split_utf8_code_page() {
+    assert_decode_split_chunks(65001U, {"\xE4\xBD", "\xA0"}, "\xE4\xBD\xA0");
+    assert_decode_split_chunks(65001U, {"\xF0", "\x9F\x98", "\x80"}, "\xF0\x9F\x98\x80");
+}
+
+void test_decode_carries_split_four_byte_code_page_sequence() {
+    if (!code_page_available(54936U)) {
+        return;
+    }
+
+    const unsigned int surrogate_pair[] = {0xD83DU, 0xDE00U};
+    std::string raw;
+    try {
+        raw = raw_from_code_page(54936U, wide_from_units(surrogate_pair, 2U));
+    } catch (const std::exception&) {
+        return;
+    }
+    if (raw.size() != 4U) {
+        return;
+    }
+
+    assert_decode_split_chunks(
+        54936U,
+        {raw.substr(0U, 2U), raw.substr(2U, 1U), raw.substr(3U)},
+        "\xF0\x9F\x98\x80"
+    );
 }
 
 void assert_decode_without_false_carry(
@@ -385,6 +476,8 @@ int main() {
     test_invalid_utf8_to_wide();
     test_code_page_decode();
     test_decode_carry();
+    test_decode_carries_split_utf8_code_page();
+    test_decode_carries_split_four_byte_code_page_sequence();
     test_decode_complete_dbcs_character_does_not_carry_trail_byte();
     test_invalid_decode_fallback();
     test_utf8_stream_decode_carry();

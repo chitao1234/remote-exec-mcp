@@ -13,7 +13,7 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use windows_sys::Win32::Foundation::ERROR_INVALID_FLAGS;
 #[cfg(windows)]
 use windows_sys::Win32::Globalization::{
-    CP_UTF8, GetACP, GetOEMCP, IsDBCSLeadByteEx, MB_ERR_INVALID_CHARS, MultiByteToWideChar,
+    CPINFO, GetACP, GetCPInfo, GetOEMCP, MB_ERR_INVALID_CHARS, MultiByteToWideChar,
 };
 
 use crate::config::{ProcessEnvironment, WindowsPtyBackendOverride};
@@ -367,29 +367,51 @@ fn carry_incomplete_windows_code_page_suffix(
     raw: &mut Vec<u8>,
     carry: &mut Vec<u8>,
 ) {
-    if code_page == CP_UTF8 {
-        let complete_len = complete_utf8_lossy_prefix_len(raw);
-        if complete_len < raw.len() {
-            carry.extend_from_slice(&raw[complete_len..]);
-            raw.truncate(complete_len);
-        }
+    let Some(max_char_size) = windows_code_page_max_char_size(code_page) else {
+        return;
+    };
+
+    if windows_code_page_decodes(code_page, raw) {
         return;
     }
 
-    let mut index = 0;
-    while index < raw.len() {
-        if unsafe { IsDBCSLeadByteEx(code_page, raw[index]) } == 0 {
-            index += 1;
-            continue;
-        }
-
-        if index + 1 == raw.len() {
-            carry.push(raw[index]);
-            raw.truncate(index);
+    let max_suffix = raw.len().min(max_char_size - 1);
+    for suffix_size in 1..=max_suffix {
+        let prefix_size = raw.len() - suffix_size;
+        if prefix_size == 0 || windows_code_page_decodes(code_page, &raw[..prefix_size]) {
+            carry.extend_from_slice(&raw[prefix_size..]);
+            raw.truncate(prefix_size);
             return;
         }
+    }
+}
 
-        index += 2;
+#[cfg(windows)]
+fn windows_code_page_max_char_size(code_page: u32) -> Option<usize> {
+    let mut info = CPINFO {
+        MaxCharSize: 0,
+        DefaultChar: [0; 2],
+        LeadByte: [0; 12],
+    };
+    if unsafe { GetCPInfo(code_page, &mut info) } == 0 {
+        return None;
+    }
+    let max_char_size = info.MaxCharSize as usize;
+    (max_char_size > 1).then_some(max_char_size)
+}
+
+#[cfg(windows)]
+fn windows_code_page_decodes(code_page: u32, raw: &[u8]) -> bool {
+    if raw.is_empty() {
+        return true;
+    }
+
+    match wide_len_from_windows_code_page(code_page, MB_ERR_INVALID_CHARS, raw) {
+        Ok(_) => true,
+        Err(err) if err.raw_os_error() == Some(ERROR_INVALID_FLAGS as i32) => {
+            wide_len_from_windows_code_page(code_page, 0, raw).is_ok()
+        }
+        Err(_) => false,
     }
 }
 
@@ -446,6 +468,27 @@ fn wide_from_windows_code_page(
     flags: u32,
     raw: &[u8],
 ) -> std::io::Result<Vec<u16>> {
+    let wide_len = wide_len_from_windows_code_page(code_page, flags, raw)?;
+    let mut wide = vec![0u16; wide_len as usize];
+    let written = unsafe {
+        MultiByteToWideChar(
+            code_page,
+            flags,
+            raw.as_ptr(),
+            raw.len() as i32,
+            wide.as_mut_ptr(),
+            wide_len,
+        )
+    };
+    if written <= 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    wide.truncate(written as usize);
+    Ok(wide)
+}
+
+#[cfg(windows)]
+fn wide_len_from_windows_code_page(code_page: u32, flags: u32, raw: &[u8]) -> std::io::Result<i32> {
     let raw_len = i32::try_from(raw.len()).map_err(|_| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -466,23 +509,7 @@ fn wide_from_windows_code_page(
     if wide_len <= 0 {
         return Err(std::io::Error::last_os_error());
     }
-
-    let mut wide = vec![0u16; wide_len as usize];
-    let written = unsafe {
-        MultiByteToWideChar(
-            code_page,
-            flags,
-            raw.as_ptr(),
-            raw_len,
-            wide.as_mut_ptr(),
-            wide_len,
-        )
-    };
-    if written <= 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    wide.truncate(written as usize);
-    Ok(wide)
+    Ok(wide_len)
 }
 
 #[cfg(test)]
@@ -604,7 +631,7 @@ mod exec_pipe_decoder_tests {
     #[cfg(windows)]
     use super::{WindowsPipeDecoder, utf8_from_windows_code_page};
     #[cfg(windows)]
-    use windows_sys::Win32::Globalization::CP_UTF8;
+    use windows_sys::Win32::Globalization::{CP_UTF8, WideCharToMultiByte};
 
     #[test]
     fn split_multibyte_codepoint_is_emitted_once() {
@@ -641,6 +668,49 @@ mod exec_pipe_decoder_tests {
     }
 
     #[cfg(windows)]
+    fn bytes_from_windows_code_page(code_page: u32, wide: &[u16]) -> Option<Vec<u8>> {
+        if wide.is_empty() {
+            return Some(Vec::new());
+        }
+
+        let wide_len = i32::try_from(wide.len()).ok()?;
+        let raw_len = unsafe {
+            WideCharToMultiByte(
+                code_page,
+                0,
+                wide.as_ptr(),
+                wide_len,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+            )
+        };
+        if raw_len <= 0 {
+            return None;
+        }
+
+        let mut raw = vec![0u8; raw_len as usize];
+        let written = unsafe {
+            WideCharToMultiByte(
+                code_page,
+                0,
+                wide.as_ptr(),
+                wide_len,
+                raw.as_mut_ptr(),
+                raw_len,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+            )
+        };
+        if written <= 0 {
+            return None;
+        }
+        raw.truncate(written as usize);
+        Some(raw)
+    }
+
+    #[cfg(windows)]
     #[test]
     fn windows_pipe_decoder_carries_split_dbcs_character() {
         if !code_page_available(936) {
@@ -661,6 +731,35 @@ mod exec_pipe_decoder_tests {
 
         assert_eq!(decoder.push(&[0xe4, 0xbd]), None);
         assert_eq!(decoder.push(&[0xa0]), Some("你".to_string()));
+        assert_eq!(decoder.finish(), None);
+
+        let mut decoder = WindowsPipeDecoder::with_code_pages(CP_UTF8, 1252);
+
+        assert_eq!(decoder.push(&[0xf0]), None);
+        assert_eq!(decoder.push(&[0x9f, 0x98]), None);
+        assert_eq!(decoder.push(&[0x80]), Some("😀".to_string()));
+        assert_eq!(decoder.finish(), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pipe_decoder_carries_split_four_byte_code_page_sequence() {
+        if !code_page_available(54936) {
+            return;
+        }
+
+        let Some(raw) = bytes_from_windows_code_page(54936, &[0xd83d, 0xde00]) else {
+            return;
+        };
+        if raw.len() != 4 {
+            return;
+        }
+
+        let mut decoder = WindowsPipeDecoder::with_code_pages(54936, 1252);
+
+        assert_eq!(decoder.push(&raw[..2]), None);
+        assert_eq!(decoder.push(&raw[2..3]), None);
+        assert_eq!(decoder.push(&raw[3..]), Some("😀".to_string()));
         assert_eq!(decoder.finish(), None);
     }
 
