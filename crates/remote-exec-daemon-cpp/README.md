@@ -2,11 +2,12 @@
 
 Standalone C++11 daemon for `remote-exec-mcp`.
 
-This daemon is intentionally narrower than the Rust daemon, but it now has two
+This daemon is intentionally narrower than the Rust daemon, but it now has these
 build paths:
 
 - native POSIX hosts through the platform `c++` driver
-- legacy Windows hosts through `i686-w64-mingw32-g++`
+- 32-bit GNU Windows hosts through `i686-w64-mingw32-g++`
+- 64-bit GNU Windows hosts through `x86_64-w64-mingw32-g++`
 - host-native Windows builds through MSVC/NMAKE
 - Windows XP-compatible hosts through MSVC/NMAKE with the `v141_xp` toolset
 
@@ -20,6 +21,10 @@ installed. A GNU ANSI Win32 API path is available for Windows 9x/Me
 compatibility work and has been tested on Windows 95 and Windows 98 SE. Its 9x
 aliases keep a 0x0400 Win32 API floor, define `_WIN32_WINDOWS=0x0400`, support
 Winsock 1.1 and Winsock 2, and exclude winpty.
+
+GNU Windows builds default to `WINDOWS_ARCH=x86` for the existing legacy matrix.
+`WINDOWS_ARCH=x64` selects the x86_64 MinGW cross compiler for NT-family builds
+and produces `x64-...` binary tags. The Windows 9x/Me GNU family is x86-only.
 
 The former `remote-exec-daemon-xp` name referred to the original Windows XP-only
 shape. Current live behavior is documented here and in the repository root
@@ -100,6 +105,8 @@ Windows GNU build matrix:
 
 - `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2`
 - `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2`
+- `make all-windows-x64`
+- `make check-windows-x64`
 - `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2 WINDOWS_CHAR_API=ansi`
 - `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0500 WINDOWS_WINSOCK_VERSION=2`
 - `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0500 WINDOWS_WINSOCK_VERSION=2`
@@ -114,16 +121,21 @@ Windows GNU build matrix:
   under MSYS2/MINGW32
 - `make check-windows WINDOWS_TOOLCHAIN=native WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2` on Windows
   under MSYS2/MINGW32
-- `WINDOWS_TOOLCHAIN=cross` uses `i686-w64-mingw32-g++`, links
+- `WINDOWS_TOOLCHAIN=cross` uses the compiler selected by `WINDOWS_ARCH`, links
   `-static-libgcc -static-libstdc++`, and defaults `WINDOWS_TEST_RUNNER` to
   `wine` on non-Windows hosts.
 - `WINDOWS_TOOLCHAIN=native` uses the host `g++` in a Windows GNU environment
   and runs test binaries directly.
+- `WINDOWS_ARCH=x86|x64` selects the GNU Windows target architecture. The
+  default `x86` path uses `i686-w64-mingw32-g++` and keeps the historical
+  artifact names. The `x64` path uses `x86_64-w64-mingw32-g++`, emits `x64-...`
+  artifact names, and is supported only for the NT-family GNU build path.
 - `WINDOWS_WINVER` and `WINDOWS_WIN32_WINNT` select the Win32 API floor. By
   default `WINDOWS_WIN32_WINNT` follows `WINDOWS_WINVER`.
 - `WINDOWS_FAMILY=nt|9x` selects the Windows SDK family macros for GNU builds.
   The default is `nt`. The `9x` family defines `_WIN32_WINDOWS` and `_CHICAGO_`
-  in addition to the requested `WINVER`/`_WIN32_WINNT` values.
+  in addition to the requested `WINVER`/`_WIN32_WINNT` values and requires
+  `WINDOWS_ARCH=x86`.
 - `WINDOWS_CHAR_API=unicode|ansi` selects the daemon-owned Win32 string API
   path. `unicode` is the default and defines `UNICODE`/`_UNICODE`; `ansi`
   defines `REMOTE_EXEC_CPP_WINDOWS_ANSI_API`, uses `A` Win32 file/process/path
@@ -162,7 +174,8 @@ Windows GNU build matrix:
 - The default `WINDOWS_TOOLCHAIN` is `cross` on non-Windows hosts and `native`
   on Windows GNU hosts.
 - The defaults are `WINDOWS_WINVER=0x0501`,
-  `WINDOWS_WIN32_WINNT=WINDOWS_WINVER`, and `WINDOWS_WINSOCK_VERSION=2`.
+  `WINDOWS_WIN32_WINNT=WINDOWS_WINVER`, `WINDOWS_WINSOCK_VERSION=2`, and
+  `WINDOWS_ARCH=x86`.
 
 Compatibility aliases remain:
 
@@ -180,6 +193,8 @@ Compatibility aliases remain:
 - `make check-windows-2000`
 - `make all-windows-xp`
 - `make check-windows-xp`
+- `make all-windows-x64`
+- `make check-windows-x64`
 - `make all-windows-xp-ansi`
 - `make check-windows-xp-ansi`
 - `make all-windows-native`
@@ -229,10 +244,11 @@ rules selected by `MSVC_VARIANT=native` or `MSVC_VARIANT=xp`. The XP targets
 link as an x86 console program with a Windows XP minimum subsystem version.
 
 Runtime coverage note: host-native POSIX C++ daemon runtime tests run on Unix.
-GNU legacy Windows binaries and tests run under Wine on Linux. MSVC native
-binaries and tests run on Windows, and MSVC XP-compatible binaries run natively
-there when the XP-capable toolset is available. CI builds and runs the 32-bit
-host-native MSVC NMAKE test path on `windows-latest`. The Windows Rust test job
+GNU Windows binaries and tests, including the 64-bit GNU path, run under Wine on
+Linux. MSVC native binaries and tests run on Windows, and MSVC XP-compatible
+binaries run natively there when the XP-capable toolset is available. CI builds
+and runs the 32-bit host-native MSVC NMAKE test path on `windows-latest`. The
+Windows Rust test job
 first builds `build\msvc-native\remote-exec-daemon-cpp-msvc.exe`, then points
 `REMOTE_EXEC_CPP_DAEMON` at that binary while running the Rust integration
 tests.
@@ -279,6 +295,12 @@ Windows XP-compatible GNU Winsock 2:
 
 ```bat
 build\remote-exec-daemon-cpp-xp-ws2.exe config\daemon-cpp.example.ini
+```
+
+Windows x64 GNU XP/Winsock 2:
+
+```bat
+build\remote-exec-daemon-cpp-x64-xp-ws2.exe config\daemon-cpp.example.ini
 ```
 
 Windows 2000-compatible GNU Winsock 2:
@@ -401,6 +423,7 @@ and Wine is available:
 
 ```sh
 make check-windows-xp
+make check-windows-x64
 make check-windows-2000
 make check-windows-nt4-ws1
 make check-windows-nt4-ws2
@@ -600,7 +623,8 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
   on Windows NT 3.51 and Windows NT 4.0. The GNU NT 4.0 API-floor build also
   supports Winsock 2 when that runtime is installed. The GNU ANSI API build
   path exists for Windows 9x/Me compatibility work and has been tested with
-  Winsock 1.1 and Winsock 2 on Windows 95 and Windows 98 SE.
+  Winsock 1.1 and Winsock 2 on Windows 95 and Windows 98 SE. GNU x64 builds are
+  NT-family only; the 9x/Me aliases require `WINDOWS_ARCH=x86`.
 - `view_image` supports passthrough PNG, JPEG, and WebP only
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - broker-owned `forward_id` values do not persist across broker restart

@@ -511,6 +511,7 @@ Build paths:
 make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-2000
 make -C crates/remote-exec-daemon-cpp check-windows-xp
+make -C crates/remote-exec-daemon-cpp check-windows-x64
 make -C crates/remote-exec-daemon-cpp check-windows-xp-ansi
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1-ansi
@@ -521,10 +522,10 @@ bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
 
 The GNU make Windows runtime targets, such as `check-windows-2000`,
-`check-windows-xp`, `check-windows-nt4-ws1`, and `check-windows-nt4-ws2`, run
-through `WINDOWS_TEST_RUNNER` when that variable is set and directly when it is
-empty. The GNU make default is `wine` on non-Windows hosts and empty on
-Windows.
+`check-windows-xp`, `check-windows-x64`, `check-windows-nt4-ws1`, and
+`check-windows-nt4-ws2`, run through `WINDOWS_TEST_RUNNER` when that variable
+is set and directly when it is empty. The GNU make default is `wine` on
+non-Windows hosts and empty on Windows.
 Add `WINDOWS_CHAR_API=ansi`, or use aliases such as `check-windows-xp-ansi` and
 `check-windows-nt4-ws1-ansi`, to build the daemon-owned ANSI Win32 API path.
 Use `check-windows-9x-ws1-ansi` or `check-windows-9x-ws2-ansi` for the GNU
@@ -533,6 +534,9 @@ Use `check-windows-9x-ws1-ansi` or `check-windows-9x-ws2-ansi` for the GNU
 and command strings, reject unrepresentable UTF-8 input, and disable GNU winpty
 auto-enable. The `9x-ws2-ansi` variant requires Winsock 2 to be installed on
 older 9x systems such as Windows 95.
+Use `WINDOWS_ARCH=x64`, or the `check-windows-x64` alias, for the GNU x86_64
+NT-family path. The GNU default remains `WINDOWS_ARCH=x86`, and the 9x/Me GNU
+aliases require x86.
 
 From an x86 Visual Studio developer prompt:
 
@@ -585,6 +589,7 @@ crates/remote-exec-daemon-cpp/scripts/clang_format.sh check
 make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-2000
 make -C crates/remote-exec-daemon-cpp check-windows-xp
+make -C crates/remote-exec-daemon-cpp check-windows-x64
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws2
 # On Windows under MSYS2/MINGW32:
@@ -639,13 +644,13 @@ broker integration tests consume a prebuilt C++ daemon binary when one is
 present, and skip the C++ daemon scenarios when it is absent; they do not build
 the C++ daemon themselves. CI builds that C++ daemon binary in an explicit step
 before the Rust test job. The standalone C++ daemon also has its own Linux and
-Windows CI job: POSIX runtime tests run on Linux, Windows 2000 and
+Windows CI job: POSIX runtime tests run on Linux, Windows 2000, GNU x64, and
 NT 4.0/Winsock 1 test binaries run under Wine on Linux when available, and the
 32-bit host-native MSVC NMAKE path runs on `windows-latest`. CI also gates
 owned C++ daemon source formatting with `clang-format`. The GNU Winsock 1.1
 Unicode variant has also been manually tested on Windows NT 3.51, and the GNU
-ANSI API path has been tested on Windows 95 and Windows 98 SE. The MSVC path
-now exercises the vendored winpty-backed PTY build instead of a PTY-disabled
+ANSI API path has been tested on Windows 95 and Windows 98 SE. The MSVC path now
+exercises the vendored winpty-backed PTY build instead of a PTY-disabled
 fallback.
 
 A separate periodic/manual GitHub Actions workflow exercises BSD coverage inside
