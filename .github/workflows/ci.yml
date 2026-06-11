@@ -247,17 +247,10 @@ jobs:
       - name: Run host clippy without default features
         run: cargo clippy -p remote-exec-host --no-default-features --all-targets --locked -- -D warnings
 
-  cpp:
-    name: C++ daemon (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  cpp-posix:
+    name: C++ daemon POSIX (ubuntu-latest)
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
 
     steps:
       - name: Checkout
@@ -269,50 +262,92 @@ jobs:
         uses: actions/cache@v4
         with:
           path: crates/remote-exec-daemon-cpp/build
-          key: cpp-${{ runner.os }}-${{ hashFiles('crates/remote-exec-daemon-cpp/**', 'winptyrs/**', '.gitmodules') }}
+          key: cpp-posix-${{ runner.os }}-${{ hashFiles('crates/remote-exec-daemon-cpp/**', 'winptyrs/**', '.gitmodules') }}
           restore-keys: |
+            cpp-posix-${{ runner.os }}-
             cpp-${{ runner.os }}-
 
       - name: Install Linux C++ dependencies
-        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ make
+
+      - name: Run POSIX C++ checks
+        shell: bash
+        run: |
+          make -k -j"$(nproc)" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-posix check-posix
+
+  cpp-windows-cross:
+    name: C++ daemon Windows cross (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows 2000
+            make_target: check-windows-2000
+            build_dir: build/ci-windows-2000
+          - name: NT 4.0 Winsock 1
+            make_target: check-windows-nt4-ws1
+            build_dir: build/ci-windows-nt4-ws1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache C++ build outputs
+        uses: actions/cache@v4
+        with:
+          path: crates/remote-exec-daemon-cpp/build
+          key: cpp-windows-cross-${{ matrix.make_target }}-${{ runner.os }}-${{ hashFiles('crates/remote-exec-daemon-cpp/**', 'winptyrs/**', '.gitmodules') }}
+          restore-keys: |
+            cpp-windows-cross-${{ matrix.make_target }}-${{ runner.os }}-
+            cpp-${{ runner.os }}-
+
+      - name: Install Linux C++ dependencies
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y g++ make g++-mingw-w64-i686 g++-mingw-w64-x86-64 wine wine32:i386
 
+      - name: Run Windows C++ cross checks
+        shell: bash
+        env:
+          BUILD_DIR: ${{ matrix.build_dir }}
+          MAKE_TARGET: ${{ matrix.make_target }}
+        run: |
+          make -k -j"$(nproc)" -C crates/remote-exec-daemon-cpp BUILD_DIR="${BUILD_DIR}" "${MAKE_TARGET}"
+
+  cpp-msvc:
+    name: C++ daemon MSVC (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache C++ build outputs
+        uses: actions/cache@v4
+        with:
+          path: crates/remote-exec-daemon-cpp/build
+          key: cpp-msvc-${{ runner.os }}-${{ hashFiles('crates/remote-exec-daemon-cpp/**', 'winptyrs/**', '.gitmodules') }}
+          restore-keys: |
+            cpp-msvc-${{ runner.os }}-
+            cpp-${{ runner.os }}-
+
       - name: Set up MSVC
-        if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x86
 
-      - name: Run Linux C++ checks
-        if: runner.os == 'Linux'
-        run: |
-          jobs="$(nproc)"
-
-          make -k -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-posix check-posix &
-          posix_pid="$!"
-
-          make -k -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-windows-2000 check-windows-2000 &
-          win2000_pid="$!"
-
-          make -k -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-windows-nt4-ws1 check-windows-nt4-ws1 &
-          nt4_ws1_pid="$!"
-
-          posix_status=0
-          win2000_status=0
-          nt4_ws1_status=0
-          wait "${posix_pid}" || posix_status="$?"
-          wait "${win2000_pid}" || win2000_status="$?"
-          wait "${nt4_ws1_pid}" || nt4_ws1_status="$?"
-
-          if [ "${posix_status}" -ne 0 ] || [ "${win2000_status}" -ne 0 ] || [ "${nt4_ws1_status}" -ne 0 ]; then
-            exit 1
-          fi
-
       - name: Run Windows C++ checks
-        if: runner.os == 'Windows'
         shell: cmd
         run: |
           nmake /K /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
