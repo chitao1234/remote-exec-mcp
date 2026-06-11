@@ -7,6 +7,7 @@ WINDOWS_ARCH_X86 := x86
 WINDOWS_ARCH_X64 := x64
 WINDOWS_ARCHES := $(WINDOWS_ARCH_X86) $(WINDOWS_ARCH_X64)
 
+WINDOWS_WINVER_NT3X := 0x0400
 WINDOWS_WINVER_NT4 := 0x0400
 WINDOWS_WINVER_9X := 0x0400
 WINDOWS_WINVER_2000 := 0x0500
@@ -28,6 +29,7 @@ WINDOWS_WINSOCK_VERSION ?= $(WINDOWS_WINSOCK2)
 WINDOWS_CHAR_API ?= $(WINDOWS_CHAR_API_UNICODE)
 WINDOWS_ARCH ?= $(WINDOWS_ARCH_X86)
 WINDOWS_WINPTY ?= auto
+WINDOWS_VARIANT_LABEL ?=
 
 WINDOWS_COMMON_CPPFLAGS := $(COMMON_CPPFLAGS) -DWIN32_LEAN_AND_MEAN
 WINDOWS_TEST_CXXFLAGS := $(TEST_CXXFLAGS)
@@ -109,6 +111,11 @@ ifeq ($(WINDOWS_WINVER),$(WINDOWS_WINVER_XP))
 WINDOWS_WINVER_LABEL := xp
 endif
 endif
+WINDOWS_VARIANT_BUILD_VERSION_TAG := winver$(WINDOWS_WINVER_HEX_TAG)
+ifneq ($(WINDOWS_VARIANT_LABEL),)
+WINDOWS_WINVER_LABEL := $(WINDOWS_VARIANT_LABEL)
+WINDOWS_VARIANT_BUILD_VERSION_TAG := $(WINDOWS_VARIANT_LABEL)-winver$(WINDOWS_WINVER_HEX_TAG)
+endif
 WINDOWS_WS_TAG := ws$(WINDOWS_WINSOCK_VERSION)
 WINDOWS_CHAR_API_TAG := $(WINDOWS_CHAR_API)
 WINDOWS_ARCH_BUILD_TAG := $(if $(filter $(WINDOWS_ARCH_X64),$(WINDOWS_ARCH)),-x64,)
@@ -141,9 +148,9 @@ WINDOWS_WINPTY_AUTO_ENABLED := $(if $(filter $(WINDOWS_WINVER),$(WINDOWS_WINPTY_
 endif
 WINDOWS_WINPTY_ENABLED := $(if $(filter $(WINDOWS_WINPTY),on),1,$(if $(filter $(WINDOWS_WINPTY),off),0,$(WINDOWS_WINPTY_AUTO_ENABLED)))
 
-WINDOWS_VARIANT_BUILD_TAG := $(WINDOWS_TOOLCHAIN_BUILD_TAG)$(WINDOWS_ARCH_BUILD_TAG)-winver$(WINDOWS_WINVER_HEX_TAG)-$(WINDOWS_WS_TAG)$(if $(WINDOWS_CHAR_API_TAG),-$(WINDOWS_CHAR_API_TAG))
+WINDOWS_VARIANT_BUILD_TAG := $(WINDOWS_TOOLCHAIN_BUILD_TAG)$(WINDOWS_ARCH_BUILD_TAG)-$(WINDOWS_VARIANT_BUILD_VERSION_TAG)-$(WINDOWS_WS_TAG)$(if $(WINDOWS_CHAR_API_TAG),-$(WINDOWS_CHAR_API_TAG))
 ifeq ($(WINDOWS_FAMILY),$(WINDOWS_FAMILY_9X))
-WINDOWS_VARIANT_BUILD_TAG := $(WINDOWS_TOOLCHAIN_BUILD_TAG)$(WINDOWS_ARCH_BUILD_TAG)-win9x-winver$(WINDOWS_WINVER_HEX_TAG)-$(WINDOWS_WS_TAG)$(if $(WINDOWS_CHAR_API_TAG),-$(WINDOWS_CHAR_API_TAG))
+WINDOWS_VARIANT_BUILD_TAG := $(WINDOWS_TOOLCHAIN_BUILD_TAG)$(WINDOWS_ARCH_BUILD_TAG)-win9x-$(WINDOWS_VARIANT_BUILD_VERSION_TAG)-$(WINDOWS_WS_TAG)$(if $(WINDOWS_CHAR_API_TAG),-$(WINDOWS_CHAR_API_TAG))
 endif
 
 WINPTY_VERSION_HEADER := $(OBJ_DIR)/$(WINDOWS_VARIANT_BUILD_TAG)-winpty/gen/GenVersion.h
@@ -358,15 +365,16 @@ windows_variant_make_args = \
 
 define define_windows_variant_alias
 $1:
-	$$(MAKE) $2 $$(call windows_variant_make_args,$3,$4,$5,$6,$7,$8)
+	$$(MAKE) $2 $$(call windows_variant_make_args,$3,$4,$5,$6,$7,$8) $9
 endef
 
 define define_windows_variant_alias_bundle
-$(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,all-windows-$(alias_name),all-windows,$2,$3,$4,$5,$6,$7)))
-$(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,test-windows-$(alias_name),test-windows,$2,$3,$4,$5,$6,$7)))
-$(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,check-windows-$(alias_name),check-windows,$2,$3,$4,$5,$6,$7)))
+$(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,all-windows-$(alias_name),all-windows,$2,$3,$4,$5,$6,$7,$8)))
+$(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,test-windows-$(alias_name),test-windows,$2,$3,$4,$5,$6,$7,$8)))
+$(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,check-windows-$(alias_name),check-windows,$2,$3,$4,$5,$6,$7,$8)))
 endef
 
+WINDOWS_NT3X_WS1_ALIAS_NAMES := nt3x-ws1
 WINDOWS_NT4_WS1_ALIAS_NAMES := nt4-ws1
 WINDOWS_NT4_WS2_ALIAS_NAMES := nt4-ws2
 WINDOWS_2000_ALIAS_NAMES := 2000 2000-ws2
@@ -378,6 +386,7 @@ WINDOWS_XP_ANSI_ALIAS_NAMES := xp-ansi xp-ws2-ansi
 WINDOWS_9X_WS1_ANSI_ALIAS_NAMES := 9x-ws1-ansi
 WINDOWS_9X_WS2_ANSI_ALIAS_NAMES := 9x-ws2-ansi
 
+$(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_NT3X_WS1_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT3X),$(WINDOWS_WINSOCK1),$(WINDOWS_CHAR_API_UNICODE),$(WINDOWS_FAMILY_NT),$(WINDOWS_ARCH_X86),WINDOWS_WINPTY=off WINDOWS_VARIANT_LABEL=nt3x))
 $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_NT4_WS1_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK1),$(WINDOWS_CHAR_API_UNICODE),$(WINDOWS_FAMILY_NT),$(WINDOWS_ARCH_X86)))
 $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_NT4_WS2_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK2),$(WINDOWS_CHAR_API_UNICODE),$(WINDOWS_FAMILY_NT),$(WINDOWS_ARCH_X86)))
 $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_2000_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2),$(WINDOWS_CHAR_API_UNICODE),$(WINDOWS_FAMILY_NT),$(WINDOWS_ARCH_X86)))
@@ -391,13 +400,14 @@ $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_9X_WS2_ANSI_ALIAS_NA
 
 define define_windows_variant_test_alias
 $1:
-	$$(MAKE) $2 $$(call windows_variant_make_args,$3,$4,$5,$6,$7,$8)
+	$$(MAKE) $2 $$(call windows_variant_make_args,$3,$4,$5,$6,$7,$8) $9
 endef
 
 define define_windows_named_test_aliases
-$(foreach test,$2,$(eval $(call define_windows_variant_test_alias,test-windows-$1-$(WINDOWS_TEST_CASE_$(test)_NAME),$(call windows_test_case_phony,$(test)),$3,$4,$5,$6,$7,$8)))
+$(foreach test,$2,$(eval $(call define_windows_variant_test_alias,test-windows-$1-$(WINDOWS_TEST_CASE_$(test)_NAME),$(call windows_test_case_phony,$(test)),$3,$4,$5,$6,$7,$8,$9)))
 endef
 
+$(eval $(call define_windows_named_test_aliases,nt3x-ws1,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT3X),$(WINDOWS_WINSOCK1),$(WINDOWS_CHAR_API_UNICODE),$(WINDOWS_FAMILY_NT),$(WINDOWS_ARCH_X86),WINDOWS_WINPTY=off WINDOWS_VARIANT_LABEL=nt3x))
 $(eval $(call define_windows_named_test_aliases,xp,$(WINDOWS_COMMON_TEST_CASES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2),$(WINDOWS_CHAR_API_UNICODE),$(WINDOWS_FAMILY_NT),$(WINDOWS_ARCH_X86)))
 $(eval $(call define_windows_named_test_aliases,2000,$(WINDOWS_COMMON_TEST_CASES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2),$(WINDOWS_CHAR_API_UNICODE),$(WINDOWS_FAMILY_NT),$(WINDOWS_ARCH_X86)))
 $(eval $(call define_windows_named_test_aliases,x64,$(WINDOWS_COMMON_TEST_CASES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2),$(WINDOWS_CHAR_API_UNICODE),$(WINDOWS_FAMILY_NT),$(WINDOWS_ARCH_X64)))
@@ -412,6 +422,7 @@ $(eval $(call define_windows_named_test_aliases,9x-ws2-ansi,$(WINDOWS_COMMON_TES
 windows_named_test_alias_phonies = $(foreach test,$2,test-windows-$1-$(WINDOWS_TEST_CASE_$(test)_NAME))
 windows_variant_alias_phonies = $(foreach alias_name,$1,all-windows-$(alias_name) test-windows-$(alias_name) check-windows-$(alias_name))
 
+WINDOWS_NT3X_WS1_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,nt3x-ws1,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND)
 WINDOWS_XP_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,xp,$(WINDOWS_COMMON_TEST_CASES))
 WINDOWS_2000_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,2000,$(WINDOWS_COMMON_TEST_CASES))
 WINDOWS_X64_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,x64,$(WINDOWS_COMMON_TEST_CASES))
@@ -423,6 +434,7 @@ WINDOWS_NT4_WS1_ANSI_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phoni
 WINDOWS_9X_WS1_ANSI_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,9x-ws1-ansi,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND)
 WINDOWS_9X_WS2_ANSI_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,9x-ws2-ansi,$(WINDOWS_COMMON_TEST_CASES))
 WINDOWS_VARIANT_ALIAS_PHONIES := \
+	$(call windows_variant_alias_phonies,$(WINDOWS_NT3X_WS1_ALIAS_NAMES)) \
 	$(call windows_variant_alias_phonies,$(WINDOWS_NT4_WS1_ALIAS_NAMES)) \
 	$(call windows_variant_alias_phonies,$(WINDOWS_NT4_WS2_ALIAS_NAMES)) \
 	$(call windows_variant_alias_phonies,$(WINDOWS_2000_ALIAS_NAMES)) \
@@ -440,6 +452,7 @@ WINDOWS_VARIANT_ALIAS_PHONIES := \
 	check-windows \
 	$(WINDOWS_VARIANT_ALIAS_PHONIES) \
 	$(WINDOWS_VARIANT_TEST_PHONIES) \
+	$(WINDOWS_NT3X_WS1_TEST_ALIAS_PHONIES) \
 	$(WINDOWS_XP_TEST_ALIAS_PHONIES) \
 	$(WINDOWS_2000_TEST_ALIAS_PHONIES) \
 	$(WINDOWS_X64_TEST_ALIAS_PHONIES) \

@@ -491,13 +491,15 @@ The C++ daemon standard level is C++11 on every supported build path. In this
 repository, "Windows XP-compatible" means using a toolchain that can target XP
 while compiling the daemon as C++11, such as the MinGW XP cross-build or an
 MSVC `v141_xp` setup.
-The minimum supported Windows runtime is Windows NT 3.51 through the GNU
-Winsock 1.1 variant; that same variant has also been tested on Windows NT 4.0.
-The GNU Windows NT 4.0 API-floor build also supports Winsock 2 when that
-runtime is installed. GNU Windows builds default to the Unicode Win32 API path.
-A GNU ANSI Win32 API path is available for Windows 9x/Me compatibility work
-and has been tested on Windows 95 and Windows 98 SE. This path covers
-daemon-owned Win32 file/process/path calls.
+The minimum supported Windows runtime family is Windows NT 3.x through the GNU
+`nt3x-ws1` Winsock 1.1 path, which keeps the 0x0400 Win32 API floor and
+disables winpty for NT 3.x compatibility. The GNU Winsock 1.1 Unicode variant
+has been tested on Windows NT 3.51 and Windows NT 4.0. The GNU Windows NT 4.0
+API-floor build also supports Winsock 2 when that runtime is installed. GNU
+Windows builds default to the Unicode Win32 API path. A GNU ANSI Win32 API path
+is available for Windows 9x/Me compatibility work and has been tested on
+Windows 95 and Windows 98 SE. This path covers daemon-owned Win32
+file/process/path calls.
 
 The Rust and C++ daemons share the `max_open_sessions` default of 64. C++ also
 has daemon-local safety knobs for its handwritten HTTP parser and blocking
@@ -513,6 +515,7 @@ make -C crates/remote-exec-daemon-cpp check-windows-2000
 make -C crates/remote-exec-daemon-cpp check-windows-xp
 make -C crates/remote-exec-daemon-cpp check-windows-x64
 make -C crates/remote-exec-daemon-cpp check-windows-xp-ansi
+make -C crates/remote-exec-daemon-cpp check-windows-nt3x-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1-ansi
 make -C crates/remote-exec-daemon-cpp check-windows-9x-ws1-ansi
@@ -522,10 +525,10 @@ bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
 
 The GNU make Windows runtime targets, such as `check-windows-2000`,
-`check-windows-xp`, `check-windows-x64`, `check-windows-nt4-ws1`, and
-`check-windows-nt4-ws2`, run through `WINDOWS_TEST_RUNNER` when that variable
-is set and directly when it is empty. The GNU make default is `wine` on
-non-Windows hosts and empty on Windows.
+`check-windows-xp`, `check-windows-x64`, `check-windows-nt3x-ws1`,
+`check-windows-nt4-ws1`, and `check-windows-nt4-ws2`, run through
+`WINDOWS_TEST_RUNNER` when that variable is set and directly when it is empty.
+The GNU make default is `wine` on non-Windows hosts and empty on Windows.
 Add `WINDOWS_CHAR_API=ansi`, or use aliases such as `check-windows-xp-ansi` and
 `check-windows-nt4-ws1-ansi`, to build the daemon-owned ANSI Win32 API path.
 Use `check-windows-9x-ws1-ansi` or `check-windows-9x-ws2-ansi` for the GNU
@@ -590,6 +593,7 @@ make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-2000
 make -C crates/remote-exec-daemon-cpp check-windows-xp
 make -C crates/remote-exec-daemon-cpp check-windows-x64
+make -C crates/remote-exec-daemon-cpp check-windows-nt3x-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws2
 # On Windows under MSYS2/MINGW32:
@@ -644,14 +648,14 @@ broker integration tests consume a prebuilt C++ daemon binary when one is
 present, and skip the C++ daemon scenarios when it is absent; they do not build
 the C++ daemon themselves. CI builds that C++ daemon binary in an explicit step
 before the Rust test job. The standalone C++ daemon also has its own Linux and
-Windows CI job: POSIX runtime tests run on Linux, Windows 2000, GNU x64, and
-NT 4.0/Winsock 1 test binaries run under Wine on Linux when available, and the
-32-bit host-native MSVC NMAKE path runs on `windows-latest`. CI also gates
-owned C++ daemon source formatting with `clang-format`. The GNU Winsock 1.1
-Unicode variant has also been manually tested on Windows NT 3.51, and the GNU
-ANSI API path has been tested on Windows 95 and Windows 98 SE. The MSVC path now
-exercises the vendored winpty-backed PTY build instead of a PTY-disabled
-fallback.
+Windows CI job: POSIX runtime tests run on Linux, Windows 2000, GNU x64, NT
+3.x/Winsock 1, and NT 4.0/Winsock 1 test binaries run under Wine on Linux when
+available, and the 32-bit host-native MSVC NMAKE path runs on `windows-latest`.
+CI also gates owned C++ daemon source formatting with `clang-format`. The GNU
+Winsock 1.1 Unicode variant has also been manually tested on Windows NT 3.51,
+and the GNU ANSI API path has been tested on Windows 95 and Windows 98 SE. The
+MSVC path now exercises the vendored winpty-backed PTY build instead of a
+PTY-disabled fallback.
 
 A separate periodic/manual GitHub Actions workflow exercises BSD coverage inside
 GitHub-hosted BSD VMs for FreeBSD, OpenBSD, NetBSD, and DragonFly BSD. Each BSD

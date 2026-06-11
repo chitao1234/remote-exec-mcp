@@ -79,9 +79,28 @@ std::string utf8_from_code_page(UINT code_page, const std::string& raw) {
     return utf8_from_wide(wide);
 }
 
+bool is_dbcs_lead_byte(UINT code_page, BYTE byte) {
+    CPINFO info;
+    if (GetCPInfo(code_page, &info) == 0 || info.MaxCharSize <= 1U) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index + 1U < sizeof(info.LeadByte); index += 2U) {
+        const BYTE first = info.LeadByte[index];
+        const BYTE last = info.LeadByte[index + 1U];
+        if (first == 0 && last == 0) {
+            break;
+        }
+        if (first <= byte && byte <= last) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void carry_incomplete_dbcs_suffix(UINT code_page, std::string* raw, std::string* carry) {
     for (std::size_t index = 0; index < raw->size();) {
-        if (IsDBCSLeadByteEx(code_page, static_cast<BYTE>((*raw)[index])) == 0) {
+        if (!is_dbcs_lead_byte(code_page, static_cast<BYTE>((*raw)[index]))) {
             ++index;
             continue;
         }

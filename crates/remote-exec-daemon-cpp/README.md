@@ -14,13 +14,15 @@ build paths:
 The daemon builds as C++11 across all supported toolchains. In this repository,
 "Windows XP-compatible" means a toolchain that can target Windows XP while
 compiling the daemon as C++11; it does not imply a pre-C++11 language level.
-The minimum supported Windows runtime is Windows NT 3.51 through the GNU
-Winsock 1.1 Unicode variant, which has also been tested on Windows NT 4.0. The
-GNU Windows NT 4.0 API-floor build also supports Winsock 2 when that runtime is
-installed. A GNU ANSI Win32 API path is available for Windows 9x/Me
-compatibility work and has been tested on Windows 95 and Windows 98 SE. Its 9x
-aliases keep a 0x0400 Win32 API floor, define `_WIN32_WINDOWS=0x0400`, support
-Winsock 1.1 and Winsock 2, and exclude winpty.
+The minimum supported Windows runtime family is Windows NT 3.x through the GNU
+`nt3x-ws1` Winsock 1.1 path, which keeps the 0x0400 Win32 API floor and
+disables winpty for NT 3.x compatibility. The GNU Winsock 1.1 Unicode variant
+has also been tested on Windows NT 3.51 and Windows NT 4.0. The GNU Windows NT
+4.0 API-floor build also supports Winsock 2 when that runtime is installed. A
+GNU ANSI Win32 API path is available for Windows 9x/Me compatibility work and
+has been tested on Windows 95 and Windows 98 SE. Its 9x aliases keep a 0x0400
+Win32 API floor, define `_WIN32_WINDOWS=0x0400`, support Winsock 1.1 and
+Winsock 2, and exclude winpty.
 
 GNU Windows builds default to `WINDOWS_ARCH=x86` for the existing legacy matrix.
 `WINDOWS_ARCH=x64` selects the x86_64 MinGW cross compiler for NT-family builds
@@ -114,6 +116,8 @@ Windows GNU build matrix:
 - `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=2`
 - `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1`
 - `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1`
+- `make all-windows-nt3x-ws1`
+- `make check-windows-nt3x-ws1`
 - `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1 WINDOWS_CHAR_API=ansi`
 - `make check-windows-9x-ws1-ansi`
 - `make check-windows-9x-ws2-ansi`
@@ -151,9 +155,13 @@ Windows GNU build matrix:
 - `WINDOWS_WINSOCK_VERSION=1` builds the NT-era Winsock 1.1 path:
   `REMOTE_EXEC_CPP_WINSOCK1`, `wsock32`, IPv4 only, and explicit rejection of
   IPv6 endpoints with an `invalid_endpoint` error.
-- `WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1` is the tested GNU
-  Winsock 1.1 path for Windows NT 3.51 and Windows NT 4.0. The `nt4-ws1`
-  alias names the API floor, not an NT 4.0-only runtime contract.
+- `WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1 WINDOWS_WINPTY=off
+  WINDOWS_VARIANT_LABEL=nt3x` is the GNU Windows NT 3.x Winsock 1.1 path. Use
+  `nt3x-ws1` aliases for this variant; it intentionally keeps `WINVER` and
+  `_WIN32_WINNT` at `0x0400` and disables winpty.
+- `WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1` is the GNU NT 4.0
+  API-floor Winsock 1.1 path. The GNU Winsock 1.1 Unicode variant has been
+  tested on Windows NT 3.51 and Windows NT 4.0.
 - `WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=2` is the GNU Windows NT 4.0
   API-floor Winsock 2 path. Use `nt4-ws2` aliases for this variant.
 - `WINDOWS_FAMILY=9x WINDOWS_WINVER=0x0400 WINDOWS_WIN32_WINDOWS=0x0400
@@ -179,6 +187,8 @@ Windows GNU build matrix:
 
 Compatibility aliases remain:
 
+- `make all-windows-nt3x-ws1`
+- `make check-windows-nt3x-ws1`
 - `make all-windows-nt4-ws1`
 - `make check-windows-nt4-ws1`
 - `make all-windows-nt4-ws1-ansi`
@@ -319,6 +329,12 @@ Windows NT 3.51/4.0-compatible GNU Winsock 1.1:
 
 ```bat
 build\remote-exec-daemon-cpp-nt4-ws1.exe config\daemon-cpp.example.ini
+```
+
+Windows NT 3.x-compatible GNU Winsock 1.1 without WinPTY:
+
+```bat
+build\remote-exec-daemon-cpp-nt3x-ws1.exe config\daemon-cpp.example.ini
 ```
 
 Windows NT 4.0 API-floor GNU Winsock 1.1 with ANSI Win32 APIs:
@@ -616,15 +632,17 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - POSIX PTY support depends on host PTY allocation
 - Windows GNU PTY support depends on `winpty` being enabled for the build and
   available at runtime; Wine intentionally disables PTY capability reporting
-- no PTY support in builds where `winpty` is disabled, including GNU ANSI API
-  builds where `WINDOWS_WINPTY=auto` resolves to disabled
+- no PTY support in builds where `winpty` is disabled, including GNU NT 3.x
+  builds and GNU ANSI API builds where `WINDOWS_WINPTY=auto` resolves to
+  disabled
 - Windows runtime support is strongest on Unicode NT-family Windows. The GNU
-  Winsock 1.1 Unicode variant is the minimum supported path and has been tested
-  on Windows NT 3.51 and Windows NT 4.0. The GNU NT 4.0 API-floor build also
-  supports Winsock 2 when that runtime is installed. The GNU ANSI API build
-  path exists for Windows 9x/Me compatibility work and has been tested with
-  Winsock 1.1 and Winsock 2 on Windows 95 and Windows 98 SE. GNU x64 builds are
-  NT-family only; the 9x/Me aliases require `WINDOWS_ARCH=x86`.
+  NT 3.x Winsock 1.1 path is the minimum supported Windows path and disables
+  winpty. The GNU Winsock 1.1 Unicode variant has been tested on Windows NT
+  3.51 and Windows NT 4.0. The GNU NT 4.0 API-floor build also supports
+  Winsock 2 when that runtime is installed. The GNU ANSI API build path exists
+  for Windows 9x/Me compatibility work and has been tested with Winsock 1.1 and
+  Winsock 2 on Windows 95 and Windows 98 SE. GNU x64 builds are NT-family only;
+  the 9x/Me aliases require `WINDOWS_ARCH=x86`.
 - `view_image` supports passthrough PNG, JPEG, and WebP only
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - broker-owned `forward_id` values do not persist across broker restart
