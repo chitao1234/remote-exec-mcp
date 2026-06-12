@@ -299,41 +299,6 @@ bool line_has_nonspace_char(const std::string& text) {
     return false;
 }
 
-bool is_prompt_marker_char(char ch) {
-    return ch == '>' || ch == '$' || ch == '#';
-}
-
-bool closed_row_should_be_joinable(const std::string& text, std::size_t row_width) {
-    return row_width >= 80U && line_has_nonspace_char(text)
-           && text.find_first_of(" \t") == std::string::npos;
-}
-
-std::string merge_joinable_rows(const std::string& previous, const std::string& current) {
-    if (previous.empty()) {
-        return current;
-    }
-    if (current.empty()) {
-        return previous;
-    }
-
-    const std::size_t repeated = current.find(previous);
-    if (repeated == 0U) {
-        return current;
-    }
-    if (repeated != std::string::npos && repeated > 0U
-        && is_prompt_marker_char(current[repeated - 1U])) {
-        return current.substr(repeated);
-    }
-
-    const std::size_t max_overlap = std::min(previous.size(), current.size());
-    for (std::size_t overlap = max_overlap; overlap > 0U; --overlap) {
-        if (previous.compare(previous.size() - overlap, overlap, current, 0U, overlap) == 0) {
-            return previous + current.substr(overlap);
-        }
-    }
-    return previous + current;
-}
-
 } // namespace
 
 std::string read_available_console_output(HANDLE pipe, std::string* carry) {
@@ -531,10 +496,9 @@ void TerminalOutputFilter::emit_control(unsigned char byte) {
         }
         {
             const std::size_t row = static_cast<std::size_t>(current_row_);
-            const std::string row_text = serialize_row(row);
-            closed_row_text_[row] = row_text;
-            closed_row_joinable_[row] =
-                closed_row_should_be_joinable(row_text, ensure_line(row).cells.size());
+            ensure_line(row);
+            closed_rows_.insert(row);
+            touch_row(row);
         }
         current_row_ += 1;
         current_col_ = 0;
@@ -687,8 +651,7 @@ void TerminalOutputFilter::clear_screen_from_cursor(int mode) {
         lines_.clear();
         touched_rows_.clear();
         pending_rows_.clear();
-        closed_row_text_.clear();
-        closed_row_joinable_.clear();
+        closed_rows_.clear();
         current_row_ = 0;
         current_col_ = 0;
         has_open_row_ = false;
@@ -729,19 +692,6 @@ TerminalOutputFilter::Line& TerminalOutputFilter::ensure_line(std::size_t row) {
         lines_.resize(row + 1U);
     }
     return lines_[row];
-}
-
-bool TerminalOutputFilter::line_has_any_content(const Line& line) const {
-    for (std::size_t i = 0; i < line.cells.size(); ++i) {
-        const Cell& cell = line.cells[i];
-        if (cell.continuation) {
-            continue;
-        }
-        if (cell.has_text || cell.explicit_space) {
-            return true;
-        }
-    }
-    return false;
 }
 
 void TerminalOutputFilter::clear_cells_range(Line* line, int start_col, int end_col) {
@@ -893,102 +843,40 @@ std::string TerminalOutputFilter::emit_rows(const std::vector<std::size_t>& rows
         Line& line = lines_[row];
         const std::string current = serialize_row(row);
 
-        if (!line_has_any_content(line) && has_open_row_ && open_row_ == row) {
-            output.push_back('\n');
+        if (closed_rows_.erase(row) != 0U) {
+            if (has_open_row_) {
+                if (open_row_ == row && current == open_row_text_) {
+                    output.push_back('\n');
+                } else {
+                    output.push_back('\n');
+                    output += current;
+                    output.push_back('\n');
+                }
+            } else {
+                output += current;
+                output.push_back('\n');
+            }
+
             has_open_row_ = false;
             open_row_text_.clear();
-            closed_row_text_.erase(row);
-            closed_row_joinable_.erase(row);
-            line.touched = false;
-            continue;
-        }
-
-        if (!line_has_any_content(line) && !has_open_row_) {
-            line.touched = false;
-            continue;
-        }
-
-        const std::size_t previous_row = row == 0U ? 0U : row - 1U;
-        const std::map<std::size_t, std::string>::const_iterator previous_closed =
-            closed_row_text_.find(previous_row);
-        const std::map<std::size_t, std::string>::const_iterator closed =
-            closed_row_text_.find(row);
-        const bool closed_joinable = closed != closed_row_text_.end()
-                                     && closed_row_joinable_.find(row) != closed_row_joinable_.end()
-                                     && closed_row_joinable_[row];
-        const bool join_previous_closed_row =
-            row > 0U && previous_closed != closed_row_text_.end()
-            && closed_row_joinable_.find(previous_row) != closed_row_joinable_.end()
-            && closed_row_joinable_[previous_row] && line_has_nonspace_char(current);
-        if (join_previous_closed_row) {
-            const std::string merged = merge_joinable_rows(previous_closed->second, current);
-            if (has_open_row_) {
-                output.push_back('\n');
-                has_open_row_ = false;
-                open_row_text_.clear();
-            }
-            output += merged;
-            has_open_row_ = true;
-            open_row_ = previous_row;
-            open_row_text_ = merged;
-            closed_row_text_.erase(previous_row);
-            closed_row_joinable_.erase(previous_row);
-            if (closed != closed_row_text_.end()) {
-                closed_row_text_[row] = merged;
-                closed_row_joinable_[row] = closed_joinable;
-            }
-            line.touched = false;
-            continue;
-        }
-
-        if (closed != closed_row_text_.end() && !closed_joinable && closed->second == current) {
-            if (has_open_row_ && open_row_ != row) {
-                output.push_back('\n');
-                has_open_row_ = false;
-                open_row_text_.clear();
-            }
-            output += current;
-            output.push_back('\n');
-            has_open_row_ = false;
-            open_row_text_.clear();
-            closed_row_text_.erase(row);
-            closed_row_joinable_.erase(row);
-            line.touched = false;
-            continue;
-        }
-
-        if (closed != closed_row_text_.end() && closed_joinable && closed->second == current) {
-            line.touched = false;
-            continue;
-        }
-
-        if (closed != closed_row_text_.end() && closed->second != current
-            && line_has_nonspace_char(current)) {
-            if (has_open_row_) {
-                output.push_back('\n');
-                has_open_row_ = false;
-                open_row_text_.clear();
-            }
-            output += current;
-            output.push_back('\n');
-            closed_row_text_[row] = current;
-            closed_row_joinable_[row] = false;
             line.touched = false;
             continue;
         }
 
         if (!line_has_nonspace_char(current)) {
+            if (has_open_row_ && open_row_ == row) {
+                output.push_back('\n');
+                has_open_row_ = false;
+                open_row_text_.clear();
+            }
             line.touched = false;
             continue;
         }
 
         if (has_open_row_ && open_row_ == row) {
             if (current != open_row_text_) {
-                const std::string suffix =
-                    current.substr(std::min(current.size(), open_row_text_.size()));
-                if (!suffix.empty()) {
-                    output += suffix;
-                }
+                output.push_back('\n');
+                output += current;
                 open_row_text_ = current;
             }
         } else {

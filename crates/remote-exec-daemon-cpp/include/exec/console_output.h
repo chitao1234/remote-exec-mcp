@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -67,7 +68,6 @@ private:
     void clear_screen_from_cursor(int mode);
     void touch_row(std::size_t row);
     Line& ensure_line(std::size_t row);
-    bool line_has_any_content(const Line& line) const;
     void clear_cells_range(Line* line, int start_col, int end_col);
     std::string serialize_row(std::size_t row) const;
     void queue_touched_rows(std::uint64_t now_ms);
@@ -80,8 +80,7 @@ private:
     std::vector<Line> lines_;
     std::vector<std::size_t> touched_rows_;
     std::map<std::size_t, PendingRow> pending_rows_;
-    std::map<std::size_t, std::string> closed_row_text_;
-    std::map<std::size_t, bool> closed_row_joinable_;
+    std::set<std::size_t> closed_rows_;
 
     State state_;
     std::string csi_buffer_;

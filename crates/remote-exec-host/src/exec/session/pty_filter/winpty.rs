@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -43,8 +43,7 @@ pub(super) struct WinptyOutputFilter {
     lines: Vec<Line>,
     touched_rows: Vec<usize>,
     pending_rows: BTreeMap<usize, PendingRow>,
-    closed_row_text: BTreeMap<usize, String>,
-    closed_row_joinable: BTreeMap<usize, bool>,
+    closed_rows: BTreeSet<usize>,
     state: RendererState,
     csi_buffer: String,
     current_row: i32,
@@ -82,8 +81,7 @@ impl WinptyOutputFilter {
             lines: Vec::new(),
             touched_rows: Vec::new(),
             pending_rows: BTreeMap::new(),
-            closed_row_text: BTreeMap::new(),
-            closed_row_joinable: BTreeMap::new(),
+            closed_rows: BTreeSet::new(),
             state: RendererState::Ground,
             csi_buffer: String::new(),
             current_row: 0,
@@ -210,11 +208,9 @@ impl WinptyOutputFilter {
                 }
 
                 let row = self.normalized_current_row();
-                let row_text = self.serialize_row(row);
-                let width = self.ensure_line(row).cells.len();
-                self.closed_row_joinable
-                    .insert(row, closed_row_should_be_joinable(&row_text, width));
-                self.closed_row_text.insert(row, row_text);
+                self.ensure_line(row);
+                self.closed_rows.insert(row);
+                self.touch_row(row);
                 self.current_row += 1;
                 self.current_col = 0;
             }
@@ -384,8 +380,7 @@ impl WinptyOutputFilter {
             self.lines.clear();
             self.touched_rows.clear();
             self.pending_rows.clear();
-            self.closed_row_text.clear();
-            self.closed_row_joinable.clear();
+            self.closed_rows.clear();
             self.current_row = 0;
             self.current_col = 0;
             self.has_open_row = false;
@@ -426,10 +421,6 @@ impl WinptyOutputFilter {
             self.lines.resize_with(row + 1, Line::default);
         }
         &mut self.lines[row]
-    }
-
-    fn line_has_any_content(&self, row: usize) -> bool {
-        self.lines.get(row).is_some_and(line_has_any_content)
     }
 
     fn serialize_row(&self, row: usize) -> String {
@@ -501,114 +492,40 @@ impl WinptyOutputFilter {
             }
 
             let current = self.serialize_row(row);
-            let has_content = self.line_has_any_content(row);
+            if self.closed_rows.remove(&row) {
+                if self.has_open_row {
+                    if self.open_row == row && current == self.open_row_text {
+                        output.push('\n');
+                    } else {
+                        output.push('\n');
+                        output.push_str(&current);
+                        output.push('\n');
+                    }
+                } else {
+                    output.push_str(&current);
+                    output.push('\n');
+                }
 
-            if !has_content && self.has_open_row && self.open_row == row {
-                output.push('\n');
                 self.has_open_row = false;
                 self.open_row_text.clear();
-                self.closed_row_text.remove(&row);
-                self.closed_row_joinable.remove(&row);
                 self.lines[row].touched = false;
                 continue;
-            }
-
-            if !has_content && !self.has_open_row {
-                self.lines[row].touched = false;
-                continue;
-            }
-
-            let previous_row = row.saturating_sub(1);
-            let previous_closed = self.closed_row_text.get(&previous_row).cloned();
-            let closed = self.closed_row_text.get(&row).cloned();
-            let closed_joinable =
-                closed.is_some() && self.closed_row_joinable.get(&row).copied().unwrap_or(false);
-            let join_previous_closed_row = row > 0
-                && previous_closed.is_some()
-                && self
-                    .closed_row_joinable
-                    .get(&previous_row)
-                    .copied()
-                    .unwrap_or(false)
-                && line_has_nonspace_char(&current);
-
-            if join_previous_closed_row {
-                let merged = merge_joinable_rows(
-                    previous_closed
-                        .as_ref()
-                        .expect("checked previous closed row above"),
-                    &current,
-                );
-                if self.has_open_row {
-                    output.push('\n');
-                    self.has_open_row = false;
-                    self.open_row_text.clear();
-                }
-                output.push_str(&merged);
-                self.has_open_row = true;
-                self.open_row = previous_row;
-                self.open_row_text = merged.clone();
-                self.closed_row_text.remove(&previous_row);
-                self.closed_row_joinable.remove(&previous_row);
-                if closed.is_some() {
-                    self.closed_row_text.insert(row, merged);
-                    self.closed_row_joinable.insert(row, closed_joinable);
-                }
-                self.lines[row].touched = false;
-                continue;
-            }
-
-            if let Some(closed_text) = closed.as_deref() {
-                if !closed_joinable && closed_text == current {
-                    if self.has_open_row && self.open_row != row {
-                        output.push('\n');
-                        self.has_open_row = false;
-                        self.open_row_text.clear();
-                    }
-                    output.push_str(&current);
-                    output.push('\n');
-                    self.has_open_row = false;
-                    self.open_row_text.clear();
-                    self.closed_row_text.remove(&row);
-                    self.closed_row_joinable.remove(&row);
-                    self.lines[row].touched = false;
-                    continue;
-                }
-
-                if closed_joinable && closed_text == current {
-                    self.lines[row].touched = false;
-                    continue;
-                }
-
-                if closed_text != current && line_has_nonspace_char(&current) {
-                    if self.has_open_row {
-                        output.push('\n');
-                        self.has_open_row = false;
-                        self.open_row_text.clear();
-                    }
-                    output.push_str(&current);
-                    output.push('\n');
-                    self.closed_row_text.insert(row, current);
-                    self.closed_row_joinable.insert(row, false);
-                    self.lines[row].touched = false;
-                    continue;
-                }
             }
 
             if !line_has_nonspace_char(&current) {
+                if self.has_open_row && self.open_row == row {
+                    output.push('\n');
+                    self.has_open_row = false;
+                    self.open_row_text.clear();
+                }
                 self.lines[row].touched = false;
                 continue;
             }
 
             if self.has_open_row && self.open_row == row {
                 if current != self.open_row_text {
-                    let suffix = suffix_after_byte_len(
-                        &current,
-                        self.open_row_text.len().min(current.len()),
-                    );
-                    if !suffix.is_empty() {
-                        output.push_str(suffix);
-                    }
+                    output.push('\n');
+                    output.push_str(&current);
                     self.open_row_text = current;
                 }
             } else {
@@ -750,60 +667,6 @@ fn line_has_nonspace_char(text: &str) -> bool {
     text.bytes().any(|byte| byte != b' ')
 }
 
-fn is_prompt_marker_char(ch: char) -> bool {
-    matches!(ch, '>' | '$' | '#')
-}
-
-fn closed_row_should_be_joinable(text: &str, row_width: usize) -> bool {
-    row_width >= 80
-        && line_has_nonspace_char(text)
-        && !text.bytes().any(|byte| matches!(byte, b' ' | b'\t'))
-}
-
-fn merge_joinable_rows(previous: &str, current: &str) -> String {
-    if previous.is_empty() {
-        return current.to_string();
-    }
-    if current.is_empty() {
-        return previous.to_string();
-    }
-    if current.starts_with(previous) {
-        return current.to_string();
-    }
-    if let Some(repeated) = current.find(previous) {
-        if repeated > 0
-            && current[..repeated]
-                .chars()
-                .last()
-                .is_some_and(is_prompt_marker_char)
-        {
-            return current[repeated..].to_string();
-        }
-    }
-
-    let previous_chars = previous.chars().collect::<Vec<_>>();
-    let current_chars = current.chars().collect::<Vec<_>>();
-    let max_overlap = previous_chars.len().min(current_chars.len());
-    for overlap in (1..=max_overlap).rev() {
-        if previous_chars[previous_chars.len() - overlap..] == current_chars[..overlap] {
-            let suffix = current_chars[overlap..].iter().collect::<String>();
-            return format!("{previous}{suffix}");
-        }
-    }
-
-    format!("{previous}{current}")
-}
-
-fn line_has_any_content(line: &Line) -> bool {
-    line.cells.iter().any(|cell| {
-        if cell.continuation {
-            false
-        } else {
-            cell.has_text || cell.explicit_space
-        }
-    })
-}
-
 fn clear_cells_range(line: &mut Line, start_col: usize, end_col: usize) {
     if end_col <= start_col {
         return;
@@ -868,18 +731,6 @@ fn clear_cells_range(line: &mut Line, start_col: usize, end_col: usize) {
     }
 }
 
-fn suffix_after_byte_len(text: &str, len: usize) -> &str {
-    let start = if text.is_char_boundary(len) {
-        len
-    } else {
-        text.char_indices()
-            .map(|(index, _)| index)
-            .find(|index| *index >= len)
-            .unwrap_or(text.len())
-    };
-    &text[start..]
-}
-
 #[cfg(test)]
 mod tests {
     use crate::exec::session::pty_filter::TerminalOutputFilter;
@@ -931,7 +782,7 @@ mod tests {
         let mut filter = WinptyOutputFilter::new(0, 0);
 
         assert_eq!(filter.filter_chunk("before\x1b[").output, "before");
-        assert_eq!(filter.filter_chunk("0Kafter").output, "after");
+        assert_eq!(filter.filter_chunk("0Kafter").output, "\nbeforeafter");
         assert_eq!(filter.drain_pending(), "");
     }
 
@@ -946,31 +797,27 @@ mod tests {
     }
 
     #[test]
-    fn winpty_output_filter_collapses_prompt_rewrites() {
+    fn winpty_output_filter_preserves_blank_lines() {
         let mut filter = WinptyOutputFilter::new(0, 0);
-        let first = filter
-            .filter_chunk(
-                "Microsoft Windows XP [\u{7248}\u{672c} 5.1.2600]\x1b[105G(C\r\n)\
-                 ) \u{7248}\u{6743}\u{6240}\u{6709} 1985-2001 Microsoft Corp.\r\n\
-                 \x1b[107GC:\\chi\r\n>\r",
-            )
-            .output;
-        let second = filter
-            .filter_chunk("\x1b[107GC:\\chi>e\r\ncho hello\x1b[100Ghello\r\n\x1b[107GC:\\chi>\r")
-            .output;
-        let final_output = first + &second + &filter.drain_pending();
 
-        assert!(final_output.contains("Microsoft Windows XP [\u{7248}\u{672c} 5.1.2600]"));
-        assert!(
-            final_output.contains("\u{7248}\u{6743}\u{6240}\u{6709} 1985-2001 Microsoft Corp.")
+        assert_eq!(
+            filter.filter_chunk("one\r\n\r\ntwo\r\n").output,
+            "one\n\ntwo\n"
         );
-        assert!(final_output.contains("C:\\chi>"));
-        assert!(final_output.contains("hellohello"));
-        assert!(
-            !final_output
-                .contains("                                                                ")
+        assert_eq!(filter.drain_pending(), "");
+    }
+
+    #[test]
+    fn winpty_output_filter_keeps_closed_rows_separate() {
+        let mut filter = WinptyOutputFilter::new(0, 0);
+        let first = "a".repeat(80);
+        let input = format!("{first}\r\nsecond\r\n");
+
+        assert_eq!(
+            filter.filter_chunk(&input).output,
+            format!("{first}\nsecond\n")
         );
-        assert!(!final_output.contains('\x1b'));
+        assert_eq!(filter.drain_pending(), "");
     }
 
     #[test]
@@ -1002,10 +849,7 @@ mod tests {
         );
         assert_eq!(filter.flush_due_at(1149), "");
 
-        let emitted = filter.flush_due_at(1150);
-        assert!(emitted.contains("prompt>echo hello"));
-        assert!(emitted.contains("hello"));
-        assert!(!emitted.contains("hell\no"));
+        assert_eq!(filter.flush_due_at(1150), "prompt>echo hello\nhello");
     }
 
     #[test]

@@ -1,6 +1,5 @@
 #include "test_assert.h"
 
-#include <cstdio>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -64,27 +63,6 @@ std::string raw_from_code_page(unsigned int code_page, const std::wstring& wide)
         throw std::runtime_error("WideCharToMultiByte failed");
     }
     return raw;
-}
-
-bool is_wine_runtime() {
-    const HMODULE ntdll = GetModuleHandleA("ntdll.dll");
-    return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
-}
-
-bool should_skip_real_winpty_timing_tests() {
-#ifdef REMOTE_EXEC_CPP_HAS_WINPTY
-    if (is_wine_runtime()) {
-        static bool warned = false;
-        if (!warned) {
-            std::fprintf(stderr, "warning: skipping WinPTY timing tests under Wine\n");
-            warned = true;
-        }
-        return true;
-    }
-    return false;
-#else
-    return true;
-#endif
 }
 
 void assert_code_page_decode(
@@ -365,7 +343,7 @@ void test_terminal_output_filter_strips_osc_title_sequences() {
 void test_terminal_output_filter_handles_split_escape_sequences() {
     TerminalOutputFilter filter;
     TEST_ASSERT(filter_terminal_output_for_test(&filter, "before\x1b[") == "before");
-    TEST_ASSERT(filter_terminal_output_for_test(&filter, "0Kafter") == "after");
+    TEST_ASSERT(filter_terminal_output_for_test(&filter, "0Kafter") == "\nbeforeafter");
     TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
 }
 
@@ -377,37 +355,19 @@ void test_terminal_output_filter_applies_backspace_to_utf8_codepoints() {
     );
 }
 
-void test_terminal_output_filter_collapses_winpty_prompt_rewrites() {
+void test_terminal_output_filter_preserves_blank_lines() {
     TerminalOutputFilter filter;
-    const std::string first = filter_terminal_output_for_test(
-        &filter,
-        "Microsoft Windows XP [\xE7\x89\x88\xE6\x9C\xAC 5.1.2600]"
-        "\x1b[105G(C\r\n)\x20"
-        "\xE7\x89\x88\xE6\x9D\x83\xE6\x89\x80\xE6\x9C\x89 1985-2001 Microsoft Corp.\r\n"
-        "\x1b[107GC:\\chi\r\n>\r"
-    );
-    const std::string second = filter_terminal_output_for_test(
-        &filter,
-        "\x1b[107GC:\\chi>e\r\n"
-        "cho hello\x1b[100Ghello\r\n"
-        "\x1b[107GC:\\chi>\r"
-    );
-    const std::string final = first + second + drain_terminal_output_for_test(&filter);
+    TEST_ASSERT(filter_terminal_output_for_test(&filter, "one\r\n\r\ntwo\r\n") == "one\n\ntwo\n");
+    TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
+}
 
-    TEST_ASSERT(
-        final.find("Microsoft Windows XP [\xE7\x89\x88\xE6\x9C\xAC 5.1.2600]") != std::string::npos
-    );
-    TEST_ASSERT(
-        final.find("\xE7\x89\x88\xE6\x9D\x83\xE6\x89\x80\xE6\x9C\x89 1985-2001 Microsoft Corp.")
-        != std::string::npos
-    );
-    TEST_ASSERT(final.find("C:\\chi>") != std::string::npos);
-    TEST_ASSERT(final.find("hellohello") != std::string::npos);
-    TEST_ASSERT(
-        final.find("                                                                ")
-        == std::string::npos
-    );
-    TEST_ASSERT(final.find('\x1b') == std::string::npos);
+void test_terminal_output_filter_keeps_closed_rows_separate() {
+    TerminalOutputFilter filter;
+    const std::string first(80U, 'a');
+    const std::string input = first + "\r\nsecond\r\n";
+
+    TEST_ASSERT(filter_terminal_output_for_test(&filter, input) == first + "\nsecond\n");
+    TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
 }
 
 void test_terminal_output_filter_debounces_touched_rows() {
@@ -434,9 +394,7 @@ void test_terminal_output_filter_debounce_uses_latest_repaint() {
     TEST_ASSERT(flush_terminal_output_due_for_test(&filter, 1149U).empty());
 
     const std::string emitted = flush_terminal_output_due_for_test(&filter, 1150U);
-    TEST_ASSERT(emitted.find("prompt>echo hello") != std::string::npos);
-    TEST_ASSERT(emitted.find("hello") != std::string::npos);
-    TEST_ASSERT(emitted.find("hell\no") == std::string::npos);
+    TEST_ASSERT(emitted == "prompt>echo hello\nhello");
 }
 
 void test_terminal_output_filter_debounce_drain_flushes_immediately() {
@@ -446,10 +404,6 @@ void test_terminal_output_filter_debounce_drain_flushes_immediately() {
 }
 
 void test_terminal_output_filter_does_not_finalize_partial_rows_on_flush_due() {
-    if (should_skip_real_winpty_timing_tests()) {
-        return;
-    }
-
     TerminalOutputFilter filter(150UL, 500UL);
     TEST_ASSERT(
         filter_terminal_output_at_for_test(&filter, "prompt>echo hello\x1b[116Ghell\r\no", 1000U)
@@ -487,7 +441,8 @@ int main() {
     test_terminal_output_filter_strips_osc_title_sequences();
     test_terminal_output_filter_handles_split_escape_sequences();
     test_terminal_output_filter_applies_backspace_to_utf8_codepoints();
-    test_terminal_output_filter_collapses_winpty_prompt_rewrites();
+    test_terminal_output_filter_preserves_blank_lines();
+    test_terminal_output_filter_keeps_closed_rows_separate();
     test_terminal_output_filter_debounces_touched_rows();
     test_terminal_output_filter_debounce_uses_latest_repaint();
     test_terminal_output_filter_debounce_drain_flushes_immediately();
