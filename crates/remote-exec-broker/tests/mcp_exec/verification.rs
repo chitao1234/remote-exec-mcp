@@ -1,5 +1,6 @@
 use super::*;
 use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
+use std::time::Duration;
 
 #[tokio::test]
 async fn broker_keeps_healthy_targets_available_when_one_target_is_down() {
@@ -26,6 +27,32 @@ async fn broker_keeps_healthy_targets_available_when_one_target_is_down() {
         )
         .await;
     assert!(dead.contains("daemon") || dead.contains("connection"));
+}
+
+#[tokio::test]
+async fn daemon_tool_error_triggers_health_recheck() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let before = fixture.health_call_count().await;
+
+    let error = fixture
+        .call_tool_error(
+            "apply_patch",
+            serde_json::json!({
+                "target": DEFAULT_TEST_TARGET,
+                "input": "*** Begin Patch\n*** Add File: missing-footer.txt\n+hello\n"
+            }),
+        )
+        .await;
+    assert!(error.contains("invalid patch footer"));
+
+    let outcome = support::test_helpers::poll_until_ready(
+        50,
+        Duration::from_millis(20),
+        || async { fixture.health_call_count().await > before },
+        || false,
+    )
+    .await;
+    assert_eq!(outcome, support::test_helpers::ReadinessWaitOutcome::Ready);
 }
 
 #[tokio::test]

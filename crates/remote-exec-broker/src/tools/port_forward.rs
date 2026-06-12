@@ -112,6 +112,9 @@ async fn open_forwards(
         {
             Ok(forward) => opened.push(forward),
             Err(err) => {
+                state.trigger_remote_target_health_recheck_if_daemon_error(&listen_side_name, &err);
+                state
+                    .trigger_remote_target_health_recheck_if_daemon_error(&connect_side_name, &err);
                 state.port_forwards.release_open_reservations(reservations);
                 for forward in opened {
                     let _ = forward

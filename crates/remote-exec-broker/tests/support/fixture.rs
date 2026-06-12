@@ -107,6 +107,10 @@ impl BrokerFixture {
         *self.stub_state.exec_start_calls.lock().await
     }
 
+    pub async fn health_call_count(&self) -> usize {
+        *self.stub_state.health_calls.lock().await
+    }
+
     pub async fn last_patch_request(&self) -> Option<remote_exec_proto::rpc::PatchApplyRequest> {
         self.stub_state.last_patch_request.lock().await.clone()
     }

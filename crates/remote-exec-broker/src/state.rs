@@ -13,7 +13,7 @@ use remote_exec_proto::rpc::{
 use remote_exec_proto::transfer::TransferLimits;
 
 use crate::{
-    daemon_client::{RpcToolErrorMode, normalize_tool_result},
+    daemon_client::{DaemonClientError, RpcToolErrorMode, normalize_tool_result},
     local::{self, BrokerHostOrTarget},
     port_forward,
     session_store::{SessionRecord, SessionStore},
@@ -173,6 +173,88 @@ impl BrokerState {
         handle.refresh_health_and_cache(name).await
     }
 
+    pub(crate) async fn refresh_remote_target_health_and_dependents(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<()> {
+        match self.refresh_remote_target_health(name).await {
+            Ok(Some(previous_daemon_instance_id)) => {
+                self.invalidate_target_exec_sessions(name).await;
+                match self
+                    .port_forwards
+                    .close_target_instance(
+                        name,
+                        &previous_daemon_instance_id,
+                        "target daemon instance changed",
+                    )
+                    .await
+                {
+                    Ok(closed) if !closed.is_empty() => {
+                        tracing::info!(
+                            target = %name,
+                            previous_daemon_instance_id = %previous_daemon_instance_id,
+                            closed_forwards = closed.len(),
+                            "closed broker port forwards after daemon instance change"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        tracing::warn!(
+                            target = %name,
+                            previous_daemon_instance_id = %previous_daemon_instance_id,
+                            error = %err,
+                            "failed to close broker port forwards after daemon instance change"
+                        );
+                    }
+                }
+                tracing::info!(
+                    target = %name,
+                    "invalidated broker sessions after daemon instance change"
+                );
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub(crate) fn trigger_remote_target_health_recheck(&self, name: &str) {
+        let Ok(handle) = self.configured_target(name) else {
+            return;
+        };
+        if handle.as_remote().is_none() {
+            return;
+        }
+
+        let state = self.clone();
+        let name = name.to_string();
+        tokio::spawn(async move {
+            if let Err(err) = state
+                .refresh_remote_target_health_and_dependents(&name)
+                .await
+            {
+                tracing::debug!(
+                    target = %name,
+                    error = %err,
+                    "triggered target health recheck did not update cached daemon metadata"
+                );
+            }
+        });
+    }
+
+    pub(crate) fn trigger_remote_target_health_recheck_if_daemon_error(
+        &self,
+        name: &str,
+        err: &anyhow::Error,
+    ) {
+        if err
+            .chain()
+            .any(|cause| cause.downcast_ref::<DaemonClientError>().is_some())
+        {
+            self.trigger_remote_target_health_recheck(name);
+        }
+    }
+
     fn configured_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
         self.targets
             .get(name)
@@ -181,8 +263,23 @@ impl BrokerState {
 
     async fn verified_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
         let handle = self.configured_target(name)?;
-        handle.ensure_daemon_info_cached(name).await?;
+        if let Err(err) = handle.ensure_daemon_info_cached(name).await {
+            self.trigger_remote_target_health_recheck(name);
+            return Err(err);
+        }
         Ok(handle)
+    }
+
+    fn normalize_target_result<T>(
+        &self,
+        name: &str,
+        result: Result<T, DaemonClientError>,
+        mode: RpcToolErrorMode,
+    ) -> anyhow::Result<T> {
+        if result.is_err() {
+            self.trigger_remote_target_health_recheck(name);
+        }
+        normalize_tool_result(result, mode)
     }
 
     pub(crate) async fn exec_path_policy(&self, name: &str) -> anyhow::Result<PathPolicy> {
@@ -197,7 +294,7 @@ impl BrokerState {
         req: &ExecStartRequest,
     ) -> anyhow::Result<ExecResponse> {
         let target = self.verified_target(name).await?;
-        normalize_tool_result(target.exec_start(req).await, RpcToolErrorMode::Full)
+        self.normalize_target_result(name, target.exec_start(req).await, RpcToolErrorMode::Full)
     }
 
     pub(crate) async fn patch_apply(
@@ -206,7 +303,7 @@ impl BrokerState {
         req: &PatchApplyRequest,
     ) -> anyhow::Result<PatchApplyResponse> {
         let target = self.verified_target(name).await?;
-        normalize_tool_result(target.patch_apply(req).await, RpcToolErrorMode::Full)
+        self.normalize_target_result(name, target.patch_apply(req).await, RpcToolErrorMode::Full)
     }
 
     pub(crate) async fn image_read(
@@ -215,7 +312,11 @@ impl BrokerState {
         req: &ImageReadRequest,
     ) -> anyhow::Result<ImageReadResponse> {
         let target = self.verified_target(name).await?;
-        normalize_tool_result(target.image_read(req).await, RpcToolErrorMode::MessageOnly)
+        self.normalize_target_result(
+            name,
+            target.image_read(req).await,
+            RpcToolErrorMode::MessageOnly,
+        )
     }
 
     async fn session_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
@@ -278,12 +379,14 @@ impl BrokerState {
         let response = match response {
             Ok(response) => response,
             Err(err) if err.is_rpc_error_code(RpcErrorCode::UnknownSession) => {
+                self.trigger_remote_target_health_recheck(&record.target);
                 self.sessions.remove(&record.session_id).await;
                 return Err(anyhow::anyhow!(unknown_process_id_message(
                     &record.session_id
                 )));
             }
             Err(err) => {
+                self.trigger_remote_target_health_recheck(&record.target);
                 if let Ok(info) = target.target_info().await {
                     if info.daemon_instance_id != record.daemon_instance_id {
                         target.invalidate_cached_daemon_info().await;
@@ -330,7 +433,7 @@ impl BrokerState {
         req: &FileReadRequest,
     ) -> anyhow::Result<FileReadResponse> {
         let target = self.file_tool_target(name).await?;
-        normalize_tool_result(target.file_read(req).await, RpcToolErrorMode::Full)
+        self.normalize_target_result(name, target.file_read(req).await, RpcToolErrorMode::Full)
     }
 
     pub(crate) async fn file_write(
@@ -339,7 +442,7 @@ impl BrokerState {
         req: &FileWriteRequest,
     ) -> anyhow::Result<FileWriteResponse> {
         let target = self.file_tool_target(name).await?;
-        normalize_tool_result(target.file_write(req).await, RpcToolErrorMode::Full)
+        self.normalize_target_result(name, target.file_write(req).await, RpcToolErrorMode::Full)
     }
 
     pub(crate) async fn file_edit(
@@ -348,7 +451,7 @@ impl BrokerState {
         req: &FileEditRequest,
     ) -> anyhow::Result<FileEditResponse> {
         let target = self.file_tool_target(name).await?;
-        normalize_tool_result(target.file_edit(req).await, RpcToolErrorMode::Full)
+        self.normalize_target_result(name, target.file_edit(req).await, RpcToolErrorMode::Full)
     }
 
     pub(crate) async fn invalidate_target_exec_sessions(&self, target: &str) {

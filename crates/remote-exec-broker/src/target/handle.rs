@@ -328,12 +328,6 @@ impl TargetHandle {
         let info = match self.target_info().await {
             Ok(info) => info,
             Err(DaemonClientError::Transport(err)) => {
-                self.runtime
-                    .lock()
-                    .await
-                    .set_unhealthy(&DaemonClientError::Transport(anyhow::anyhow!(
-                        err.to_string()
-                    )));
                 tracing::warn!(target = %name, ?err, "target identity verification failed");
                 return Err(DaemonClientError::Transport(err).into());
             }

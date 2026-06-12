@@ -96,6 +96,7 @@ pub(crate) struct StubDaemonState {
     pub(super) exec_start_behavior: Arc<Mutex<ExecStartBehavior>>,
     pub(super) exec_start_warnings: Arc<Mutex<Vec<ExecWarning>>>,
     pub(super) exec_start_calls: Arc<Mutex<usize>>,
+    pub(super) health_calls: Arc<Mutex<usize>>,
     pub(super) last_exec_write_request: Arc<Mutex<Option<ExecWriteRequest>>>,
     pub(super) last_patch_request: Arc<Mutex<Option<PatchApplyRequest>>>,
     pub(super) last_file_read_request: Arc<Mutex<Option<remote_exec_proto::rpc::FileReadRequest>>>,
@@ -138,6 +139,7 @@ pub(super) fn stub_daemon_state(
         exec_start_behavior: Arc::new(Mutex::new(ExecStartBehavior::Success)),
         exec_start_warnings: Arc::new(Mutex::new(Vec::new())),
         exec_start_calls: Arc::new(Mutex::new(0)),
+        health_calls: Arc::new(Mutex::new(0)),
         last_exec_write_request: Arc::new(Mutex::new(None)),
         last_patch_request: Arc::new(Mutex::new(None)),
         last_file_read_request: Arc::new(Mutex::new(None)),
@@ -479,6 +481,7 @@ async fn require_bearer_auth(
 }
 
 async fn health(State(state): State<StubDaemonState>) -> Json<HealthCheckResponse> {
+    *state.health_calls.lock().await += 1;
     Json(HealthCheckResponse {
         status: HealthStatus::Ok,
         daemon_version: "0.1.0".to_string(),

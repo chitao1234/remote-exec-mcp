@@ -98,7 +98,11 @@ pub(super) async fn backend_for_endpoint<'a>(
             crate::local::BrokerHostOrTarget::BrokerHost => broker_host_backend(state),
             crate::local::BrokerHostOrTarget::Target(target_name) => {
                 let target = state.transfer_remote_target(target_name).await?;
-                TransferEndpointBackend::Remote(RemoteTransferBackend { target })
+                TransferEndpointBackend::Remote(RemoteTransferBackend {
+                    state,
+                    target_name,
+                    target,
+                })
             }
         },
     )
@@ -113,16 +117,23 @@ pub(super) async fn backend_for_planned_endpoint<'a>(
         None => broker_host_backend(state),
         Some(planned_daemon_instance_id) => {
             let target = state.transfer_remote_target(&raw_endpoint.target).await?;
-            let current = target
-                .target_info()
-                .await
-                .map_err(|err| err.into_tool_error(RpcToolErrorMode::MessageOnly))?;
+            let current = match target.target_info().await {
+                Ok(current) => current,
+                Err(err) => {
+                    state.trigger_remote_target_health_recheck(&raw_endpoint.target);
+                    return Err(err.into_tool_error(RpcToolErrorMode::MessageOnly));
+                }
+            };
             anyhow::ensure!(
                 current.daemon_instance_id == planned_daemon_instance_id,
                 "target `{}` daemon instance changed during transfer planning",
                 raw_endpoint.target
             );
-            TransferEndpointBackend::Remote(RemoteTransferBackend { target })
+            TransferEndpointBackend::Remote(RemoteTransferBackend {
+                state,
+                target_name: &raw_endpoint.target,
+                target,
+            })
         }
     })
 }
@@ -142,6 +153,8 @@ pub(super) struct BrokerHostTransferBackend<'a> {
 }
 
 pub(super) struct RemoteTransferBackend<'a> {
+    state: &'a crate::BrokerState,
+    target_name: &'a str,
     target: RemoteTargetHandle<'a>,
 }
 
@@ -287,7 +300,14 @@ impl TransferBackend for RemoteTransferBackend<'_> {
         &'a self,
         request: &'a TransferPathInfoRequest,
     ) -> BoxFuture<'a, Result<TransferPathInfoResponse, DaemonClientError>> {
-        Box::pin(async move { self.target.transfer_path_info(request).await })
+        Box::pin(async move {
+            let result = self.target.transfer_path_info(request).await;
+            if result.is_err() {
+                self.state
+                    .trigger_remote_target_health_recheck(self.target_name);
+            }
+            result
+        })
     }
 
     fn export_to_file<'a>(
@@ -297,6 +317,8 @@ impl TransferBackend for RemoteTransferBackend<'_> {
     ) -> BoxFuture<'a, anyhow::Result<ExportedArchive>> {
         Box::pin(async move {
             let exported = handle_remote_transfer_result(
+                self.state,
+                self.target_name,
                 self.target,
                 self.target
                     .transfer_export_to_file(request, archive_path)
@@ -313,6 +335,8 @@ impl TransferBackend for RemoteTransferBackend<'_> {
     ) -> BoxFuture<'a, anyhow::Result<TransferArchiveStream>> {
         Box::pin(async move {
             let exported = handle_remote_transfer_result(
+                self.state,
+                self.target_name,
                 self.target,
                 self.target.transfer_export_stream(request).await,
             )
@@ -332,6 +356,8 @@ impl TransferBackend for RemoteTransferBackend<'_> {
     ) -> BoxFuture<'a, anyhow::Result<TransferImportResponse>> {
         Box::pin(async move {
             handle_remote_transfer_result(
+                self.state,
+                self.target_name,
                 self.target,
                 self.target
                     .transfer_import_from_file(archive_path, request)
@@ -348,6 +374,8 @@ impl TransferBackend for RemoteTransferBackend<'_> {
     ) -> BoxFuture<'a, anyhow::Result<TransferImportResponse>> {
         Box::pin(async move {
             handle_remote_transfer_result(
+                self.state,
+                self.target_name,
                 self.target,
                 self.target
                     .transfer_import_from_archive_stream(request, archive.into_archive_stream())
@@ -365,9 +393,14 @@ fn exported_archive_from_response(response: TransferExportResponse) -> ExportedA
 }
 
 async fn handle_remote_transfer_result<T>(
+    state: &crate::BrokerState,
+    target_name: &str,
     target: RemoteTargetHandle<'_>,
     result: Result<T, DaemonClientError>,
 ) -> anyhow::Result<T> {
     let _ = target;
+    if result.is_err() {
+        state.trigger_remote_target_health_recheck(target_name);
+    }
     normalize_tool_result(result, RpcToolErrorMode::MessageOnly)
 }
