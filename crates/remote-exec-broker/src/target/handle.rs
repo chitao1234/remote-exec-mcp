@@ -223,6 +223,10 @@ impl TargetHandle {
         self.runtime_snapshot().await.daemon_info
     }
 
+    pub(crate) async fn cached_health(&self) -> Option<CachedTargetHealth> {
+        self.runtime_snapshot().await.health
+    }
+
     pub(crate) async fn cached_daemon_info_after_verification(
         &self,
         name: &str,

@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::time::SystemTime;
 
 use anyhow::Context;
 use remote_exec_proto::rpc::TargetInfoResponse;
@@ -12,7 +13,7 @@ use crate::{
     local::backend::LocalDaemonClient,
     port_forward,
     session_store::SessionStore,
-    state::BrokerStateInit,
+    state::{BrokerStateInit, TargetHealthRefreshIntervals},
     target::{TargetBackend, TargetHandle, ensure_expected_daemon_name},
 };
 
@@ -60,7 +61,10 @@ pub async fn build_state(config: config::ValidatedBrokerConfig) -> anyhow::Resul
         enable_transfer_compression: config.enable_transfer_compression,
         transfer_limits: config.transfer_limits,
         disable_structured_content: config.disable_structured_content,
-        health_refresh_interval: config.health_refresh.interval(),
+        health_refresh_intervals: TargetHealthRefreshIntervals {
+            healthy: config.health_refresh.healthy_interval(),
+            unhealthy: config.health_refresh.unhealthy_interval(),
+        },
         tools: config.tools,
         port_forward_limits: config.port_forward_limits,
         host_sandbox,
@@ -257,7 +261,7 @@ impl PeriodicTargetRefreshTask {
 }
 
 async fn periodic_target_refresh_loop(state: BrokerState, cancel: CancellationToken) {
-    let mut interval = tokio::time::interval(state.health_refresh_interval);
+    let mut interval = tokio::time::interval(state.health_refresh_intervals.shortest());
     loop {
         tokio::select! {
             biased;
@@ -265,7 +269,10 @@ async fn periodic_target_refresh_loop(state: BrokerState, cancel: CancellationTo
             _ = interval.tick() => {}
         }
 
-        for name in state.remote_target_names() {
+        let names = state
+            .remote_targets_due_for_health_refresh(SystemTime::now())
+            .await;
+        for name in names {
             if cancel.is_cancelled() {
                 return;
             }
@@ -518,7 +525,10 @@ mod tests {
                 disable_structured_content: false,
                 tools: Default::default(),
                 port_forward_limits: Default::default(),
-                health_refresh: BrokerHealthRefreshConfig { interval_ms: 50 },
+                health_refresh: BrokerHealthRefreshConfig {
+                    healthy_interval_ms: 50,
+                    unhealthy_interval_ms: 50,
+                },
                 targets: BTreeMap::new(),
                 local: None,
             }
@@ -550,7 +560,10 @@ mod tests {
                 disable_structured_content: false,
                 tools: Default::default(),
                 port_forward_limits: Default::default(),
-                health_refresh: BrokerHealthRefreshConfig { interval_ms: 1 },
+                health_refresh: BrokerHealthRefreshConfig {
+                    healthy_interval_ms: 1,
+                    unhealthy_interval_ms: 1,
+                },
                 targets,
                 local: None,
             }

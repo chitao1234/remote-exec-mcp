@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::Context;
 use remote_exec_host::sandbox::CompiledFilesystemSandbox;
@@ -24,7 +24,7 @@ pub(crate) struct BrokerStateInit {
     pub(crate) enable_transfer_compression: bool,
     pub(crate) transfer_limits: TransferLimits,
     pub(crate) disable_structured_content: bool,
-    pub(crate) health_refresh_interval: Duration,
+    pub(crate) health_refresh_intervals: TargetHealthRefreshIntervals,
     pub(crate) tools: crate::config::BrokerToolsConfig,
     pub(crate) port_forward_limits: port_forward::BrokerPortForwardLimits,
     pub(crate) host_sandbox: Option<CompiledFilesystemSandbox>,
@@ -56,7 +56,7 @@ pub struct BrokerState {
     pub(crate) enable_transfer_compression: bool,
     pub(crate) transfer_limits: TransferLimits,
     pub(crate) disable_structured_content: bool,
-    pub(crate) health_refresh_interval: Duration,
+    pub(crate) health_refresh_intervals: TargetHealthRefreshIntervals,
     pub(crate) tools: crate::config::BrokerToolsConfig,
     pub(crate) port_forward_limits: port_forward::BrokerPortForwardLimits,
     pub(crate) host_sandbox: Option<CompiledFilesystemSandbox>,
@@ -69,6 +69,37 @@ pub struct BrokerState {
 pub(crate) struct TargetStatusSnapshot {
     pub(crate) name: String,
     pub(crate) daemon_info: Option<CachedDaemonInfo>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct TargetHealthRefreshIntervals {
+    pub(crate) healthy: Duration,
+    pub(crate) unhealthy: Duration,
+}
+
+impl TargetHealthRefreshIntervals {
+    pub(crate) fn shortest(self) -> Duration {
+        self.healthy.min(self.unhealthy)
+    }
+
+    pub(crate) fn is_due(
+        self,
+        health: Option<&crate::target::CachedTargetHealth>,
+        now: SystemTime,
+    ) -> bool {
+        let Some(health) = health else {
+            return true;
+        };
+
+        let interval = if health.healthy {
+            self.healthy
+        } else {
+            self.unhealthy
+        };
+        now.duration_since(health.last_checked_at)
+            .map(|elapsed| elapsed >= interval)
+            .unwrap_or(false)
+    }
 }
 
 pub(crate) struct RegisteredExecSession {
@@ -87,7 +118,7 @@ impl BrokerState {
             enable_transfer_compression: init.enable_transfer_compression,
             transfer_limits: init.transfer_limits,
             disable_structured_content: init.disable_structured_content,
-            health_refresh_interval: init.health_refresh_interval,
+            health_refresh_intervals: init.health_refresh_intervals,
             tools: init.tools,
             port_forward_limits: init.port_forward_limits,
             host_sandbox: init.host_sandbox,
@@ -113,12 +144,21 @@ impl BrokerState {
         snapshots
     }
 
-    pub(crate) fn remote_target_names(&self) -> Vec<String> {
-        self.targets
-            .iter()
-            .filter(|(_, handle)| handle.as_remote().is_some())
-            .map(|(name, _)| name.clone())
-            .collect()
+    pub(crate) async fn remote_targets_due_for_health_refresh(
+        &self,
+        now: SystemTime,
+    ) -> Vec<String> {
+        let mut names = Vec::new();
+        for (name, handle) in &self.targets {
+            if handle.as_remote().is_none() {
+                continue;
+            }
+            let health = handle.cached_health().await;
+            if self.health_refresh_intervals.is_due(health.as_ref(), now) {
+                names.push(name.clone());
+            }
+        }
+        names
     }
 
     pub(crate) async fn refresh_remote_target_health(

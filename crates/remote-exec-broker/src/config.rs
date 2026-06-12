@@ -52,19 +52,50 @@ pub struct BrokerToolsConfig {
     pub file: FileToolConfig,
 }
 
-const DEFAULT_TARGET_HEALTH_REFRESH_INTERVAL_MS: u64 = 5_000;
+const DEFAULT_TARGET_HEALTHY_REFRESH_INTERVAL_MS: u64 = 60_000;
+const DEFAULT_TARGET_UNHEALTHY_REFRESH_INTERVAL_MS: u64 = 15_000;
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BrokerHealthRefreshConfig {
-    #[serde(default = "default_target_health_refresh_interval_ms")]
-    pub interval_ms: u64,
+    pub healthy_interval_ms: u64,
+    pub unhealthy_interval_ms: u64,
 }
 
 impl Default for BrokerHealthRefreshConfig {
     fn default() -> Self {
         Self {
-            interval_ms: default_target_health_refresh_interval_ms(),
+            healthy_interval_ms: default_target_healthy_health_refresh_interval_ms(),
+            unhealthy_interval_ms: default_target_unhealthy_health_refresh_interval_ms(),
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for BrokerHealthRefreshConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RawBrokerHealthRefreshConfig {
+            #[serde(default)]
+            healthy_interval_ms: Option<u64>,
+            #[serde(default)]
+            unhealthy_interval_ms: Option<u64>,
+            #[serde(default)]
+            interval_ms: Option<u64>,
+        }
+
+        let raw = RawBrokerHealthRefreshConfig::deserialize(deserializer)?;
+        Ok(Self {
+            healthy_interval_ms: raw
+                .healthy_interval_ms
+                .or(raw.interval_ms)
+                .unwrap_or_else(default_target_healthy_health_refresh_interval_ms),
+            unhealthy_interval_ms: raw
+                .unhealthy_interval_ms
+                .or(raw.interval_ms)
+                .unwrap_or_else(default_target_unhealthy_health_refresh_interval_ms),
+        })
     }
 }
 
@@ -128,14 +159,22 @@ impl BrokerToolsConfig {
 impl BrokerHealthRefreshConfig {
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
-            self.interval_ms > 0,
-            "health_refresh.interval_ms must be greater than zero"
+            self.healthy_interval_ms > 0,
+            "health_refresh.healthy_interval_ms must be greater than zero"
+        );
+        anyhow::ensure!(
+            self.unhealthy_interval_ms > 0,
+            "health_refresh.unhealthy_interval_ms must be greater than zero"
         );
         Ok(())
     }
 
-    pub(crate) fn interval(self) -> Duration {
-        Duration::from_millis(self.interval_ms)
+    pub(crate) fn healthy_interval(self) -> Duration {
+        Duration::from_millis(self.healthy_interval_ms)
+    }
+
+    pub(crate) fn unhealthy_interval(self) -> Duration {
+        Duration::from_millis(self.unhealthy_interval_ms)
     }
 }
 
@@ -513,8 +552,12 @@ fn default_target_request_timeout_ms() -> u64 {
     DEFAULT_TARGET_REQUEST_TIMEOUT_MS
 }
 
-fn default_target_health_refresh_interval_ms() -> u64 {
-    DEFAULT_TARGET_HEALTH_REFRESH_INTERVAL_MS
+fn default_target_healthy_health_refresh_interval_ms() -> u64 {
+    DEFAULT_TARGET_HEALTHY_REFRESH_INTERVAL_MS
+}
+
+fn default_target_unhealthy_health_refresh_interval_ms() -> u64 {
+    DEFAULT_TARGET_UNHEALTHY_REFRESH_INTERVAL_MS
 }
 
 fn default_target_startup_probe_timeout_ms() -> u64 {

@@ -94,7 +94,10 @@ mod tests {
             enable_transfer_compression: true,
             transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
             disable_structured_content: false,
-            health_refresh_interval: std::time::Duration::from_secs(5),
+            health_refresh_intervals: crate::state::TargetHealthRefreshIntervals {
+                healthy: std::time::Duration::from_secs(60),
+                unhealthy: std::time::Duration::from_secs(15),
+            },
             tools: crate::config::BrokerToolsConfig::default(),
             port_forward_limits: crate::port_forward::BrokerPortForwardLimits::default(),
             host_sandbox: None,

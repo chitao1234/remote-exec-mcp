@@ -116,6 +116,89 @@ request_ms = 0
     );
 }
 
+#[tokio::test]
+async fn load_defaults_split_health_refresh_intervals() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = load_config(&dir, valid_target_config(DEFAULT_TEST_TARGET))
+        .await
+        .unwrap();
+
+    assert_eq!(config.health_refresh.healthy_interval_ms, 60_000);
+    assert_eq!(config.health_refresh.unhealthy_interval_ms, 15_000);
+    assert_eq!(
+        config.health_refresh.healthy_interval(),
+        std::time::Duration::from_secs(60)
+    );
+    assert_eq!(
+        config.health_refresh.unhealthy_interval(),
+        std::time::Duration::from_secs(15)
+    );
+}
+
+#[tokio::test]
+async fn load_accepts_split_health_refresh_intervals() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = load_config(
+        &dir,
+        format!(
+            r#"[health_refresh]
+healthy_interval_ms = 12000
+unhealthy_interval_ms = 7000
+
+{}"#,
+            valid_target_config(DEFAULT_TEST_TARGET)
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(config.health_refresh.healthy_interval_ms, 12_000);
+    assert_eq!(config.health_refresh.unhealthy_interval_ms, 7_000);
+}
+
+#[tokio::test]
+async fn load_accepts_legacy_single_health_refresh_interval() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = load_config(
+        &dir,
+        format!(
+            r#"[health_refresh]
+interval_ms = 9000
+
+{}"#,
+            valid_target_config(DEFAULT_TEST_TARGET)
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(config.health_refresh.healthy_interval_ms, 9_000);
+    assert_eq!(config.health_refresh.unhealthy_interval_ms, 9_000);
+}
+
+#[tokio::test]
+async fn load_rejects_zero_health_refresh_interval() {
+    let dir = tempfile::tempdir().unwrap();
+    let err = load_config(
+        &dir,
+        format!(
+            r#"[health_refresh]
+unhealthy_interval_ms = 0
+
+{}"#,
+            valid_target_config(DEFAULT_TEST_TARGET)
+        ),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("health_refresh.unhealthy_interval_ms must be greater than zero"),
+        "unexpected error: {err}"
+    );
+}
+
 #[cfg(not(feature = "broker-tls"))]
 #[tokio::test]
 async fn load_accepts_https_targets_even_when_broker_tls_feature_disabled() {
