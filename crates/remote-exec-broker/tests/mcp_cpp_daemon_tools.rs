@@ -46,10 +46,11 @@ async fn assert_list_targets_smoke(fixture: &CppDaemonBrokerFixture) {
         .iter()
         .find(|target| target["name"] == CPP_TARGET)
         .expect("C++ daemon target should be listed");
+    assert_eq!(target["healthy"], true);
     let daemon_info = &target["daemon_info"];
     assert!(daemon_info["supports_pty"].as_bool().is_some());
     assert_eq!(daemon_info["supports_port_forward"], true);
-    assert_eq!(daemon_info["port_forward_protocol_version"], 4);
+    assert!(daemon_info.get("port_forward_protocol_version").is_none());
     assert_eq!(daemon_info["transfer_stream_protocol_version"], 2);
 }
 

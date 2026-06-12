@@ -92,7 +92,7 @@ async fn broker_forwards_ports_through_real_cpp_daemon_and_handles_port_conflict
 }
 
 #[tokio::test]
-async fn list_targets_reports_port_forward_protocol_version_for_real_cpp_daemon() {
+async fn list_targets_reports_version_checked_port_forward_support_for_real_cpp_daemon() {
     let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
         return;
     };
@@ -106,9 +106,15 @@ async fn list_targets_reports_port_forward_protocol_version_for_real_cpp_daemon(
         "list_targets failed: {}",
         result.text_output
     );
+    assert_eq!(result.structured_content["targets"][0]["healthy"], true);
     assert_eq!(
-        result.structured_content["targets"][0]["daemon_info"]["port_forward_protocol_version"],
-        4
+        result.structured_content["targets"][0]["daemon_info"]["supports_port_forward"],
+        true
+    );
+    assert!(
+        result.structured_content["targets"][0]["daemon_info"]
+            .get("port_forward_protocol_version")
+            .is_none()
     );
 }
 
@@ -487,8 +493,17 @@ async fn windows_cpp_daemon_smoke() {
         target_info.text_output
     );
     assert_eq!(
-        target_info.structured_content["targets"][0]["daemon_info"]["port_forward_protocol_version"],
-        4
+        target_info.structured_content["targets"][0]["healthy"],
+        true
+    );
+    assert_eq!(
+        target_info.structured_content["targets"][0]["daemon_info"]["supports_port_forward"],
+        true
+    );
+    assert!(
+        target_info.structured_content["targets"][0]["daemon_info"]
+            .get("port_forward_protocol_version")
+            .is_none()
     );
 
     let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

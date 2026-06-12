@@ -14,15 +14,18 @@ pub async fn list_targets(
     let mut targets = Vec::with_capacity(snapshots.len());
     for snapshot in snapshots {
         let daemon_info = if snapshot.healthy {
-            snapshot.daemon_info.map(|info| ListTargetDaemonInfo {
-                identity: info.identity,
-                capabilities: info.capabilities,
+            snapshot.daemon_info.map(|info| {
+                ListTargetDaemonInfo::from_identity_and_capabilities(
+                    info.identity,
+                    &info.capabilities,
+                )
             })
         } else {
             None
         };
         targets.push(ListTargetEntry {
             name: snapshot.name,
+            healthy: snapshot.healthy,
             daemon_info,
         });
     }
@@ -53,29 +56,17 @@ fn format_targets_text(targets: &[ListTargetEntry]) -> String {
         .iter()
         .map(|target| match &target.daemon_info {
             Some(info) => format!(
-                "- {}: {}/{}, host={}, version={}, pty={}, forward_ports={}{}",
+                "- {}: healthy, {}/{}, host={}, version={}, pty={}, forward_ports={}",
                 target.name,
                 info.identity.platform.as_str(),
                 info.identity.arch.as_str(),
                 info.identity.hostname.as_str(),
                 info.identity.daemon_version.as_str(),
-                if info.capabilities.supports_pty {
+                if info.supports_pty { "yes" } else { "no" },
+                if info.supports_port_forward {
                     "yes"
                 } else {
                     "no"
-                },
-                if info.capabilities.supports_port_forward {
-                    "yes"
-                } else {
-                    "no"
-                },
-                if info.capabilities.supports_port_forward {
-                    info.capabilities
-                        .port_forward_protocol_version
-                        .map(|version| format!(", forward_protocol=v{}", version.get()))
-                        .unwrap_or_default()
-                } else {
-                    String::new()
                 },
             ),
             None => format!("- {}: unavailable (no cached daemon info)", target.name),

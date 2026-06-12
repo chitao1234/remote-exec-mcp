@@ -19,8 +19,10 @@ does not require repository knowledge.
 - `local` means the broker host, not necessarily your current shell.
 - `session_id` and `forward_id` are opaque broker runtime tokens. Do not treat
   them as process IDs or daemon-local state.
-- `list_targets` is cached inventory, not a live health probe. A configured
-  target can have `daemon_info: null`.
+- `list_targets` is broker inventory backed by cached metadata. It performs a
+  bounded recheck for unavailable or unhealthy remote targets before returning.
+- A configured target can have `healthy: false` and `daemon_info: null`; stale
+  daemon metadata is hidden while the target remains unhealthy.
 - Choosing a target grants broad access on that machine unless static sandbox
   config narrows the relevant path operation.
 - A single command runs on one endpoint. Use `transfer_files` to move bytes
@@ -92,8 +94,11 @@ Input:
 {}
 ```
 
-Use `daemon_info.platform` for path choices, `supports_pty` before `tty: true`,
-and `supports_port_forward` before remote forwarding.
+Use `targets[].healthy` to distinguish healthy targets from unavailable or
+unhealthy ones, `daemon_info.platform` for path choices, `supports_pty` before
+`tty: true`, and `supports_port_forward` before remote forwarding.
+`supports_port_forward` is true only when the target reports forwarding support
+and the broker verifies a supported tunnel protocol version.
 
 ### `exec_command`
 
@@ -446,7 +451,8 @@ Port forward:
   the tools and capabilities it reports.
 - Do not infer behavior from operating system names, daemon implementation,
   version strings, or build labels.
-- Trust `list_targets` capability fields and the tools exposed by the broker.
+- Trust `list_targets` health and capability fields and the tools exposed by the
+  broker.
 - Use `supports_pty` before `tty: true`; if PTY support is false or unknown,
   run non-interactively or expect a typed unsupported error.
 - Use `supports_port_forward` before opening forwards.

@@ -2,7 +2,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::rpc::{
-    DaemonIdentity, ExecPtySize, ExecWarning, TargetCapabilities, TargetInfoResponse,
+    DaemonIdentity, ExecPtySize, ExecWarning, FileToolProtocolVersion, TargetCapabilities,
+    TargetInfoResponse, TransferStreamProtocolVersion,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -62,15 +63,34 @@ pub struct CommandToolResult {
 pub struct ListTargetDaemonInfo {
     #[serde(flatten)]
     pub identity: DaemonIdentity,
-    #[serde(flatten)]
-    pub capabilities: TargetCapabilities,
+    pub supports_pty: bool,
+    pub supports_port_forward: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transfer_stream_protocol_version: Option<TransferStreamProtocolVersion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_tool_protocol_version: Option<FileToolProtocolVersion>,
 }
 
 impl From<&TargetInfoResponse> for ListTargetDaemonInfo {
     fn from(value: &TargetInfoResponse) -> Self {
+        Self::from_identity_and_capabilities(value.identity.clone(), &value.capabilities)
+    }
+}
+
+impl ListTargetDaemonInfo {
+    pub fn from_identity_and_capabilities(
+        identity: DaemonIdentity,
+        capabilities: &TargetCapabilities,
+    ) -> Self {
         Self {
-            identity: value.identity.clone(),
-            capabilities: value.capabilities.clone(),
+            identity,
+            supports_pty: capabilities.supports_pty,
+            supports_port_forward: capabilities.supports_port_forward
+                && capabilities
+                    .port_forward_protocol_version
+                    .is_some_and(|version| version.get() >= 4),
+            transfer_stream_protocol_version: capabilities.transfer_stream_protocol_version,
+            file_tool_protocol_version: capabilities.file_tool_protocol_version,
         }
     }
 }
@@ -78,6 +98,7 @@ impl From<&TargetInfoResponse> for ListTargetDaemonInfo {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ListTargetEntry {
     pub name: String,
+    pub healthy: bool,
     pub daemon_info: Option<ListTargetDaemonInfo>,
 }
 

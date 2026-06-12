@@ -29,8 +29,9 @@
 disable_structured_content = true
 
 # Optional periodic background refresh for cached remote target health and
-# daemon metadata. `list_targets` remains cache-backed and does not probe at
-# read time. Transient refresh failures do not clear last-known metadata.
+# daemon metadata. Healthy and unhealthy targets use separate intervals.
+# `list_targets` performs a bounded recheck for unavailable or unhealthy remote
+# targets and hides stale daemon metadata while a target remains unhealthy.
 #[health_refresh]
 #healthy_interval_ms = 60000
 #unhealthy_interval_ms = 15000

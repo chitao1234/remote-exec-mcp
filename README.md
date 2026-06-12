@@ -82,12 +82,15 @@ formatting, and runtime ID mapping.
 
 Important invariants:
 
-- `list_targets` is broker-local cached inventory. It does not probe daemons at
-  read time.
+- `list_targets` is broker-local inventory backed by cached target metadata. It
+  performs a bounded recheck for unavailable or unhealthy remote targets before
+  returning.
 - Cached target metadata is refreshed periodically in the background. Transient
   reachability failures mark a target unhealthy but do not erase its last known
-  metadata; cached metadata is invalidated when the broker observes daemon
-  replacement or identity mismatch.
+  metadata internally; public `list_targets` output hides stale daemon metadata
+  while a target is unhealthy.
+- Public `supports_port_forward` means the target reported port forwarding
+  support and the broker verified a supported tunnel protocol version.
 - A temporarily unreachable target can still be configured. The broker may start
   successfully and verify that target before the first forwarded call.
 - Public `session_id` values are broker-owned opaque tokens, not daemon process
@@ -450,8 +453,9 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 
 - Broker startup probes run concurrently and are bounded by
   `timeouts.startup_probe_ms`.
-- Broker target health refresh runs periodically in the background and updates
-  cached target metadata without probing from `list_targets` call paths.
+- Broker target health refresh runs periodically in the background with separate
+  healthy and unhealthy intervals. `list_targets` also performs a bounded
+  recheck for unavailable or unhealthy remote targets.
 - Broker-daemon calls are bounded by per-target connect/read/request timeouts.
 - Rust daemon live exec sessions are capped by `max_open_sessions` and prune
   older sessions under pressure, preferring completed sessions. Broker-host

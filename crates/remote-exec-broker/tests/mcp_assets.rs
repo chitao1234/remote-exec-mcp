@@ -119,7 +119,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a: linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes, forward_ports=no\n- builder-b: unavailable (no cached daemon info)"
+        "Configured targets:\n- builder-a: healthy, linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes, forward_ports=no\n- builder-b: unavailable (no cached daemon info)"
     );
     assert_eq!(
         result.structured_content,
@@ -127,6 +127,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
             "targets": [
                 {
                     "name": DEFAULT_TEST_TARGET,
+                    "healthy": true,
                     "daemon_info": {
                         "daemon_version": "0.1.0",
                         "hostname": "builder-a-host",
@@ -140,6 +141,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
                 },
                 {
                     "name": "builder-b",
+                    "healthy": false,
                     "daemon_info": null
                 }
             ]
@@ -157,7 +159,7 @@ async fn list_targets_omits_structured_content_when_broker_disables_it() {
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a: linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes, forward_ports=no"
+        "Configured targets:\n- builder-a: healthy, linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes, forward_ports=no"
     );
     assert_eq!(result.structured_content, serde_json::Value::Null);
 }
@@ -171,24 +173,53 @@ async fn list_targets_formats_windows_metadata_and_truthful_pty_support() {
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a: windows/x86_64, host=builder-a-host, version=0.1.0, pty=no, forward_ports=no"
+        "Configured targets:\n- builder-a: healthy, windows/x86_64, host=builder-a-host, version=0.1.0, pty=no, forward_ports=no"
     );
 }
 
 #[tokio::test]
-async fn list_targets_reports_port_forward_protocol_version_when_available() {
+async fn list_targets_reports_version_checked_port_forward_support() {
     let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     let result = fixture
         .call_tool("list_targets", serde_json::json!({}))
         .await;
 
     assert_eq!(
-        result.structured_content["targets"][0]["daemon_info"]["port_forward_protocol_version"],
-        serde_json::json!(4)
+        result.structured_content["targets"][0]["daemon_info"]["supports_port_forward"],
+        serde_json::json!(true)
+    );
+    assert!(
+        result.structured_content["targets"][0]["daemon_info"]
+            .get("port_forward_protocol_version")
+            .is_none()
     );
     assert!(
         result.text_output.contains("forward_ports=yes")
-            && result.text_output.contains("forward_protocol=v4"),
+            && !result.text_output.contains("forward_protocol"),
+        "unexpected text: {}",
+        result.text_output
+    );
+}
+
+#[tokio::test]
+async fn list_targets_rejects_port_forward_support_without_v4_protocol() {
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    let result = fixture
+        .call_tool("list_targets", serde_json::json!({}))
+        .await;
+
+    assert_eq!(
+        result.structured_content["targets"][0]["daemon_info"]["supports_port_forward"],
+        serde_json::json!(false)
+    );
+    assert!(
+        result.structured_content["targets"][0]["daemon_info"]
+            .get("port_forward_protocol_version")
+            .is_none()
+    );
+    assert!(
+        result.text_output.contains("forward_ports=no")
+            && !result.text_output.contains("forward_protocol"),
         "unexpected text: {}",
         result.text_output
     );
@@ -237,6 +268,7 @@ async fn list_targets_hides_cached_daemon_info_for_unhealthy_target() {
         after.text_output,
         "Configured targets:\n- builder-a: unavailable (no cached daemon info)"
     );
+    assert_eq!(after.structured_content["targets"][0]["healthy"], false);
     assert!(after.structured_content["targets"][0]["daemon_info"].is_null());
 }
 
@@ -248,6 +280,7 @@ async fn list_targets_includes_enabled_local_target() {
         .await;
 
     assert_eq!(result.structured_content["targets"][0]["name"], "local");
+    assert_eq!(result.structured_content["targets"][0]["healthy"], true);
     assert_eq!(
         result.structured_content["targets"][0]["daemon_info"]["platform"],
         std::env::consts::OS
