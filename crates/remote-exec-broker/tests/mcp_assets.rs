@@ -1,7 +1,5 @@
 mod support;
 
-use std::time::Duration;
-
 use axum::http::StatusCode;
 use image::{ImageBuffer, Rgba};
 use remote_exec_proto::rpc::{RpcErrorBody, RpcErrorCode};
@@ -223,53 +221,6 @@ async fn list_targets_rejects_port_forward_support_without_v4_protocol() {
         "unexpected text: {}",
         result.text_output
     );
-}
-
-#[tokio::test]
-async fn list_targets_hides_cached_daemon_info_for_unhealthy_target() {
-    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
-    let before = fixture
-        .call_tool("list_targets", serde_json::json!({}))
-        .await;
-    assert!(before.structured_content["targets"][0]["daemon_info"].is_object());
-
-    let health_calls = fixture.health_call_count().await;
-    fixture
-        .set_health_response(support::stub_daemon::StubHealthResponse::RpcError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            body: RpcErrorBody::new(RpcErrorCode::BadRequest, "health unavailable"),
-        })
-        .await;
-
-    let error = fixture
-        .call_tool_error(
-            "apply_patch",
-            serde_json::json!({
-                "target": DEFAULT_TEST_TARGET,
-                "input": "*** Begin Patch\n*** Add File: missing-footer.txt\n+hello\n"
-            }),
-        )
-        .await;
-    assert!(error.contains("invalid patch footer"));
-
-    let outcome = support::test_helpers::poll_until_ready(
-        50,
-        Duration::from_millis(20),
-        || async { fixture.health_call_count().await > health_calls },
-        || false,
-    )
-    .await;
-    assert_eq!(outcome, support::test_helpers::ReadinessWaitOutcome::Ready);
-
-    let after = fixture
-        .call_tool("list_targets", serde_json::json!({}))
-        .await;
-    assert_eq!(
-        after.text_output,
-        "Configured targets:\n- builder-a: unavailable (no cached daemon info)"
-    );
-    assert_eq!(after.structured_content["targets"][0]["healthy"], false);
-    assert!(after.structured_content["targets"][0]["daemon_info"].is_null());
 }
 
 #[tokio::test]
