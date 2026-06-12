@@ -97,6 +97,7 @@ pub(crate) struct StubDaemonState {
     pub(super) exec_start_warnings: Arc<Mutex<Vec<ExecWarning>>>,
     pub(super) exec_start_calls: Arc<Mutex<usize>>,
     pub(super) health_calls: Arc<Mutex<usize>>,
+    pub(super) health_response: Arc<Mutex<StubHealthResponse>>,
     pub(super) last_exec_write_request: Arc<Mutex<Option<ExecWriteRequest>>>,
     pub(super) last_patch_request: Arc<Mutex<Option<PatchApplyRequest>>>,
     pub(super) last_file_read_request: Arc<Mutex<Option<remote_exec_proto::rpc::FileReadRequest>>>,
@@ -114,6 +115,15 @@ pub(crate) struct StubDaemonState {
     pub(super) daemon_instance_after_next_transfer_path_info: Arc<Mutex<Option<String>>>,
     port_forward: StubPortForwardState,
     background_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum StubHealthResponse {
+    Ok,
+    RpcError {
+        status: StatusCode,
+        body: RpcErrorBody,
+    },
 }
 
 pub(super) fn stub_daemon_state(
@@ -140,6 +150,7 @@ pub(super) fn stub_daemon_state(
         exec_start_warnings: Arc::new(Mutex::new(Vec::new())),
         exec_start_calls: Arc::new(Mutex::new(0)),
         health_calls: Arc::new(Mutex::new(0)),
+        health_response: Arc::new(Mutex::new(StubHealthResponse::Ok)),
         last_exec_write_request: Arc::new(Mutex::new(None)),
         last_patch_request: Arc::new(Mutex::new(None)),
         last_file_read_request: Arc::new(Mutex::new(None)),
@@ -208,6 +219,10 @@ pub(super) fn set_file_tool_support(state: &mut StubDaemonState, enabled: bool) 
 
 pub(super) fn set_required_bearer_token(state: &mut StubDaemonState, token: &str) {
     state.required_bearer_token = Some(token.to_string());
+}
+
+pub(crate) async fn set_health_response(state: &StubDaemonState, response: StubHealthResponse) {
+    *state.health_response.lock().await = response;
 }
 
 async fn spawn_stub_task(
@@ -480,13 +495,17 @@ async fn require_bearer_auth(
         .into_response()
 }
 
-async fn health(State(state): State<StubDaemonState>) -> Json<HealthCheckResponse> {
+async fn health(State(state): State<StubDaemonState>) -> Response {
     *state.health_calls.lock().await += 1;
-    Json(HealthCheckResponse {
-        status: HealthStatus::Ok,
-        daemon_version: "0.1.0".to_string(),
-        daemon_instance_id: state.daemon_instance_id.lock().await.clone(),
-    })
+    match state.health_response.lock().await.clone() {
+        StubHealthResponse::Ok => Json(HealthCheckResponse {
+            status: HealthStatus::Ok,
+            daemon_version: "0.1.0".to_string(),
+            daemon_instance_id: state.daemon_instance_id.lock().await.clone(),
+        })
+        .into_response(),
+        StubHealthResponse::RpcError { status, body } => (status, Json(body)).into_response(),
+    }
 }
 
 async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoResponse> {

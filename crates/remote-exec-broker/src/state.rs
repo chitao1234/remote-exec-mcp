@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use anyhow::Context;
+use futures_util::future::join_all;
 use remote_exec_host::sandbox::CompiledFilesystemSandbox;
 use remote_exec_proto::path::PathPolicy;
 use remote_exec_proto::rpc::{
@@ -68,8 +69,11 @@ pub struct BrokerState {
 
 pub(crate) struct TargetStatusSnapshot {
     pub(crate) name: String,
+    pub(crate) healthy: bool,
     pub(crate) daemon_info: Option<CachedDaemonInfo>,
 }
+
+const TARGET_STATUS_RECHECK_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy)]
 pub(crate) struct TargetHealthRefreshIntervals {
@@ -134,14 +138,56 @@ impl BrokerState {
     }
 
     pub(crate) async fn target_status_snapshots(&self) -> Vec<TargetStatusSnapshot> {
+        self.refresh_status_targets().await;
+
         let mut snapshots = Vec::with_capacity(self.targets.len());
         for (name, handle) in &self.targets {
+            let status = handle.cached_status().await;
             snapshots.push(TargetStatusSnapshot {
                 name: name.clone(),
-                daemon_info: handle.cached_daemon_info().await,
+                healthy: status.healthy,
+                daemon_info: status.daemon_info,
             });
         }
         snapshots
+    }
+
+    async fn refresh_status_targets(&self) {
+        let mut names = Vec::new();
+        for (name, handle) in &self.targets {
+            if handle.as_remote().is_some() && handle.needs_status_recheck().await {
+                names.push(name.clone());
+            }
+        }
+
+        let refreshes = names.into_iter().map(|name| {
+            let state = self.clone();
+            async move {
+                match tokio::time::timeout(
+                    TARGET_STATUS_RECHECK_TIMEOUT,
+                    state.refresh_remote_target_health_and_dependents(&name),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => {
+                        tracing::debug!(
+                            target = %name,
+                            error = %err,
+                            "target status recheck did not update cached daemon metadata"
+                        );
+                    }
+                    Err(_) => {
+                        tracing::debug!(
+                            target = %name,
+                            timeout_ms = TARGET_STATUS_RECHECK_TIMEOUT.as_millis(),
+                            "target status recheck timed out"
+                        );
+                    }
+                }
+            }
+        });
+        join_all(refreshes).await;
     }
 
     pub(crate) async fn remote_targets_due_for_health_refresh(

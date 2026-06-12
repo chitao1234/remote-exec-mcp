@@ -13,10 +13,14 @@ pub async fn list_targets(
     let snapshots = state.target_status_snapshots().await;
     let mut targets = Vec::with_capacity(snapshots.len());
     for snapshot in snapshots {
-        let daemon_info = snapshot.daemon_info.map(|info| ListTargetDaemonInfo {
-            identity: info.identity,
-            capabilities: info.capabilities,
-        });
+        let daemon_info = if snapshot.healthy {
+            snapshot.daemon_info.map(|info| ListTargetDaemonInfo {
+                identity: info.identity,
+                capabilities: info.capabilities,
+            })
+        } else {
+            None
+        };
         targets.push(ListTargetEntry {
             name: snapshot.name,
             daemon_info,

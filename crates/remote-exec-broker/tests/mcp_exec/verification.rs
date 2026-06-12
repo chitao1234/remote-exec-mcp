@@ -86,7 +86,7 @@ async fn broker_rejects_unverified_target_if_it_returns_as_the_wrong_daemon() {
 }
 
 #[tokio::test]
-async fn list_targets_clears_cached_daemon_info_after_daemon_instance_mismatch() {
+async fn list_targets_rechecks_cached_daemon_info_after_daemon_instance_mismatch() {
     let fixture = support::spawners::spawn_broker_with_retryable_exec_write_error().await;
 
     let before = fixture
@@ -114,7 +114,7 @@ async fn list_targets_clears_cached_daemon_info_after_daemon_instance_mismatch()
     let after = fixture
         .call_tool("list_targets", serde_json::json!({}))
         .await;
-    assert!(after.structured_content["targets"][0]["daemon_info"].is_null());
+    assert!(after.structured_content["targets"][0]["daemon_info"].is_object());
 }
 
 #[tokio::test]
@@ -128,18 +128,6 @@ async fn list_targets_repopulates_cached_daemon_info_after_later_successful_veri
     assert!(before.structured_content["targets"][1]["daemon_info"].is_null());
 
     fixture.spawn_target("builder-b").await;
-    let result = fixture
-        .broker
-        .call_tool(
-            "apply_patch",
-            serde_json::json!({
-                "target": "builder-b",
-                "input": "*** Begin Patch\n*** Add File: ok.txt\n+ok\n*** End Patch\n"
-            }),
-        )
-        .await;
-    assert!(result.text_output.contains("Success."));
-
     let after = fixture
         .broker
         .call_tool("list_targets", serde_json::json!({}))

@@ -7,10 +7,11 @@ use tempfile::TempDir;
 
 use super::stub_daemon::{
     ExecStartBehavior, ExecWriteBehavior, StubDaemonState, StubFileEditResponse,
-    StubFileReadResponse, StubFileWriteResponse, StubImageReadResponse, StubTransferExportCapture,
-    StubTransferImportCapture, set_daemon_instance_after_next_transfer_path_info,
-    set_exec_start_behavior, set_exec_write_behavior, set_file_edit_response,
-    set_file_read_response, set_file_write_response, set_image_read_response,
+    StubFileReadResponse, StubFileWriteResponse, StubHealthResponse, StubImageReadResponse,
+    StubTransferExportCapture, StubTransferImportCapture,
+    set_daemon_instance_after_next_transfer_path_info, set_exec_start_behavior,
+    set_exec_write_behavior, set_file_edit_response, set_file_read_response,
+    set_file_write_response, set_health_response, set_image_read_response,
     set_transfer_export_directory_response, set_transfer_export_file_response,
     set_transfer_path_info_error_response, set_transfer_path_info_response,
 };
@@ -109,6 +110,10 @@ impl BrokerFixture {
 
     pub async fn health_call_count(&self) -> usize {
         *self.stub_state.health_calls.lock().await
+    }
+
+    pub async fn set_health_response(&self, response: StubHealthResponse) {
+        set_health_response(&self.stub_state, response).await;
     }
 
     pub async fn last_patch_request(&self) -> Option<remote_exec_proto::rpc::PatchApplyRequest> {
