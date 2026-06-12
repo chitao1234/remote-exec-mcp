@@ -2,7 +2,7 @@ use remote_exec_proto::public::{
     ListTargetDaemonInfo, ListTargetEntry, ListTargetsInput, ListTargetsResult,
 };
 
-use crate::mcp_server::ToolCallOutput;
+use crate::{CachedDaemonInfo, mcp_server::ToolCallOutput};
 
 pub async fn list_targets(
     state: &crate::BrokerState,
@@ -13,20 +13,10 @@ pub async fn list_targets(
     let snapshots = state.target_status_snapshots().await;
     let mut targets = Vec::with_capacity(snapshots.len());
     for snapshot in snapshots {
-        let daemon_info = if snapshot.healthy {
-            snapshot.daemon_info.map(|info| {
-                ListTargetDaemonInfo::from_identity_and_capabilities(
-                    info.identity,
-                    &info.capabilities,
-                )
-            })
-        } else {
-            None
-        };
         targets.push(ListTargetEntry {
             name: snapshot.name,
             healthy: snapshot.healthy,
-            daemon_info,
+            daemon_info: snapshot.daemon_info.map(public_daemon_info),
         });
     }
     let text = format_targets_text(&targets);
@@ -45,6 +35,10 @@ pub async fn list_targets(
         text,
         serde_json::to_value(ListTargetsResult { targets })?,
     ))
+}
+
+fn public_daemon_info(info: CachedDaemonInfo) -> ListTargetDaemonInfo {
+    ListTargetDaemonInfo::from_identity_and_capabilities(info.identity, &info.capabilities)
 }
 
 fn format_targets_text(targets: &[ListTargetEntry]) -> String {

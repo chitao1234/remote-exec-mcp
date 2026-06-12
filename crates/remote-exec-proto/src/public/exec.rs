@@ -85,10 +85,7 @@ impl ListTargetDaemonInfo {
         Self {
             identity,
             supports_pty: capabilities.supports_pty,
-            supports_port_forward: capabilities.supports_port_forward
-                && capabilities
-                    .port_forward_protocol_version
-                    .is_some_and(|version| version.get() >= 4),
+            supports_port_forward: capabilities.supports_compatible_port_forward(),
             transfer_stream_protocol_version: capabilities.transfer_stream_protocol_version,
             file_tool_protocol_version: capabilities.file_tool_protocol_version,
         }

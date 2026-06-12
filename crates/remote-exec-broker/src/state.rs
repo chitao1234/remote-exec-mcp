@@ -536,11 +536,7 @@ impl BrokerState {
         let handle = self.verified_target(name).await?;
         let info = handle.cached_daemon_info_after_verification(name).await?;
         anyhow::ensure!(
-            info.capabilities.supports_port_forward
-                && info
-                    .capabilities
-                    .port_forward_protocol_version
-                    .is_some_and(|version| version.get() >= 4),
+            info.capabilities.supports_compatible_port_forward(),
             "target `{name}` does not support port forward protocol version 4"
         );
         Ok(port_forward::SideHandle::target(

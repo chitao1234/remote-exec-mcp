@@ -3,6 +3,8 @@ use std::num::NonZeroU32;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub const MIN_PORT_FORWARD_PROTOCOL_VERSION: u32 = 4;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HealthStatus {
@@ -37,6 +39,15 @@ pub struct TargetCapabilities {
     pub file_tool_protocol_version: Option<FileToolProtocolVersion>,
 }
 
+impl TargetCapabilities {
+    pub fn supports_compatible_port_forward(&self) -> bool {
+        self.supports_port_forward
+            && self
+                .port_forward_protocol_version
+                .is_some_and(|version| version.get() >= MIN_PORT_FORWARD_PROTOCOL_VERSION)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TargetInfoResponse {
     pub target: String,
@@ -58,7 +69,7 @@ pub struct PortForwardProtocolVersion(NonZeroU32);
 
 impl PortForwardProtocolVersion {
     pub fn v4() -> Self {
-        Self(NonZeroU32::new(4).expect("v4 is nonzero"))
+        Self(NonZeroU32::new(MIN_PORT_FORWARD_PROTOCOL_VERSION).expect("v4 is nonzero"))
     }
 
     pub fn new(value: NonZeroU32) -> Self {
@@ -107,5 +118,39 @@ impl FileToolProtocolVersion {
 
     pub fn get(self) -> u32 {
         self.0.get()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        FileToolProtocolVersion, PortForwardProtocolVersion, TargetCapabilities,
+        TransferStreamProtocolVersion,
+    };
+
+    fn capabilities(
+        supports_port_forward: bool,
+        port_forward_protocol_version: Option<PortForwardProtocolVersion>,
+    ) -> TargetCapabilities {
+        TargetCapabilities {
+            supports_pty: true,
+            supports_port_forward,
+            port_forward_protocol_version,
+            transfer_stream_protocol_version: Some(TransferStreamProtocolVersion::v2()),
+            file_tool_protocol_version: Some(FileToolProtocolVersion::v1()),
+        }
+    }
+
+    #[test]
+    fn compatible_port_forward_support_requires_flag_and_protocol_version() {
+        assert!(
+            capabilities(true, Some(PortForwardProtocolVersion::v4()))
+                .supports_compatible_port_forward()
+        );
+        assert!(
+            !capabilities(false, Some(PortForwardProtocolVersion::v4()))
+                .supports_compatible_port_forward()
+        );
+        assert!(!capabilities(true, None).supports_compatible_port_forward());
     }
 }

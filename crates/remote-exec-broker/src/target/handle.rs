@@ -90,6 +90,10 @@ impl TargetRuntimeSnapshot {
             health: Some(CachedTargetHealth::from_target_info(info)),
         }
     }
+
+    fn health_ok(&self) -> bool {
+        self.health.as_ref().is_some_and(|health| health.healthy)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -235,16 +239,8 @@ impl TargetHandle {
 
     pub(crate) async fn cached_status(&self) -> CachedTargetStatus {
         let snapshot = self.runtime_snapshot().await;
-        let health_ok = snapshot
-            .health
-            .as_ref()
-            .map(|health| health.healthy)
-            .unwrap_or(false);
-        let daemon_info = if health_ok {
-            snapshot.daemon_info
-        } else {
-            None
-        };
+        let health_ok = snapshot.health_ok();
+        let daemon_info = health_ok.then_some(snapshot.daemon_info).flatten();
         CachedTargetStatus {
             healthy: health_ok && daemon_info.is_some(),
             daemon_info,
@@ -253,12 +249,7 @@ impl TargetHandle {
 
     pub(crate) async fn needs_status_recheck(&self) -> bool {
         let snapshot = self.runtime_snapshot().await;
-        !snapshot
-            .health
-            .as_ref()
-            .map(|health| health.healthy)
-            .unwrap_or(false)
-            || snapshot.daemon_info.is_none()
+        !snapshot.health_ok() || snapshot.daemon_info.is_none()
     }
 
     pub(crate) async fn cached_daemon_info_after_verification(
