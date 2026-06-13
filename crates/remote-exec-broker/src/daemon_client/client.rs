@@ -61,11 +61,13 @@ impl DaemonClient {
     }
 
     pub async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {
-        self.post("/v1/target-info", &serde_json::json!({})).await
+        self.post_idempotent("/v1/target-info", &serde_json::json!({}))
+            .await
     }
 
     pub async fn health(&self) -> Result<HealthCheckResponse, DaemonClientError> {
-        self.post("/v1/health", &serde_json::json!({})).await
+        self.post_idempotent("/v1/health", &serde_json::json!({}))
+            .await
     }
 
     pub async fn exec_start(
@@ -126,6 +128,31 @@ impl DaemonClient {
         Req: serde::Serialize + ?Sized,
         Resp: serde::de::DeserializeOwned,
     {
+        self.post_with_retry_policy(path, body, false).await
+    }
+
+    async fn post_idempotent<Req, Resp>(
+        &self,
+        path: &str,
+        body: &Req,
+    ) -> Result<Resp, DaemonClientError>
+    where
+        Req: serde::Serialize + ?Sized,
+        Resp: serde::de::DeserializeOwned,
+    {
+        self.post_with_retry_policy(path, body, true).await
+    }
+
+    async fn post_with_retry_policy<Req, Resp>(
+        &self,
+        path: &str,
+        body: &Req,
+        retry_idempotent_request_transport_error: bool,
+    ) -> Result<Resp, DaemonClientError>
+    where
+        Req: serde::Serialize + ?Sized,
+        Resp: serde::de::DeserializeOwned,
+    {
         let started = std::time::Instant::now();
         let context = RpcCallContext::path(
             &self.target_name,
@@ -141,14 +168,34 @@ impl DaemonClient {
             "sending daemon rpc"
         );
         let result = tokio::time::timeout(self.request_timeout, async {
-            let response = self
-                .send_request_with_policy(
-                    self.request(path).json(body).send(),
-                    RpcErrorDecodePolicy::Strict,
-                    |err| context.log_transport_error(err),
-                    |status| context.log_status_error(status),
-                )
-                .await?;
+            let mut retried = false;
+            let response = loop {
+                let response = self
+                    .send_request_with_policy(
+                        self.request(path).json(body).send(),
+                        RpcErrorDecodePolicy::Strict,
+                        |err| context.log_transport_error(err),
+                        |status| context.log_status_error(status),
+                    )
+                    .await;
+                match response {
+                    Ok(response) => break response,
+                    Err(err)
+                        if retry_idempotent_request_transport_error
+                            && !retried
+                            && is_retryable_idempotent_rpc_transport_error(&err) =>
+                    {
+                        retried = true;
+                        tracing::debug!(
+                            target = %self.target_name,
+                            base_url = %self.base_url,
+                            path,
+                            "retrying idempotent daemon rpc after request transport failure"
+                        );
+                    }
+                    Err(err) => return Err(err),
+                }
+            };
 
             let decoded = self
                 .decode_json_response(
@@ -292,4 +339,15 @@ fn build_http_daemon_client(timeouts: TargetTimeoutConfig) -> anyhow::Result<req
     apply_daemon_client_timeouts(reqwest::Client::builder(), timeouts)
         .build()
         .map_err(anyhow::Error::from)
+}
+
+fn is_retryable_idempotent_rpc_transport_error(err: &DaemonClientError) -> bool {
+    let DaemonClientError::Transport(err) = err else {
+        return false;
+    };
+    let Some(err) = err.downcast_ref::<reqwest::Error>() else {
+        return false;
+    };
+
+    err.is_request() && !err.is_connect() && !err.is_timeout() && !err.is_builder()
 }

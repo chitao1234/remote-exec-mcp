@@ -21,7 +21,10 @@ mod tests {
     use std::time::Duration;
 
     use remote_exec_proto::request_id::{REQUEST_ID_HEADER, RequestId};
-    use remote_exec_proto::rpc::{ExecStartRequest, ExecWriteRequest, RpcErrorCode};
+    use remote_exec_proto::rpc::{
+        DaemonIdentity, ExecStartRequest, ExecWriteRequest, RpcErrorCode, TargetCapabilities,
+        TargetInfoResponse, TransferStreamProtocolVersion,
+    };
     use reqwest::header::HeaderValue;
 
     use super::response::decode_rpc_error_body;
@@ -64,6 +67,69 @@ mod tests {
         (client, server)
     }
 
+    async fn read_http_request(stream: &mut tokio::net::TcpStream) -> String {
+        let mut data = Vec::new();
+        loop {
+            let mut buf = [0u8; 512];
+            let read = stream.read(&mut buf).await.unwrap();
+            assert!(read > 0, "client closed before sending a full request");
+            data.extend_from_slice(&buf[..read]);
+
+            let Some(header_end) = data.windows(4).position(|window| window == b"\r\n\r\n") else {
+                continue;
+            };
+            let headers = String::from_utf8_lossy(&data[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap_or(0);
+            if data.len() >= header_end + 4 + content_length {
+                return String::from_utf8_lossy(&data).into_owned();
+            }
+        }
+    }
+
+    fn target_info_response_body() -> String {
+        serde_json::to_string(&TargetInfoResponse {
+            target: DEFAULT_TEST_TARGET.to_string(),
+            daemon_instance_id: "daemon-retry".to_string(),
+            identity: DaemonIdentity {
+                daemon_version: "test".to_string(),
+                hostname: "host".to_string(),
+                platform: "linux".to_string(),
+                arch: "x86_64".to_string(),
+            },
+            capabilities: TargetCapabilities {
+                supports_pty: true,
+                supports_port_forward: false,
+                port_forward_protocol_version: None,
+                transfer_stream_protocol_version: Some(TransferStreamProtocolVersion::v2()),
+                file_tool_protocol_version: None,
+            },
+            supports_image_read: true,
+            supports_transfer_compression: false,
+        })
+        .unwrap()
+    }
+
+    async fn write_json_response(stream: &mut tokio::net::TcpStream, body: &str) {
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn daemon_rpc_times_out_hung_response() {
         let (client, server) = hung_response_client(Duration::from_millis(50)).await;
@@ -81,6 +147,36 @@ mod tests {
             "unexpected error: {err}"
         );
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn daemon_target_info_retries_closed_request_transport_once() {
+        crate::install_crypto_provider().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut first, _) = listener.accept().await.unwrap();
+            let first_request = read_http_request(&mut first).await;
+            assert!(first_request.starts_with("POST /v1/target-info "));
+            drop(first);
+
+            let (mut second, _) = listener.accept().await.unwrap();
+            let second_request = read_http_request(&mut second).await;
+            assert!(second_request.starts_with("POST /v1/target-info "));
+            write_json_response(&mut second, &target_info_response_body()).await;
+        });
+
+        let client = DaemonClient {
+            client: reqwest::Client::builder().build().unwrap(),
+            target_name: DEFAULT_TEST_TARGET.to_string(),
+            base_url: format!("http://{addr}"),
+            authorization: None,
+            request_timeout: Duration::from_secs(5),
+        };
+
+        let info = client.target_info().await.unwrap();
+        assert_eq!(info.daemon_instance_id, "daemon-retry");
+        server.await.unwrap();
     }
 
     #[tokio::test]
