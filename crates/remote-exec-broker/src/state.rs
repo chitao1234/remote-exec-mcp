@@ -225,7 +225,8 @@ impl BrokerState {
     ) -> anyhow::Result<()> {
         match self.refresh_remote_target_health(name).await {
             Ok(Some(previous_daemon_instance_id)) => {
-                self.invalidate_target_exec_sessions(name).await;
+                self.invalidate_target_exec_sessions(name, &previous_daemon_instance_id)
+                    .await;
                 match self
                     .port_forwards
                     .close_target_instance(
@@ -500,8 +501,14 @@ impl BrokerState {
         self.normalize_target_result(name, target.file_edit(req).await, RpcToolErrorMode::Full)
     }
 
-    pub(crate) async fn invalidate_target_exec_sessions(&self, target: &str) {
-        self.sessions.remove_target(target).await;
+    pub(crate) async fn invalidate_target_exec_sessions(
+        &self,
+        target: &str,
+        daemon_instance_id: &str,
+    ) {
+        self.sessions
+            .remove_target_instance(target, daemon_instance_id)
+            .await;
     }
 
     pub(crate) async fn transfer_remote_target<'a>(
