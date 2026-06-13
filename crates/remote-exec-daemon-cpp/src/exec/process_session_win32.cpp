@@ -683,11 +683,6 @@ public:
                 return output;
             }
 
-            int exit_code = 0;
-            if (has_exited(&exit_code)) {
-                return output + flush_carry(carry);
-            }
-
             platform::sleep_ms(WINPTY_READ_POLL_MS);
         }
     }

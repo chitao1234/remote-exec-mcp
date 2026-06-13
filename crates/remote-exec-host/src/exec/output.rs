@@ -141,12 +141,24 @@ pub async fn drain_after_exit(session: &mut LiveSession) -> anyhow::Result<Strin
         }
     }
 
-    drain_available(session, &mut output).await?;
+    drain_available_final(session, &mut output).await?;
     Ok(output)
 }
 
 async fn drain_available(session: &mut LiveSession, output: &mut String) -> anyhow::Result<()> {
     let chunk = session.read_available().await?;
+    if !chunk.is_empty() {
+        session.record_output(&chunk);
+        output.push_str(&chunk);
+    }
+    Ok(())
+}
+
+async fn drain_available_final(
+    session: &mut LiveSession,
+    output: &mut String,
+) -> anyhow::Result<()> {
+    let chunk = session.read_available_final().await?;
     if !chunk.is_empty() {
         session.record_output(&chunk);
         output.push_str(&chunk);

@@ -85,12 +85,23 @@ impl LiveSession {
         #[cfg(windows)]
         output.push_str(&self.flush_terminal_output_due());
 
+        Ok(output)
+    }
+
+    pub(crate) async fn read_available_final(&mut self) -> anyhow::Result<String> {
+        let output = self.read_available().await?;
+
         #[cfg(windows)]
-        if self.exit_code.is_some() {
+        {
+            let mut output = output;
             output.push_str(&self.drain_terminal_output_buffer());
+            Ok(output)
         }
 
-        Ok(output)
+        #[cfg(not(windows))]
+        {
+            Ok(output)
+        }
     }
 
     pub(crate) async fn wait_for_output(
@@ -215,5 +226,59 @@ impl Drop for LiveSession {
         if self.exit_code.is_none() {
             let _ = self.child.terminate();
         }
+    }
+}
+
+#[cfg(all(test, windows, feature = "winpty"))]
+mod tests {
+    use std::process::{Command, Stdio};
+
+    use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+
+    use crate::exec::output;
+
+    use super::super::child::SessionChild;
+    use super::super::pty_filter::TerminalOutputState;
+    use super::{LiveSession, new_live_session_with_terminal_output_state};
+
+    fn finished_winpty_filtered_pipe_session(receiver: UnboundedReceiver<String>) -> LiveSession {
+        let mut command = Command::new("cmd.exe");
+        command
+            .args(["/D", "/C", "exit 0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let child = command.spawn().expect("test child should spawn");
+        let mut session = new_live_session_with_terminal_output_state(
+            true,
+            SessionChild::Pipe(Box::new(child)),
+            receiver,
+            Some(TerminalOutputState::winpty()),
+        );
+        session.exit_code = Some(0);
+        session
+    }
+
+    #[tokio::test]
+    async fn read_available_after_exit_does_not_finalize_winpty_rows() {
+        let (sender, receiver) = unbounded_channel();
+        let mut session = finished_winpty_filtered_pipe_session(receiver);
+
+        sender.send("open".to_string()).expect("open row");
+        let mut output = session.read_available().await.expect("read open row");
+
+        sender
+            .send("\r\nnext\r\n".to_string())
+            .expect("closed rows");
+        drop(sender);
+
+        output.push_str(
+            &output::drain_after_exit(&mut session)
+                .await
+                .expect("exit drain"),
+        );
+
+        assert_eq!(output, "open\nnext\n");
     }
 }
