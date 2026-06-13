@@ -209,6 +209,32 @@ void test_decode_carries_split_utf8_code_page() {
     assert_decode_split_chunks(65001U, {"\xF0", "\x9F\x98", "\x80"}, "\xF0\x9F\x98\x80");
 }
 
+void test_utf8_code_page_wins_over_valid_gbk_mojibake() {
+    std::string carry;
+    TEST_ASSERT(
+        decode_console_output_for_test(
+            65001U,
+            936U,
+            &carry,
+            "\xE6\xAD\xA3\xE5\x9C\xA8\xE4\xB8\x8B\xE8\xBD\xBD",
+            false
+        )
+        == "\xE6\xAD\xA3\xE5\x9C\xA8\xE4\xB8\x8B\xE8\xBD\xBD"
+    );
+    TEST_ASSERT(carry.empty());
+    TEST_ASSERT(
+        decode_console_output_for_test(
+            65001U,
+            936U,
+            &carry,
+            "\xE2\x96\x92\xE2\x96\x92\xE2\x96\x92\xE2\x96\x92",
+            false
+        )
+        == "\xE2\x96\x92\xE2\x96\x92\xE2\x96\x92\xE2\x96\x92"
+    );
+    TEST_ASSERT(carry.empty());
+}
+
 void test_decode_carries_split_four_byte_code_page_sequence() {
     if (!code_page_available(54936U)) {
         return;
@@ -431,6 +457,7 @@ int main() {
     test_code_page_decode();
     test_decode_carry();
     test_decode_carries_split_utf8_code_page();
+    test_utf8_code_page_wins_over_valid_gbk_mojibake();
     test_decode_carries_split_four_byte_code_page_sequence();
     test_decode_complete_dbcs_character_does_not_carry_trail_byte();
     test_invalid_decode_fallback();

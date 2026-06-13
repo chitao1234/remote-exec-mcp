@@ -15,6 +15,8 @@ use windows_sys::Win32::Foundation::ERROR_INVALID_FLAGS;
 use windows_sys::Win32::Globalization::{
     CPINFO, GetACP, GetCPInfo, GetOEMCP, MB_ERR_INVALID_CHARS, MultiByteToWideChar,
 };
+#[cfg(windows)]
+use windows_sys::Win32::System::Console::GetConsoleOutputCP;
 
 use crate::config::{ProcessEnvironment, WindowsPtyBackendOverride};
 
@@ -305,7 +307,7 @@ struct WindowsPipeDecoder {
 #[cfg(windows)]
 impl WindowsPipeDecoder {
     fn new() -> Self {
-        unsafe { Self::with_code_pages(GetOEMCP(), GetACP()) }
+        unsafe { Self::with_code_pages(windows_pipe_primary_code_page(), GetACP()) }
     }
 
     fn with_code_pages(primary_code_page: u32, fallback_code_page: u32) -> Self {
@@ -358,6 +360,16 @@ impl WindowsPipeDecoder {
             }
         };
         Some(output)
+    }
+}
+
+#[cfg(windows)]
+fn windows_pipe_primary_code_page() -> u32 {
+    let console_output_code_page = unsafe { GetConsoleOutputCP() };
+    if console_output_code_page != 0 {
+        console_output_code_page
+    } else {
+        unsafe { GetOEMCP() }
     }
 }
 
@@ -738,6 +750,22 @@ mod exec_pipe_decoder_tests {
         assert_eq!(decoder.push(&[0xf0]), None);
         assert_eq!(decoder.push(&[0x9f, 0x98]), None);
         assert_eq!(decoder.push(&[0x80]), Some("😀".to_string()));
+        assert_eq!(decoder.finish(), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pipe_decoder_prefers_utf8_when_console_code_page_is_utf8() {
+        let mut decoder = WindowsPipeDecoder::with_code_pages(CP_UTF8, 936);
+
+        assert_eq!(
+            decoder.push("正在下载\n".as_bytes()),
+            Some("正在下载\n".to_string())
+        );
+        assert_eq!(
+            decoder.push("▒▒▒▒\n".as_bytes()),
+            Some("▒▒▒▒\n".to_string())
+        );
         assert_eq!(decoder.finish(), None);
     }
 

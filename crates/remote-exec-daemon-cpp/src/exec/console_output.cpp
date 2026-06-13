@@ -37,6 +37,27 @@ void log_console_decode_fallback_once(
     );
 }
 
+typedef UINT(WINAPI* GetConsoleOutputCodePageFn)();
+
+UINT active_console_output_code_page() {
+    HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
+    if (kernel32 == NULL) {
+        return 0U;
+    }
+    FARPROC proc = GetProcAddress(kernel32, "GetConsoleOutputCP");
+    if (proc == NULL) {
+        return 0U;
+    }
+    GetConsoleOutputCodePageFn get_console_output_code_page =
+        reinterpret_cast<GetConsoleOutputCodePageFn>(proc);
+    return get_console_output_code_page();
+}
+
+UINT primary_console_output_code_page() {
+    const UINT console_output_code_page = active_console_output_code_page();
+    return console_output_code_page == 0U ? GetOEMCP() : console_output_code_page;
+}
+
 std::string utf8_from_wide(const std::wstring& wide) {
     return win32_utf8::utf8_from_wide(wide);
 }
@@ -303,7 +324,7 @@ bool line_has_nonspace_char(const std::string& text) {
 
 std::string read_available_console_output(HANDLE pipe, std::string* carry) {
     return decode_console_output_with_code_pages(
-        GetOEMCP(),
+        primary_console_output_code_page(),
         CP_ACP,
         carry,
         read_available_raw(pipe),
@@ -315,7 +336,7 @@ std::string read_console_output(HANDLE pipe, bool block, bool* eof, std::string*
     *eof = false;
     if (block) {
         return decode_console_output_with_code_pages(
-            GetOEMCP(),
+            primary_console_output_code_page(),
             CP_ACP,
             carry,
             read_blocking_raw(pipe, eof),
@@ -324,7 +345,7 @@ std::string read_console_output(HANDLE pipe, bool block, bool* eof, std::string*
     }
 
     return decode_console_output_with_code_pages(
-        GetOEMCP(),
+        primary_console_output_code_page(),
         CP_ACP,
         carry,
         read_available_raw(pipe),
@@ -333,7 +354,13 @@ std::string read_console_output(HANDLE pipe, bool block, bool* eof, std::string*
 }
 
 std::string flush_console_output_carry(std::string* carry) {
-    return decode_console_output_with_code_pages(GetOEMCP(), CP_ACP, carry, "", true);
+    return decode_console_output_with_code_pages(
+        primary_console_output_code_page(),
+        CP_ACP,
+        carry,
+        "",
+        true
+    );
 }
 
 TerminalOutputFilter::TerminalOutputFilter()
