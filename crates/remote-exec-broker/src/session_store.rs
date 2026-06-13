@@ -63,7 +63,7 @@ impl SessionStore {
         }
     }
 
-    pub async fn remove_target_instance(&self, target: &str, daemon_instance_id: &str) {
+    pub async fn remove_target_instance(&self, target: &str, daemon_instance_id: &str) -> usize {
         let mut removed = Vec::new();
         {
             let mut guard = self.inner.write().await;
@@ -81,6 +81,7 @@ impl SessionStore {
             }
         }
 
+        let removed_count = removed.len();
         for record in removed {
             tracing::info!(
                 session_id = %record.session_id,
@@ -90,6 +91,8 @@ impl SessionStore {
                 "removed broker session mapping after target instance refresh invalidation"
             );
         }
+
+        removed_count
     }
 }
 
@@ -125,8 +128,9 @@ mod tests {
             )
             .await;
 
-        store.remove_target_instance("target-a", "daemon-old").await;
+        let removed = store.remove_target_instance("target-a", "daemon-old").await;
 
+        assert_eq!(removed, 1);
         assert!(store.get(&old_target_session.session_id).await.is_none());
         assert!(store.get(&new_target_session.session_id).await.is_some());
         assert!(store.get(&other_target_session.session_id).await.is_some());

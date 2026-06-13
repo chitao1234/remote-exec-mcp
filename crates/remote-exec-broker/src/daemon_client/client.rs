@@ -31,6 +31,20 @@ pub struct DaemonClient {
     pub(super) request_timeout: std::time::Duration,
 }
 
+#[derive(Clone, Copy)]
+enum RpcRetryPolicy {
+    None,
+    IdempotentMetadata,
+}
+
+impl RpcRetryPolicy {
+    fn should_retry(self, err: &reqwest::Error, retried: bool) -> bool {
+        matches!(self, Self::IdempotentMetadata)
+            && !retried
+            && is_retryable_idempotent_rpc_transport_error(err)
+    }
+}
+
 impl DaemonClient {
     pub async fn new(
         target_name: impl Into<String>,
@@ -128,7 +142,8 @@ impl DaemonClient {
         Req: serde::Serialize + ?Sized,
         Resp: serde::de::DeserializeOwned,
     {
-        self.post_with_retry_policy(path, body, false).await
+        self.post_with_retry_policy(path, body, RpcRetryPolicy::None)
+            .await
     }
 
     async fn post_idempotent<Req, Resp>(
@@ -140,14 +155,15 @@ impl DaemonClient {
         Req: serde::Serialize + ?Sized,
         Resp: serde::de::DeserializeOwned,
     {
-        self.post_with_retry_policy(path, body, true).await
+        self.post_with_retry_policy(path, body, RpcRetryPolicy::IdempotentMetadata)
+            .await
     }
 
     async fn post_with_retry_policy<Req, Resp>(
         &self,
         path: &str,
         body: &Req,
-        retry_idempotent_request_transport_error: bool,
+        retry_policy: RpcRetryPolicy,
     ) -> Result<Resp, DaemonClientError>
     where
         Req: serde::Serialize + ?Sized,
@@ -170,30 +186,29 @@ impl DaemonClient {
         let result = tokio::time::timeout(self.request_timeout, async {
             let mut retried = false;
             let response = loop {
-                let response = self
-                    .send_request_with_policy(
-                        self.request(path).json(body).send(),
-                        RpcErrorDecodePolicy::Strict,
-                        |err| context.log_transport_error(err),
-                        |status| context.log_status_error(status),
-                    )
-                    .await;
+                let response = self.request(path).json(body).send().await;
                 match response {
-                    Ok(response) => break response,
-                    Err(err)
-                        if retry_idempotent_request_transport_error
-                            && !retried
-                            && is_retryable_idempotent_rpc_transport_error(&err) =>
-                    {
+                    Ok(response) => {
+                        break self
+                            .ensure_success(response, RpcErrorDecodePolicy::Strict, |status| {
+                                context.log_status_error(status)
+                            })
+                            .await?;
+                    }
+                    Err(err) if retry_policy.should_retry(&err, retried) => {
                         retried = true;
                         tracing::debug!(
                             target = %self.target_name,
                             base_url = %self.base_url,
                             path,
+                            error = %err,
                             "retrying idempotent daemon rpc after request transport failure"
                         );
                     }
-                    Err(err) => return Err(err),
+                    Err(err) => {
+                        context.log_transport_error(&err);
+                        return Err(DaemonClientError::Transport(err.into()));
+                    }
                 }
             };
 
@@ -341,13 +356,6 @@ fn build_http_daemon_client(timeouts: TargetTimeoutConfig) -> anyhow::Result<req
         .map_err(anyhow::Error::from)
 }
 
-fn is_retryable_idempotent_rpc_transport_error(err: &DaemonClientError) -> bool {
-    let DaemonClientError::Transport(err) = err else {
-        return false;
-    };
-    let Some(err) = err.downcast_ref::<reqwest::Error>() else {
-        return false;
-    };
-
+fn is_retryable_idempotent_rpc_transport_error(err: &reqwest::Error) -> bool {
     err.is_request() && !err.is_connect() && !err.is_timeout() && !err.is_builder()
 }

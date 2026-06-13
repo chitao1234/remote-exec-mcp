@@ -225,7 +225,8 @@ impl BrokerState {
     ) -> anyhow::Result<()> {
         match self.refresh_remote_target_health(name).await {
             Ok(Some(previous_daemon_instance_id)) => {
-                self.invalidate_target_exec_sessions(name, &previous_daemon_instance_id)
+                let invalidated_sessions = self
+                    .invalidate_target_exec_sessions(name, &previous_daemon_instance_id)
                     .await;
                 match self
                     .port_forwards
@@ -256,6 +257,8 @@ impl BrokerState {
                 }
                 tracing::info!(
                     target = %name,
+                    previous_daemon_instance_id = %previous_daemon_instance_id,
+                    invalidated_sessions,
                     "invalidated broker sessions after daemon instance change"
                 );
                 Ok(())
@@ -505,10 +508,10 @@ impl BrokerState {
         &self,
         target: &str,
         daemon_instance_id: &str,
-    ) {
+    ) -> usize {
         self.sessions
             .remove_target_instance(target, daemon_instance_id)
-            .await;
+            .await
     }
 
     pub(crate) async fn transfer_remote_target<'a>(
