@@ -91,8 +91,31 @@ impl TargetRuntimeSnapshot {
         }
     }
 
+    fn available(&self) -> bool {
+        self.health_ok() && self.daemon_info.is_some()
+    }
+
     fn health_ok(&self) -> bool {
         self.health.as_ref().is_some_and(|health| health.healthy)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TargetAvailabilityTransition {
+    AvailableToUnavailable,
+    UnavailableToAvailable,
+}
+
+impl TargetAvailabilityTransition {
+    fn from_snapshots(
+        previous: &TargetRuntimeSnapshot,
+        current: &TargetRuntimeSnapshot,
+    ) -> Option<Self> {
+        match (previous.available(), current.available()) {
+            (true, false) => Some(Self::AvailableToUnavailable),
+            (false, true) => Some(Self::UnavailableToAvailable),
+            _ => None,
+        }
     }
 }
 
@@ -239,17 +262,17 @@ impl TargetHandle {
 
     pub(crate) async fn cached_status(&self) -> CachedTargetStatus {
         let snapshot = self.runtime_snapshot().await;
-        let health_ok = snapshot.health_ok();
-        let daemon_info = health_ok.then_some(snapshot.daemon_info).flatten();
+        let available = snapshot.available();
+        let daemon_info = available.then_some(snapshot.daemon_info).flatten();
         CachedTargetStatus {
-            healthy: health_ok && daemon_info.is_some(),
+            healthy: available,
             daemon_info,
         }
     }
 
     pub(crate) async fn needs_status_recheck(&self) -> bool {
         let snapshot = self.runtime_snapshot().await;
-        !snapshot.health_ok() || snapshot.daemon_info.is_none()
+        !snapshot.available()
     }
 
     pub(crate) async fn cached_daemon_info_after_verification(
@@ -335,11 +358,6 @@ impl TargetHandle {
         self.backend.port_tunnel(max_queued_bytes).await
     }
 
-    pub(crate) async fn invalidate_cached_daemon_info(&self) {
-        self.runtime.lock().await.snapshot.daemon_info = None;
-        tracing::info!("cleared cached daemon identity and metadata");
-    }
-
     pub(crate) async fn ensure_daemon_info_cached(&self, name: &str) -> anyhow::Result<()> {
         if self.runtime.lock().await.daemon_info().is_some() {
             return Ok(());
@@ -350,6 +368,7 @@ impl TargetHandle {
             return Ok(());
         }
 
+        let previous_snapshot = self.runtime_snapshot().await;
         let info = match self.target_info().await {
             Ok(info) => info,
             Err(DaemonClientError::Transport(err)) => {
@@ -361,16 +380,8 @@ impl TargetHandle {
         ensure_expected_daemon_name(name, self.expected_daemon_name.as_deref(), &info.target)?;
 
         self.runtime.lock().await.set_verified_target_info(&info);
-        tracing::info!(
-            target = %name,
-            daemon_name = %info.target,
-            daemon_instance_id = %info.daemon_instance_id,
-            platform = %info.identity.platform,
-            arch = %info.identity.arch,
-            hostname = %info.identity.hostname,
-            supports_pty = info.capabilities.supports_pty,
-            "verified target identity"
-        );
+        self.log_availability_transition_since(name, &previous_snapshot, None)
+            .await;
         Ok(())
     }
 
@@ -379,25 +390,62 @@ impl TargetHandle {
         name: &str,
     ) -> anyhow::Result<Option<String>> {
         let _probe_guard = self.probe_lock.lock().await;
+        let previous_snapshot = self.runtime_snapshot().await;
         match self.health().await {
             Ok(health) => {
-                let previous_daemon_instance_id = self.runtime.lock().await.update_healthy(&health);
-                let needs_target_info = self.runtime.lock().await.daemon_info().is_none();
+                let (previous_daemon_instance_id, needs_target_info) = {
+                    let mut runtime = self.runtime.lock().await;
+                    let previous_daemon_instance_id = runtime.update_healthy(&health);
+                    (
+                        previous_daemon_instance_id,
+                        runtime.snapshot.daemon_info.is_none(),
+                    )
+                };
 
                 if needs_target_info {
-                    let info = self.target_info().await?;
-                    ensure_expected_daemon_name(
+                    let info = match self.target_info().await {
+                        Ok(info) => info,
+                        Err(err) => {
+                            let error = err.to_string();
+                            self.log_availability_transition_since(
+                                name,
+                                &previous_snapshot,
+                                Some(error.as_str()),
+                            )
+                            .await;
+                            return Err(err.into());
+                        }
+                    };
+                    if let Err(err) = ensure_expected_daemon_name(
                         name,
                         self.expected_daemon_name.as_deref(),
                         &info.target,
-                    )?;
+                    ) {
+                        let error = err.to_string();
+                        self.log_availability_transition_since(
+                            name,
+                            &previous_snapshot,
+                            Some(error.as_str()),
+                        )
+                        .await;
+                        return Err(err);
+                    }
                     self.runtime.lock().await.set_verified_target_info(&info);
                 }
 
+                self.log_availability_transition_since(name, &previous_snapshot, None)
+                    .await;
                 Ok(previous_daemon_instance_id)
             }
             Err(err) => {
                 self.runtime.lock().await.set_unhealthy(&err);
+                let error = err.to_string();
+                self.log_availability_transition_since(
+                    name,
+                    &previous_snapshot,
+                    Some(error.as_str()),
+                )
+                .await;
                 if let DaemonClientError::Rpc { .. } | DaemonClientError::Decode(_) = &err {
                     tracing::debug!(target = %name, error = %err, "target health refresh failed");
                 } else {
@@ -406,6 +454,97 @@ impl TargetHandle {
                 Err(err.into())
             }
         }
+    }
+
+    async fn log_availability_transition_since(
+        &self,
+        name: &str,
+        previous_snapshot: &TargetRuntimeSnapshot,
+        error: Option<&str>,
+    ) -> bool {
+        let current_snapshot = self.runtime_snapshot().await;
+        log_target_availability_transition(name, previous_snapshot, &current_snapshot, error)
+    }
+
+    pub(crate) async fn invalidate_cached_daemon_info(&self, name: &str) {
+        let (previous_snapshot, current_snapshot) = {
+            let mut runtime = self.runtime.lock().await;
+            let previous_snapshot = runtime.snapshot();
+            runtime.snapshot.daemon_info = None;
+            let current_snapshot = runtime.snapshot();
+            (previous_snapshot, current_snapshot)
+        };
+
+        if !log_target_availability_transition(name, &previous_snapshot, &current_snapshot, None) {
+            tracing::info!(
+                target = %name,
+                "cleared cached daemon identity and metadata"
+            );
+        }
+    }
+}
+
+fn log_target_availability_transition(
+    name: &str,
+    previous: &TargetRuntimeSnapshot,
+    current: &TargetRuntimeSnapshot,
+    error: Option<&str>,
+) -> bool {
+    match TargetAvailabilityTransition::from_snapshots(previous, current) {
+        Some(TargetAvailabilityTransition::AvailableToUnavailable) => {
+            log_target_became_unavailable(name, previous, error);
+            true
+        }
+        Some(TargetAvailabilityTransition::UnavailableToAvailable) => {
+            log_target_became_available(name, current);
+            true
+        }
+        None => false,
+    }
+}
+
+fn log_target_became_available(name: &str, current: &TargetRuntimeSnapshot) {
+    let info = current
+        .daemon_info
+        .as_ref()
+        .expect("available target should have cached daemon info");
+    tracing::info!(
+        target = %name,
+        daemon_name = %info.target,
+        daemon_instance_id = %info.daemon_instance_id,
+        platform = %info.identity.platform,
+        arch = %info.identity.arch,
+        hostname = %info.identity.hostname,
+        supports_pty = info.capabilities.supports_pty,
+        supports_transfer_compression = info.supports_transfer_compression,
+        "target transitioned from unavailable to available"
+    );
+}
+
+fn log_target_became_unavailable(
+    name: &str,
+    previous: &TargetRuntimeSnapshot,
+    error: Option<&str>,
+) {
+    let info = previous
+        .daemon_info
+        .as_ref()
+        .expect("previously available target should have cached daemon info");
+    if let Some(error) = error {
+        tracing::info!(
+            target = %name,
+            daemon_name = %info.target,
+            daemon_instance_id = %info.daemon_instance_id,
+            error = %error,
+            "target transitioned from available to unavailable"
+        );
+    } else {
+        tracing::info!(
+            target = %name,
+            daemon_name = %info.target,
+            daemon_instance_id = %info.daemon_instance_id,
+            "target transitioned from available to unavailable"
+        );
     }
 }
 
@@ -478,7 +617,7 @@ mod tests {
         TransferStreamProtocolVersion,
     };
 
-    use super::TargetRuntimeState;
+    use super::{TargetAvailabilityTransition, TargetRuntimeSnapshot, TargetRuntimeState};
 
     #[test]
     fn healthy_refresh_for_new_instance_clears_stale_daemon_info_in_same_snapshot() {
@@ -534,6 +673,48 @@ mod tests {
                 .as_ref()
                 .and_then(|health| health.daemon_version.as_deref()),
             Some("1.0.1")
+        );
+    }
+
+    #[test]
+    fn availability_transition_detects_available_to_unavailable() {
+        let info = target_info("daemon-old", "1.0.0");
+        let previous = TargetRuntimeSnapshot::verified(&info);
+        let current = TargetRuntimeSnapshot {
+            daemon_info: Some(super::TargetHandle::cache_from_target_info(&info)),
+            health: None,
+        };
+
+        assert_eq!(
+            TargetAvailabilityTransition::from_snapshots(&previous, &current),
+            Some(TargetAvailabilityTransition::AvailableToUnavailable)
+        );
+    }
+
+    #[test]
+    fn availability_transition_detects_unavailable_to_available() {
+        let previous = TargetRuntimeSnapshot::default();
+        let current = TargetRuntimeSnapshot::verified(&target_info("daemon-new", "1.0.1"));
+
+        assert_eq!(
+            TargetAvailabilityTransition::from_snapshots(&previous, &current),
+            Some(TargetAvailabilityTransition::UnavailableToAvailable)
+        );
+    }
+
+    #[test]
+    fn availability_transition_ignores_unchanged_availability() {
+        let info = target_info("daemon-old", "1.0.0");
+        let available = TargetRuntimeSnapshot::verified(&info);
+        let unavailable = TargetRuntimeSnapshot::default();
+
+        assert_eq!(
+            TargetAvailabilityTransition::from_snapshots(&available, &available),
+            None
+        );
+        assert_eq!(
+            TargetAvailabilityTransition::from_snapshots(&unavailable, &unavailable),
+            None
         );
     }
 

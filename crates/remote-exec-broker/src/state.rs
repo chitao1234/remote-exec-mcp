@@ -439,7 +439,7 @@ impl BrokerState {
                 self.trigger_remote_target_health_recheck(&record.target);
                 if let Ok(info) = target.target_info().await {
                     if info.daemon_instance_id != record.daemon_instance_id {
-                        target.invalidate_cached_daemon_info().await;
+                        target.invalidate_cached_daemon_info(&record.target).await;
                         self.sessions.remove(&record.session_id).await;
                         return Err(anyhow::anyhow!(unknown_process_id_message(
                             &record.session_id
