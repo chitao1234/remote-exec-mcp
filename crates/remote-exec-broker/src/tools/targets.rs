@@ -101,7 +101,7 @@ mod tests {
         let text = call_result
             .content
             .iter()
-            .filter_map(|content| content.raw.as_text().map(|text| text.text.as_str()))
+            .filter_map(|content| content.as_text().map(|text| text.text.as_str()))
             .collect::<Vec<_>>()
             .join("\n");
 

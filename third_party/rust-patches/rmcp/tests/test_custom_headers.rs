@@ -866,16 +866,18 @@ async fn test_server_rejects_unsupported_protocol_version() {
 fn test_protocol_version_utilities() {
     use rmcp::model::ProtocolVersion;
 
+    assert_eq!(ProtocolVersion::V_2026_07_28.as_str(), "2026-07-28");
     assert_eq!(ProtocolVersion::V_2025_11_25.as_str(), "2025-11-25");
     assert_eq!(ProtocolVersion::V_2025_06_18.as_str(), "2025-06-18");
     assert_eq!(ProtocolVersion::V_2025_03_26.as_str(), "2025-03-26");
     assert_eq!(ProtocolVersion::V_2024_11_05.as_str(), "2024-11-05");
 
-    assert_eq!(ProtocolVersion::KNOWN_VERSIONS.len(), 4);
+    assert_eq!(ProtocolVersion::KNOWN_VERSIONS.len(), 5);
     assert!(ProtocolVersion::KNOWN_VERSIONS.contains(&ProtocolVersion::V_2024_11_05));
     assert!(ProtocolVersion::KNOWN_VERSIONS.contains(&ProtocolVersion::V_2025_03_26));
     assert!(ProtocolVersion::KNOWN_VERSIONS.contains(&ProtocolVersion::V_2025_06_18));
     assert!(ProtocolVersion::KNOWN_VERSIONS.contains(&ProtocolVersion::V_2025_11_25));
+    assert!(ProtocolVersion::KNOWN_VERSIONS.contains(&ProtocolVersion::V_2026_07_28));
 }
 
 /// Integration test: Verify server validates only the Host header for DNS rebinding protection
@@ -1029,4 +1031,201 @@ async fn test_server_validates_host_header_port_for_dns_rebinding_protection() {
 
     let response = service.handle(wrong_port_request).await;
     assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+}
+
+/// Integration test: Verify the validator falls back to the URI authority when
+/// the Host header is absent (HTTP/2 :authority pseudo-header scenario).
+#[tokio::test]
+#[cfg(all(feature = "transport-streamable-http-server", feature = "server",))]
+async fn test_server_falls_back_to_uri_authority_when_host_header_missing() {
+    use std::sync::Arc;
+
+    use bytes::Bytes;
+    use http::{Method, Request, header::CONTENT_TYPE};
+    use http_body_util::Full;
+    use rmcp::{
+        handler::server::ServerHandler,
+        model::{ServerCapabilities, ServerInfo},
+        transport::streamable_http_server::{
+            StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+        },
+    };
+    use serde_json::json;
+
+    #[derive(Clone)]
+    struct TestHandler;
+
+    impl ServerHandler for TestHandler {
+        fn get_info(&self) -> ServerInfo {
+            ServerInfo::new(ServerCapabilities::builder().build())
+        }
+    }
+
+    let service = StreamableHttpService::new(
+        || Ok(TestHandler),
+        Arc::new(LocalSessionManager::default()),
+        StreamableHttpServerConfig::default(),
+    );
+
+    let init_body = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": {
+                "name": "test-client",
+                "version": "1.0.0"
+            }
+        }
+    });
+
+    // Allowed authority via URI only — no Host header.
+    let allowed_request = Request::builder()
+        .method(Method::POST)
+        .uri("http://localhost:8080/")
+        .header("Accept", "application/json, text/event-stream")
+        .header(CONTENT_TYPE, "application/json")
+        .body(Full::new(Bytes::from(init_body.to_string())))
+        .unwrap();
+    assert!(allowed_request.headers().get("Host").is_none());
+
+    let response = service.handle(allowed_request).await;
+    assert_eq!(response.status(), http::StatusCode::OK);
+
+    // Disallowed authority via URI only — no Host header.
+    let bad_request = Request::builder()
+        .method(Method::POST)
+        .uri("http://attacker.example/")
+        .header("Accept", "application/json, text/event-stream")
+        .header(CONTENT_TYPE, "application/json")
+        .body(Full::new(Bytes::from(init_body.to_string())))
+        .unwrap();
+    assert!(bad_request.headers().get("Host").is_none());
+
+    let response = service.handle(bad_request).await;
+    assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+
+    // Neither Host header nor URI authority — still a 400.
+    let missing_request = Request::builder()
+        .method(Method::POST)
+        .uri("/")
+        .header("Accept", "application/json, text/event-stream")
+        .header(CONTENT_TYPE, "application/json")
+        .body(Full::new(Bytes::from(init_body.to_string())))
+        .unwrap();
+    assert!(missing_request.headers().get("Host").is_none());
+    assert!(missing_request.uri().authority().is_none());
+
+    let response = service.handle(missing_request).await;
+    assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
+}
+
+#[cfg(all(feature = "transport-streamable-http-server", feature = "server"))]
+mod origin_validation {
+    use std::sync::Arc;
+
+    use bytes::Bytes;
+    use http::{Method, Request, header::CONTENT_TYPE};
+    use http_body_util::Full;
+    use rmcp::{
+        handler::server::ServerHandler,
+        model::{ServerCapabilities, ServerInfo},
+        transport::streamable_http_server::{
+            StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+        },
+    };
+    use serde_json::json;
+
+    #[derive(Clone)]
+    struct TestHandler;
+
+    impl ServerHandler for TestHandler {
+        fn get_info(&self) -> ServerInfo {
+            ServerInfo::new(ServerCapabilities::builder().build())
+        }
+    }
+
+    fn service_with_allowed_origins(
+        origins: &[&str],
+    ) -> StreamableHttpService<TestHandler, LocalSessionManager> {
+        StreamableHttpService::new(
+            || Ok(TestHandler),
+            Arc::new(LocalSessionManager::default()),
+            StreamableHttpServerConfig::default().with_allowed_origins(origins.iter().copied()),
+        )
+    }
+
+    fn init_request(origin: Option<&str>) -> Request<Full<Bytes>> {
+        let init_body = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "1.0.0"}
+            }
+        });
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .header("Accept", "application/json, text/event-stream")
+            .header(CONTENT_TYPE, "application/json")
+            .header("Host", "localhost:8080");
+        if let Some(origin) = origin {
+            builder = builder.header("Origin", origin);
+        }
+        builder
+            .body(Full::new(Bytes::from(init_body.to_string())))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn allowlisted_origin_is_allowed() {
+        let service = service_with_allowed_origins(&["http://localhost:8080"]);
+        let response = service
+            .handle(init_request(Some("http://localhost:8080")))
+            .await;
+        assert_eq!(response.status(), http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn non_allowlisted_origin_is_forbidden() {
+        let service = service_with_allowed_origins(&["http://localhost:8080"]);
+        let response = service
+            .handle(init_request(Some("http://attacker.example")))
+            .await;
+        assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn missing_origin_passes_through() {
+        let service = service_with_allowed_origins(&["http://localhost:8080"]);
+        let response = service.handle(init_request(None)).await;
+        assert_eq!(response.status(), http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn scheme_mismatch_is_forbidden() {
+        let service = service_with_allowed_origins(&["http://localhost:8080"]);
+        let response = service
+            .handle(init_request(Some("https://localhost:8080")))
+            .await;
+        assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn null_origin_is_allowed_when_allowlisted() {
+        let service = service_with_allowed_origins(&["null"]);
+        let response = service.handle(init_request(Some("null"))).await;
+        assert_eq!(response.status(), http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn null_origin_is_forbidden_when_not_allowlisted() {
+        let service = service_with_allowed_origins(&["http://localhost:8080"]);
+        let response = service.handle(init_request(Some("null"))).await;
+        assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+    }
 }

@@ -3,7 +3,7 @@ use axum::Router;
 use rmcp::{
     ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRoute, router::tool::ToolRouter, tool::ToolCallContext},
-    model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, ContentBlock, ServerCapabilities, ServerInfo},
     tool_handler,
     transport::{StreamableHttpServerConfig, StreamableHttpService},
 };
@@ -16,7 +16,7 @@ use crate::request_context::RequestContext;
 use crate::tools::registry::BrokerTool;
 
 pub struct ToolCallOutput {
-    pub content: Vec<Content>,
+    pub content: Vec<ContentBlock>,
     pub structured: Option<serde_json::Value>,
 }
 
@@ -26,19 +26,22 @@ pub(crate) type ToolCallFuture<'a> =
 impl ToolCallOutput {
     pub fn text_and_structured(text: String, structured: serde_json::Value) -> Self {
         Self {
-            content: vec![Content::text(text)],
+            content: vec![ContentBlock::text(text)],
             structured: Some(structured),
         }
     }
 
     pub fn text(text: String) -> Self {
         Self {
-            content: vec![Content::text(text)],
+            content: vec![ContentBlock::text(text)],
             structured: None,
         }
     }
 
-    pub fn content_and_structured(content: Vec<Content>, structured: serde_json::Value) -> Self {
+    pub fn content_and_structured(
+        content: Vec<ContentBlock>,
+        structured: serde_json::Value,
+    ) -> Self {
         Self {
             content,
             structured: Some(structured),
@@ -55,7 +58,7 @@ impl ToolCallOutput {
 }
 
 pub fn tool_error_result(text: String) -> CallToolResult {
-    CallToolResult::error(vec![Content::text(text)])
+    CallToolResult::error(vec![ContentBlock::text(text)])
 }
 
 fn format_tool_error_without_logging(err: anyhow::Error) -> CallToolResult {
@@ -384,7 +387,6 @@ mod tests {
 
     fn error_text(result: rmcp::model::CallToolResult) -> String {
         result.content[0]
-            .raw
             .as_text()
             .expect("text content")
             .text

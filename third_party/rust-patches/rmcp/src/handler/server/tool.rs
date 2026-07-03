@@ -10,7 +10,7 @@ use serde::de::DeserializeOwned;
 
 use super::common::{AsRequestContext, FromContextPart};
 pub use super::{
-    common::{Extension, RequestId, schema_for_output, schema_for_type},
+    common::{Extension, RequestId, schema_for_input, schema_for_output, schema_for_type},
     router::tool::{ToolRoute, ToolRouter},
 };
 use crate::{
@@ -35,7 +35,7 @@ pub struct ToolCallContext<'s, S> {
     pub service: &'s S,
     pub name: Cow<'static, str>,
     pub arguments: Option<JsonObject>,
-    pub task: Option<JsonObject>,
+    pub task: Option<crate::model::TaskMetadata>,
 }
 
 impl<'s, S> ToolCallContext<'s, S> {

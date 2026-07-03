@@ -7,7 +7,7 @@ use remote_exec_test_support::test_helpers;
 use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
-    model::{CallToolRequestParams, CallToolResult, ClientInfo},
+    model::{CallToolRequestParams, CallToolResult, ClientInfo, ContentBlock},
     service::RunningService,
 };
 use tempfile::TempDir;
@@ -317,7 +317,7 @@ impl ToolResult {
         let text_output = result
             .content
             .iter()
-            .filter_map(|content| content.raw.as_text().map(|text| text.text.as_str()))
+            .filter_map(|content| content.as_text().map(|text| text.text.as_str()))
             .collect::<Vec<_>>()
             .join("\n");
         let raw_content = result.content.iter().map(normalize_content).collect();
@@ -345,15 +345,15 @@ impl ToolResult {
     }
 }
 
-fn normalize_content(content: &rmcp::model::Content) -> serde_json::Value {
-    if let Some(text) = content.raw.as_text() {
+fn normalize_content(content: &ContentBlock) -> serde_json::Value {
+    if let Some(text) = content.as_text() {
         return serde_json::json!({
             "type": "text",
             "text": text.text,
         });
     }
 
-    if let Some(image) = content.raw.as_image() {
+    if let Some(image) = content.as_image() {
         return serde_json::json!({
             "type": "input_image",
             "image_url": format!("data:{};base64,{}", image.mime_type, image.data),

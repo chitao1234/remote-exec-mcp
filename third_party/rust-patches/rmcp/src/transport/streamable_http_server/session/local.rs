@@ -66,9 +66,16 @@ impl SessionManager for LocalSessionManager {
         Ok(response)
     }
     async fn close_session(&self, id: &SessionId) -> Result<(), Self::Error> {
-        let mut sessions = self.sessions.write().await;
-        if let Some(handle) = sessions.remove(id) {
-            handle.close().await?;
+        let handle = {
+            let mut sessions = self.sessions.write().await;
+            sessions.remove(id)
+        };
+        if let Some(handle) = handle {
+            match handle.close().await {
+                // Worker already exited — nothing left to clean up.
+                Ok(()) | Err(SessionError::SessionServiceTerminated) => {}
+                Err(e) => return Err(e.into()),
+            }
         }
         Ok(())
     }
@@ -136,6 +143,20 @@ impl SessionManager for LocalSessionManager {
         handle.push_message(message, None).await?;
         Ok(())
     }
+
+    async fn restore_session(
+        &self,
+        id: SessionId,
+    ) -> Result<RestoreOutcome<Self::Transport>, Self::Error> {
+        let mut sessions = self.sessions.write().await;
+        if sessions.contains_key(&id) {
+            // A concurrent request already restored this session.
+            return Ok(RestoreOutcome::AlreadyPresent);
+        }
+        let (handle, worker) = create_local_session(id.clone(), self.session_config.clone());
+        sessions.insert(id, handle);
+        Ok(RestoreOutcome::Restored(WorkerTransport::spawn(worker)))
+    }
 }
 
 /// `<index>/request_id>`
@@ -188,7 +209,7 @@ impl std::str::FromStr for EventId {
     }
 }
 
-use super::{ServerSseMessage, SessionManager};
+use super::{RestoreOutcome, ServerSseMessage, SessionManager};
 
 struct CachedTx {
     tx: Sender<ServerSseMessage>,
@@ -408,9 +429,10 @@ impl LocalSessionWorker {
         notification: &JsonRpcNotification<ClientNotification>,
     ) {
         if let ClientNotification::CancelledNotification(n) = &notification.notification {
-            let request_id = n.params.request_id.clone();
-            let resource = ResourceKey::McpRequestId(request_id);
-            self.unregister_resource(&resource);
+            if let Some(request_id) = n.params.request_id.clone() {
+                let resource = ResourceKey::McpRequestId(request_id);
+                self.unregister_resource(&resource);
+            }
         }
     }
     fn evict_expired_channels(&mut self) {
@@ -475,13 +497,17 @@ impl LocalSessionWorker {
                     }),
                 ..
             }) => {
-                if let Some(id) = self
-                    .resource_router
-                    .get(&ResourceKey::McpRequestId(request_id.clone()))
-                {
-                    OutboundChannel::RequestWise {
-                        id: *id,
-                        close: false,
+                if let Some(req_id) = request_id {
+                    if let Some(id) = self
+                        .resource_router
+                        .get(&ResourceKey::McpRequestId(req_id.clone()))
+                    {
+                        OutboundChannel::RequestWise {
+                            id: *id,
+                            close: false,
+                        }
+                    } else {
+                        OutboundChannel::Common
                     }
                 } else {
                     OutboundChannel::Common
@@ -502,14 +528,12 @@ impl LocalSessionWorker {
                 }
             }
             ServerJsonRpcMessage::Error(json_rpc_error) => {
-                if let Some(id) = self
-                    .resource_router
-                    .get(&ResourceKey::McpRequestId(json_rpc_error.id.clone()))
-                {
-                    OutboundChannel::RequestWise {
-                        id: *id,
-                        close: true,
-                    }
+                if let Some(id) = json_rpc_error.id.clone().and_then(|rid| {
+                    self.resource_router
+                        .get(&ResourceKey::McpRequestId(rid))
+                        .copied()
+                }) {
+                    OutboundChannel::RequestWise { id, close: true }
                 } else {
                     OutboundChannel::Common
                 }
@@ -914,8 +938,11 @@ pub enum LocalSessionWorkerError {
     FailToSendInitializeRequest(SessionError),
     #[error("fail to handle message: {0}")]
     FailToHandleMessage(SessionError),
+    #[deprecated(note = "idle timeout now surfaces as WorkerQuitReason::IdleTimeout")]
     #[error("keep alive timeout after {}ms", _0.as_millis())]
     KeepAliveTimeout(Duration),
+    #[error("init timeout after {}ms", _0.as_millis())]
+    InitTimeout(Duration),
     #[error("Transport closed")]
     TransportClosed,
     #[error("Tokio join error {0}")]
@@ -945,13 +972,24 @@ impl Worker for LocalSessionWorker {
             FromHttpService(SessionEvent),
             FromHandler(WorkerSendRequest<LocalSessionWorker>),
         }
-        // waiting for initialize request
-        let evt = self.event_rx.recv().await.ok_or_else(|| {
-            WorkerQuitReason::fatal(
-                LocalSessionWorkerError::TransportTerminated,
-                "get initialize request",
-            )
-        })?;
+        let init_timeout = self.session_config.init_timeout.unwrap_or(Duration::MAX);
+        let evt = tokio::select! {
+            evt = self.event_rx.recv() => evt.ok_or_else(|| {
+                WorkerQuitReason::fatal(
+                    LocalSessionWorkerError::TransportTerminated,
+                    "get initialize request",
+                )
+            })?,
+            _ = context.cancellation_token.cancelled() => {
+                return Err(WorkerQuitReason::Cancelled);
+            }
+            _ = tokio::time::sleep(init_timeout) => {
+                return Err(WorkerQuitReason::fatal(
+                    LocalSessionWorkerError::InitTimeout(init_timeout),
+                    "waiting for initialize request",
+                ));
+            }
+        };
         let SessionEvent::InitializeRequest { request, responder } = evt else {
             return Err(WorkerQuitReason::fatal(
                 LocalSessionWorkerError::UnexpectedEvent(evt),
@@ -994,7 +1032,7 @@ impl Worker for LocalSessionWorker {
                     return Err(WorkerQuitReason::Cancelled)
                 }
                 _ = keep_alive_timeout => {
-                    return Err(WorkerQuitReason::fatal(LocalSessionWorkerError::KeepAliveTimeout(keep_alive), "poll next session event"))
+                    return Err(WorkerQuitReason::IdleTimeout(keep_alive))
                 }
             };
             match event {
@@ -1006,8 +1044,7 @@ impl Worker for LocalSessionWorker {
                             Some(ResourceKey::McpRequestId(request_id))
                         }
                         crate::model::JsonRpcMessage::Error(json_rpc_error) => {
-                            let request_id = json_rpc_error.id.clone();
-                            Some(ResourceKey::McpRequestId(request_id))
+                            json_rpc_error.id.clone().map(ResourceKey::McpRequestId)
                         }
                         _ => {
                             None
@@ -1108,6 +1145,10 @@ pub struct SessionConfig {
     /// resume requests. After this duration, completed entries are evicted
     /// and resume will return an error. Default is 60 seconds.
     pub completed_cache_ttl: Duration,
+    /// Maximum duration to wait for the `initialize` request after session
+    /// creation. If not received within this window, the session is
+    /// terminated. Default is 60 seconds. Set to `None` to disable.
+    pub init_timeout: Option<Duration>,
 }
 
 impl SessionConfig {
@@ -1115,6 +1156,7 @@ impl SessionConfig {
     pub const DEFAULT_KEEP_ALIVE: Duration = Duration::from_secs(300);
     pub const DEFAULT_SSE_RETRY: Duration = Duration::from_secs(3);
     pub const DEFAULT_COMPLETED_CACHE_TTL: Duration = Duration::from_secs(60);
+    pub const DEFAULT_INIT_TIMEOUT: Duration = Duration::from_secs(60);
 }
 
 impl Default for SessionConfig {
@@ -1124,6 +1166,7 @@ impl Default for SessionConfig {
             keep_alive: Some(Self::DEFAULT_KEEP_ALIVE),
             sse_retry: Some(Self::DEFAULT_SSE_RETRY),
             completed_cache_ttl: Self::DEFAULT_COMPLETED_CACHE_TTL,
+            init_timeout: Some(Self::DEFAULT_INIT_TIMEOUT),
         }
     }
 }

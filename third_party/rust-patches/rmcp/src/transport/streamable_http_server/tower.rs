@@ -1,4 +1,6 @@
-use std::{convert::Infallible, fmt::Display, sync::Arc, time::Duration};
+use std::{
+    borrow::Cow, collections::HashMap, convert::Infallible, fmt::Display, sync::Arc, time::Duration,
+};
 
 use bytes::Bytes;
 use futures::{StreamExt, future::BoxFuture};
@@ -8,10 +10,16 @@ use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
-use super::session::SessionManager;
+use super::session::{
+    RestoreOutcome, SessionId, SessionManager, SessionRestoreMarker, SessionState, SessionStore,
+};
 use crate::{
     RoleServer,
-    model::{ClientJsonRpcMessage, ClientRequest, GetExtensions, ProtocolVersion},
+    model::{
+        ClientCapabilities, ClientJsonRpcMessage, ClientNotification, ClientRequest, ErrorData,
+        GetExtensions, Implementation, InitializeRequest, InitializeRequestParams,
+        InitializedNotification, JsonRpcError, ProtocolVersion, RequestId,
+    },
     serve_server,
     service::serve_directly,
     transport::{
@@ -59,6 +67,43 @@ pub struct StreamableHttpServerConfig {
     /// or with ports:
     ///     allowed_hosts = ["example.com", "example.com:8080"]
     pub allowed_hosts: Vec<String>,
+    /// Allowed browser origins for inbound `Origin` validation.
+    ///
+    /// Defaults to an empty list, which disables Origin validation. When
+    /// non-empty, requests carrying an `Origin` header must match per RFC 6454
+    /// `(scheme, host, port)`; missing-`Origin` requests still pass. Entries
+    /// must include a scheme; `"null"` matches the browser's `Origin: null`.
+    /// examples:
+    ///     allowed_origins = ["https://app.example.com", "http://localhost:8080"]
+    pub allowed_origins: Vec<String>,
+    /// Optional external session store for cross-instance recovery.
+    ///
+    /// When set, [`SessionState`] (the client's `initialize` parameters) is
+    /// persisted after a successful handshake and deleted when the session
+    /// closes. On any subsequent request that arrives at an instance with no
+    /// in-memory session, the store is consulted: if an entry is found the
+    /// session is transparently restored so the client does not need to
+    /// re-initialize.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use std::sync::Arc;
+    /// use rmcp::transport::streamable_http_server::{
+    ///     StreamableHttpServerConfig, session::SessionStore,
+    /// };
+    ///
+    /// let config = StreamableHttpServerConfig {
+    ///     session_store: Some(Arc::new(MyRedisStore::new())),
+    ///     ..Default::default()
+    /// };
+    /// ```
+    pub session_store: Option<Arc<dyn SessionStore>>,
+}
+
+impl std::fmt::Debug for dyn SessionStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<SessionStore>")
+    }
 }
 
 impl Default for StreamableHttpServerConfig {
@@ -70,6 +115,8 @@ impl Default for StreamableHttpServerConfig {
             json_response: false,
             cancellation_token: CancellationToken::new(),
             allowed_hosts: vec!["localhost".into(), "127.0.0.1".into(), "::1".into()],
+            allowed_origins: vec![],
+            session_store: None,
         }
     }
 }
@@ -85,6 +132,18 @@ impl StreamableHttpServerConfig {
     /// Disable allowed hosts. This will allow requests with any `Host` header, which is NOT recommended for public deployments.
     pub fn disable_allowed_hosts(mut self) -> Self {
         self.allowed_hosts.clear();
+        self
+    }
+    pub fn with_allowed_origins(
+        mut self,
+        allowed_origins: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.allowed_origins = allowed_origins.into_iter().map(Into::into).collect();
+        self
+    }
+    /// Disable Origin validation, reverting to the default ignore-Origin behavior.
+    pub fn disable_allowed_origins(mut self) -> Self {
+        self.allowed_origins.clear();
         self
     }
     pub fn with_sse_keep_alive(mut self, duration: Option<Duration>) -> Self {
@@ -153,6 +212,54 @@ fn validate_protocol_version_header(headers: &http::HeaderMap) -> Result<(), Box
     Ok(())
 }
 
+fn invalid_request_jsonrpc_response(
+    id: Option<RequestId>,
+    message: impl Into<Cow<'static, str>>,
+) -> BoxResponse {
+    let err = JsonRpcError::new(id, ErrorData::invalid_request(message, None));
+    let body = serde_json::to_vec(&err).expect("serialize JsonRpcError");
+    Response::builder()
+        .status(http::StatusCode::BAD_REQUEST)
+        .header(http::header::CONTENT_TYPE, JSON_MIME_TYPE)
+        .body(Full::new(Bytes::from(body)).boxed())
+        .expect("valid response")
+}
+
+#[expect(
+    clippy::result_large_err,
+    reason = "BoxResponse is intentionally large; matches other handlers in this file"
+)]
+/// Absent header is allowed; the first initialize round-trip may legitimately omit it.
+fn validate_header_matches_init_body(
+    headers: &http::HeaderMap,
+    body_version: &str,
+    request_id: Option<RequestId>,
+) -> Result<(), BoxResponse> {
+    let Some(header_value) = headers.get(HEADER_MCP_PROTOCOL_VERSION) else {
+        return Ok(());
+    };
+    let header_str = header_value.to_str().map_err(|_| {
+        invalid_request_jsonrpc_response(
+            request_id.clone(),
+            "Invalid Request: MCP-Protocol-Version header is not valid UTF-8",
+        )
+    })?;
+    if header_str != body_version {
+        tracing::warn!(
+            header = header_str,
+            body = body_version,
+            "rejecting initialize: MCP-Protocol-Version header does not match params.protocolVersion"
+        );
+        return Err(invalid_request_jsonrpc_response(
+            request_id,
+            format!(
+                "Invalid Request: MCP-Protocol-Version header ({header_str}) does not match initialize params.protocolVersion ({body_version})"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn forbidden_response(message: impl Into<String>) -> BoxResponse {
     Response::builder()
         .status(http::StatusCode::FORBIDDEN)
@@ -209,6 +316,59 @@ fn host_is_allowed(host: &NormalizedAuthority, allowed_hosts: &[String]) -> bool
         })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NormalizedOrigin {
+    Null,
+    Tuple {
+        scheme: String,
+        host: String,
+        port: Option<u16>,
+    },
+}
+
+fn parse_origin_value(value: &str) -> Option<NormalizedOrigin> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if value.eq_ignore_ascii_case("null") {
+        return Some(NormalizedOrigin::Null);
+    }
+    let uri = http::Uri::try_from(value).ok()?;
+    let scheme = uri.scheme_str()?.to_ascii_lowercase();
+    let authority = uri.authority()?;
+    Some(NormalizedOrigin::Tuple {
+        scheme,
+        host: normalize_host(authority.host()),
+        port: authority.port_u16(),
+    })
+}
+
+fn origin_is_allowed(origin: &NormalizedOrigin, allowed_origins: &[String]) -> bool {
+    if allowed_origins.is_empty() {
+        return true;
+    }
+    allowed_origins
+        .iter()
+        .filter_map(|raw| parse_origin_value(raw))
+        .any(|allowed| match (&allowed, origin) {
+            (NormalizedOrigin::Null, NormalizedOrigin::Null) => true,
+            (
+                NormalizedOrigin::Tuple {
+                    scheme: a_scheme,
+                    host: a_host,
+                    port: a_port,
+                },
+                NormalizedOrigin::Tuple {
+                    scheme: o_scheme,
+                    host: o_host,
+                    port: o_port,
+                },
+            ) => a_scheme == o_scheme && a_host == o_host && (a_port.is_none() || a_port == o_port),
+            _ => false,
+        })
+}
+
 fn bad_request_response(message: &str) -> BoxResponse {
     let body = Full::from(message.to_string()).boxed();
 
@@ -219,28 +379,85 @@ fn bad_request_response(message: &str) -> BoxResponse {
         .expect("failed to build bad request response")
 }
 
-fn parse_host_header(headers: &HeaderMap) -> Result<NormalizedAuthority, BoxResponse> {
-    let Some(host) = headers.get(http::header::HOST) else {
-        return Err(bad_request_response("Bad Request: missing Host header"));
-    };
-
-    let host = host
-        .to_str()
-        .map_err(|_| bad_request_response("Bad Request: Invalid Host header encoding"))?;
-    let authority = http::uri::Authority::try_from(host)
-        .map_err(|_| bad_request_response("Bad Request: Invalid Host header"))?;
+fn parse_host_header(
+    uri: &http::Uri,
+    headers: &HeaderMap,
+) -> Result<NormalizedAuthority, BoxResponse> {
+    if let Some(host) = headers.get(http::header::HOST) {
+        let host_str = host
+            .to_str()
+            .inspect_err(|_| {
+                tracing::warn!(host = ?host, "rejected request with non-UTF-8 Host header");
+            })
+            .map_err(|_| bad_request_response("Bad Request: Invalid Host header encoding"))?;
+        let authority = http::uri::Authority::try_from(host_str)
+            .inspect_err(|_| {
+                tracing::warn!(
+                    host = host_str,
+                    "rejected request with malformed Host header"
+                );
+            })
+            .map_err(|_| bad_request_response("Bad Request: Invalid Host header"))?;
+        return Ok(normalize_authority(authority.host(), authority.port_u16()));
+    }
+    // HTTP/2 carries the host in `:authority`; middleware such as
+    // `axum::Router::nest` can drop the `Host` header hyper synthesizes from it.
+    let authority = uri.authority().ok_or_else(|| {
+        tracing::warn!("rejected request with missing Host header and no :authority");
+        bad_request_response("Bad Request: missing Host header")
+    })?;
     Ok(normalize_authority(authority.host(), authority.port_u16()))
 }
 
 fn validate_dns_rebinding_headers(
+    uri: &http::Uri,
     headers: &HeaderMap,
     config: &StreamableHttpServerConfig,
 ) -> Result<(), BoxResponse> {
-    let host = parse_host_header(headers)?;
+    let host = parse_host_header(uri, headers)?;
     if !host_is_allowed(&host, &config.allowed_hosts) {
+        tracing::warn!(
+            host = ?host,
+            "rejected request with disallowed Host header (possible DNS rebinding attempt)",
+        );
         return Err(forbidden_response("Forbidden: Host header is not allowed"));
     }
+    validate_origin_header(headers, &config.allowed_origins)?;
+    Ok(())
+}
 
+fn validate_origin_header(
+    headers: &HeaderMap,
+    allowed_origins: &[String],
+) -> Result<(), BoxResponse> {
+    if allowed_origins.is_empty() {
+        return Ok(());
+    }
+    let Some(origin_header) = headers.get(http::header::ORIGIN) else {
+        return Ok(());
+    };
+    let origin_str = origin_header
+        .to_str()
+        .inspect_err(|_| {
+            tracing::warn!(origin = ?origin_header, "rejected request with non-UTF-8 Origin header");
+        })
+        .map_err(|_| bad_request_response("Bad Request: Invalid Origin header encoding"))?;
+    let origin = parse_origin_value(origin_str).ok_or_else(|| {
+        tracing::warn!(
+            origin = origin_str,
+            "rejected request with malformed Origin header",
+        );
+        bad_request_response("Bad Request: Invalid Origin header")
+    })?;
+    if !origin_is_allowed(&origin, allowed_origins) {
+        tracing::warn!(
+            origin = ?origin,
+            "rejected request with disallowed Origin header (possible cross-origin attack)",
+        );
+        return Err(forbidden_response(
+            "Forbidden: Origin header is not allowed",
+        ));
+    }
     Ok(())
 }
 
@@ -331,6 +548,13 @@ pub struct StreamableHttpService<S, M> {
     pub config: StreamableHttpServerConfig,
     session_manager: Arc<M>,
     service_factory: Arc<dyn Fn() -> Result<S, std::io::Error> + Send + Sync>,
+    /// Tracks in-progress session restores so that concurrent requests for the
+    /// same unknown session ID wait for the first restore to complete rather
+    /// than racing to replay the initialize handshake. `None` when no external
+    /// session store is configured (avoids allocating the map).
+    pending_restores: Option<
+        Arc<tokio::sync::RwLock<HashMap<SessionId, tokio::sync::watch::Sender<Option<bool>>>>>,
+    >,
 }
 
 impl<S, M> Clone for StreamableHttpService<S, M> {
@@ -339,6 +563,7 @@ impl<S, M> Clone for StreamableHttpService<S, M> {
             config: self.config.clone(),
             session_manager: self.session_manager.clone(),
             service_factory: self.service_factory.clone(),
+            pending_restores: self.pending_restores.clone(),
         }
     }
 }
@@ -369,6 +594,35 @@ where
     }
 }
 
+/// Guard used inside [`StreamableHttpService::try_restore_from_store`].
+///
+/// Ensures the `pending_restores` map entry is always cleaned up — even when
+/// the future is cancelled mid-await.
+///
+/// `result` defaults to `false` (failure / cancellation). Only the success path
+/// needs to set it to `true` before returning.
+struct PendingRestoreGuard {
+    pending_restores:
+        Arc<tokio::sync::RwLock<HashMap<SessionId, tokio::sync::watch::Sender<Option<bool>>>>>,
+    session_id: SessionId,
+    watch_tx: tokio::sync::watch::Sender<Option<bool>>,
+    /// The value that will be broadcast to waiting tasks on drop.
+    result: bool,
+}
+
+impl Drop for PendingRestoreGuard {
+    fn drop(&mut self) {
+        // `send` is synchronous — unblocks waiters immediately, no lock needed.
+        let _ = self.watch_tx.send(Some(self.result));
+        // Remove the map entry asynchronously (requires the async write lock).
+        let pending_restores = self.pending_restores.clone();
+        let session_id = self.session_id.clone();
+        tokio::spawn(async move {
+            pending_restores.write().await.remove(&session_id);
+        });
+    }
+}
+
 impl<S, M> StreamableHttpService<S, M>
 where
     S: crate::Service<RoleServer> + Send + 'static,
@@ -379,21 +633,241 @@ where
         session_manager: Arc<M>,
         config: StreamableHttpServerConfig,
     ) -> Self {
+        let pending_restores = config.session_store.is_some().then(|| {
+            Arc::new(tokio::sync::RwLock::new(HashMap::<
+                SessionId,
+                tokio::sync::watch::Sender<Option<bool>>,
+            >::new()))
+        });
         Self {
             config,
             session_manager,
             service_factory: Arc::new(service_factory),
+            pending_restores,
         }
     }
     fn get_service(&self) -> Result<S, std::io::Error> {
         (self.service_factory)()
+    }
+
+    /// Spawn a task that runs `serve_server` for the given session, waits for
+    /// it to finish, and then calls `close_session`.
+    ///
+    /// `init_done_tx`: when `Some`, the sender is fired after `serve_server`
+    /// returns successfully, signalling to the caller that the MCP handshake
+    /// is complete. Used by `try_restore_from_store` to synchronise with the
+    /// restore `initialize` replay; `handle_post` passes `None`.
+    fn spawn_session_worker(
+        session_manager: Arc<M>,
+        session_id: SessionId,
+        service: S,
+        transport: M::Transport,
+        init_done_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    ) where
+        S: crate::Service<RoleServer> + Send + 'static,
+        M: SessionManager,
+    {
+        tokio::spawn(async move {
+            let svc =
+                serve_server::<S, M::Transport, _, TransportAdapterIdentity>(service, transport)
+                    .await;
+            match svc {
+                Ok(svc) => {
+                    if let Some(tx) = init_done_tx {
+                        let _ = tx.send(());
+                    }
+                    let _ = svc.waiting().await;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to serve session: {e}");
+                    // Dropping init_done_tx (if Some) signals failure to the caller.
+                }
+            }
+            let _ = session_manager
+                .close_session(&session_id)
+                .await
+                .inspect_err(|e| {
+                    tracing::error!("Failed to close session {session_id}: {e}");
+                });
+        });
+    }
+
+    /// Attempt to restore a session from the external store.
+    ///
+    /// Returns `true` when the session is available and ready to serve the
+    /// current request (either just restored or already in memory). Returns
+    /// `false` when no store is configured or the session ID is unknown.
+    ///
+    /// Concurrent requests for the same unknown session ID are serialized: the
+    /// first caller performs the full restore and handshake replay while others
+    /// subscribe to a `watch` channel and wait, avoiding duplicate handshakes.
+    async fn try_restore_from_store(
+        &self,
+        session_id: &SessionId,
+        parts: &http::request::Parts,
+    ) -> Result<bool, std::io::Error>
+    where
+        S: crate::Service<RoleServer> + Send + 'static,
+        M: SessionManager,
+    {
+        // Both fields are Some iff a session store is configured.
+        let (Some(pending_restores), Some(store)) =
+            (&self.pending_restores, &self.config.session_store)
+        else {
+            return Ok(false);
+        };
+
+        // Serialize concurrent restores for the same session ID.
+        // Write-lock once: if another task is already restoring, subscribe and wait;
+        // otherwise, register ourselves as the restoring task.
+        // Channel value: None = in progress, Some(true) = restored, Some(false) = not found/failed.
+        let (watch_tx, _watch_rx) = tokio::sync::watch::channel(None::<bool>);
+        {
+            let mut pending = pending_restores.write().await;
+            if let Some(tx) = pending.get(session_id) {
+                let mut rx = tx.subscribe();
+                drop(pending);
+                // Wait for the restore to finish, then propagate the outcome.
+                let result = rx
+                    .wait_for(|r| r.is_some())
+                    .await
+                    .map(|r| r.unwrap_or(false))
+                    .unwrap_or(false);
+                return Ok(result);
+            }
+            pending.insert(session_id.clone(), watch_tx.clone());
+        }
+
+        // Guard: signals waiters and cleans up the map entry on drop
+        let mut guard = PendingRestoreGuard {
+            pending_restores: pending_restores.clone(),
+            session_id: session_id.clone(),
+            watch_tx: watch_tx.clone(),
+            result: false,
+        };
+
+        // --- Step 3: load from external store ---
+        let state = match store.load(session_id.as_ref()).await {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                return Ok(false);
+            }
+            Err(e) => {
+                tracing::error!(
+                    session_id = session_id.as_ref(),
+                    error = %e,
+                    "session store load failed during restore"
+                );
+                return Err(std::io::Error::other(e));
+            }
+        };
+
+        // --- Step 4: ask the session manager to allocate an in-memory worker ---
+        let transport = match self
+            .session_manager
+            .restore_session(session_id.clone())
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))
+        {
+            Ok(RestoreOutcome::Restored(t)) => t,
+            Ok(RestoreOutcome::AlreadyPresent) => {
+                // Invariant violation: pending_restores ensures only one task can call
+                // restore_session per session ID, so AlreadyPresent is impossible here.
+                return Err(std::io::Error::other(
+                    "restore_session returned AlreadyPresent unexpectedly; session manager might have modified the session store outside of the restore_session API",
+                ));
+            }
+            Ok(RestoreOutcome::NotSupported) => {
+                return Ok(false);
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        };
+
+        // --- Step 5: replay the MCP initialize handshake ---
+        let service = match self.get_service() {
+            Ok(s) => s,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+
+        // `serve_server` requires both the `initialize` request and the
+        // `notifications/initialized` notification before transitioning to
+        // the running state — we must send both before returning.
+        let mut restore_init = ClientJsonRpcMessage::request(
+            ClientRequest::InitializeRequest(InitializeRequest {
+                params: state.initialize_params,
+                ..Default::default()
+            }),
+            crate::model::NumberOrString::Number(0),
+        );
+        restore_init.insert_extension(parts.clone());
+        restore_init.insert_extension(SessionRestoreMarker {
+            id: session_id.clone(),
+        });
+        let mut restore_initialized = ClientJsonRpcMessage::notification(
+            ClientNotification::InitializedNotification(InitializedNotification {
+                ..Default::default()
+            }),
+        );
+        restore_initialized.insert_extension(parts.clone());
+        restore_initialized.insert_extension(SessionRestoreMarker {
+            id: session_id.clone(),
+        });
+        // Signal from the spawned task once serve_server finishes initialising.
+        let (init_done_tx, init_done_rx) = tokio::sync::oneshot::channel::<()>();
+
+        Self::spawn_session_worker(
+            self.session_manager.clone(),
+            session_id.clone(),
+            service,
+            transport,
+            Some(init_done_tx),
+        );
+
+        if let Err(e) = self
+            .session_manager
+            .initialize_session(session_id, restore_init)
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))
+        {
+            return Err(e);
+        }
+
+        if let Err(e) = self
+            .session_manager
+            .accept_message(session_id, restore_initialized)
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))
+        {
+            return Err(e);
+        }
+
+        if init_done_rx.await.is_err() {
+            return Err(std::io::Error::other(
+                "serve_server initialization failed during restore",
+            ));
+        }
+
+        // Restore complete — wake any waiting concurrent requests.
+        guard.result = true;
+
+        tracing::debug!(
+            session_id = session_id.as_ref(),
+            "session restored from external store"
+        );
+        Ok(true)
     }
     pub async fn handle<B>(&self, request: Request<B>) -> Response<BoxBody<Bytes, Infallible>>
     where
         B: Body + Send + 'static,
         B::Error: Display,
     {
-        if let Err(response) = validate_dns_rebinding_headers(request.headers(), &self.config) {
+        if let Err(response) =
+            validate_dns_rebinding_headers(request.uri(), request.headers(), &self.config)
+        {
             return response;
         }
         let method = request.method().clone();
@@ -462,18 +936,26 @@ where
             .has_session(&session_id)
             .await
             .map_err(internal_error_response("check session"))?;
+        let (parts, _) = request.into_parts();
         if !has_session {
-            // MCP spec: server MUST respond with 404 Not Found for terminated/unknown sessions
-            return Ok(Response::builder()
-                .status(http::StatusCode::NOT_FOUND)
-                .body(Full::new(Bytes::from("Not Found: Session not found")).boxed())
-                .expect("valid response"));
+            // Attempt transparent cross-instance restore from external store.
+            let restored = self
+                .try_restore_from_store(&session_id, &parts)
+                .await
+                .map_err(internal_error_response("restore session"))?;
+            if !restored {
+                // MCP spec: server MUST respond with 404 Not Found for terminated/unknown sessions
+                return Ok(Response::builder()
+                    .status(http::StatusCode::NOT_FOUND)
+                    .body(Full::new(Bytes::from("Not Found: Session not found")).boxed())
+                    .expect("valid response"));
+            }
         }
         // Validate MCP-Protocol-Version header (per 2025-06-18 spec)
-        validate_protocol_version_header(request.headers())?;
+        validate_protocol_version_header(&parts.headers)?;
         // check if last event id is provided
-        let last_event_id = request
-            .headers()
+        let last_event_id = parts
+            .headers
             .get(HEADER_LAST_EVENT_ID)
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_owned());
@@ -585,11 +1067,18 @@ where
                     .await
                     .map_err(internal_error_response("check session"))?;
                 if !has_session {
-                    // MCP spec: server MUST respond with 404 Not Found for terminated/unknown sessions
-                    return Ok(Response::builder()
-                        .status(http::StatusCode::NOT_FOUND)
-                        .body(Full::new(Bytes::from("Not Found: Session not found")).boxed())
-                        .expect("valid response"));
+                    // Attempt transparent cross-instance restore from external store.
+                    let restored = self
+                        .try_restore_from_store(&session_id, &part)
+                        .await
+                        .map_err(internal_error_response("restore session"))?;
+                    if !restored {
+                        // MCP spec: server MUST respond with 404 Not Found for terminated/unknown sessions
+                        return Ok(Response::builder()
+                            .status(http::StatusCode::NOT_FOUND)
+                            .body(Full::new(Bytes::from("Not Found: Session not found")).boxed())
+                            .expect("valid response"));
+                    }
                 }
 
                 // Validate MCP-Protocol-Version header (per 2025-06-18 spec)
@@ -636,55 +1125,71 @@ where
                     }
                 }
             } else {
+                // Capture init params for external store persistence before
+                // extensions are injected (which would require Clone).
+                let stored_init_params = match &mut message {
+                    ClientJsonRpcMessage::Request(req) => {
+                        let ClientRequest::InitializeRequest(init_req) = &req.request else {
+                            return Err(unexpected_message_response("initialize request"));
+                        };
+                        // Reject mismatched MCP-Protocol-Version header before binding the session to anything.
+                        validate_header_matches_init_body(
+                            &part.headers,
+                            init_req.params.protocol_version.as_str(),
+                            Some(req.id.clone()),
+                        )?;
+                        let stored_init_params = self
+                            .config
+                            .session_store
+                            .as_ref()
+                            .map(|_| init_req.params.clone());
+                        // inject request part to extensions
+                        req.request.extensions_mut().insert(part);
+                        stored_init_params
+                    }
+                    _ => {
+                        return Err(unexpected_message_response("initialize request"));
+                    }
+                };
+                let service = self
+                    .get_service()
+                    .map_err(internal_error_response("get service"))?;
                 let (session_id, transport) = self
                     .session_manager
                     .create_session()
                     .await
                     .map_err(internal_error_response("create session"))?;
-                if let ClientJsonRpcMessage::Request(req) = &mut message {
-                    if !matches!(req.request, ClientRequest::InitializeRequest(_)) {
-                        return Err(unexpected_message_response("initialize request"));
-                    }
-                    // inject request part to extensions
-                    req.request.extensions_mut().insert(part);
-                } else {
-                    return Err(unexpected_message_response("initialize request"));
-                }
-                let service = self
-                    .get_service()
-                    .map_err(internal_error_response("get service"))?;
                 // spawn a task to serve the session
-                tokio::spawn({
-                    let session_manager = self.session_manager.clone();
-                    let session_id = session_id.clone();
-                    async move {
-                        let service = serve_server::<S, M::Transport, _, TransportAdapterIdentity>(
-                            service, transport,
-                        )
-                        .await;
-                        match service {
-                            Ok(service) => {
-                                // on service created
-                                let _ = service.waiting().await;
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to create service: {e}");
-                            }
-                        }
-                        let _ = session_manager
-                            .close_session(&session_id)
-                            .await
-                            .inspect_err(|e| {
-                                tracing::error!("Failed to close session {session_id}: {e}");
-                            });
-                    }
-                });
+                Self::spawn_session_worker(
+                    self.session_manager.clone(),
+                    session_id.clone(),
+                    service,
+                    transport,
+                    None,
+                );
                 // get initialize response
                 let response = self
                     .session_manager
                     .initialize_session(&session_id, message)
                     .await
                     .map_err(internal_error_response("create stream"))?;
+                // Persist session state to external store after a successful handshake.
+                if let (Some(store), Some(params)) =
+                    (&self.config.session_store, stored_init_params)
+                {
+                    let state = SessionState {
+                        initialize_params: params,
+                    };
+                    let _ = store
+                        .store(session_id.as_ref(), &state)
+                        .await
+                        .inspect_err(|e| {
+                            tracing::warn!(
+                                "Failed to persist session {} to store: {e}",
+                                session_id
+                            );
+                        });
+                }
                 let stream =
                     futures::stream::once(async move { ServerSseMessage::from_message(response) });
                 // Prepend priming event if sse_retry configured
@@ -711,23 +1216,41 @@ where
                 Ok(response)
             }
         } else {
-            // Stateless mode: validate MCP-Protocol-Version on non-init requests
-            let is_init = matches!(
-                &message,
-                ClientJsonRpcMessage::Request(req) if matches!(req.request, ClientRequest::InitializeRequest(_))
-            );
-            if !is_init {
-                validate_protocol_version_header(&part.headers)?;
+            // Stateless mode:
+            // - on initialize: the header (if present) must match `params.protocolVersion`
+            // - on every other request: the header must name a known version.
+            match &message {
+                ClientJsonRpcMessage::Request(req) => {
+                    if let ClientRequest::InitializeRequest(init_req) = &req.request {
+                        validate_header_matches_init_body(
+                            &part.headers,
+                            init_req.params.protocol_version.as_str(),
+                            Some(req.id.clone()),
+                        )?;
+                    } else {
+                        validate_protocol_version_header(&part.headers)?;
+                    }
+                }
+                _ => {
+                    validate_protocol_version_header(&part.headers)?;
+                }
             }
             let service = self
                 .get_service()
                 .map_err(internal_error_response("get service"))?;
             match message {
                 ClientJsonRpcMessage::Request(mut request) => {
+                    // Build a peer_info so context.protocol_version() works inside handlers.
+                    // serve_directly skips the handshake and receives None by default, making
+                    // protocol_version() always return None in stateless mode. We reconstruct it:
+                    // - initialize requests: version comes from the request body params
+                    // - all other requests: version comes from the MCP-Protocol-Version header
+                    //   (already validated above; absent header defaults to 2025-03-26)
+                    let peer_info = Self::peer_info_for_stateless_request(&request, &part.headers);
                     request.request.extensions_mut().insert(part);
                     let (transport, mut receiver) =
                         OneshotTransport::<RoleServer>::new(ClientJsonRpcMessage::Request(request));
-                    let service = serve_directly(service, transport, None);
+                    let service = serve_directly(service, transport, peer_info);
                     tokio::spawn(async move {
                         // on service created
                         let _ = service.waiting().await;
@@ -807,6 +1330,43 @@ where
             .close_session(&session_id)
             .await
             .map_err(internal_error_response("close session"))?;
+        // Remove from external store: a DELETE means the client intentionally
+        // ends the session, so the store entry is no longer needed.
+        if let Some(store) = &self.config.session_store {
+            let _ = store.delete(session_id.as_ref()).await.inspect_err(|e| {
+                tracing::warn!("Failed to delete session {} from store: {e}", session_id);
+            });
+        }
         Ok(accepted_response())
+    }
+
+    /// Build a `ClientInfo` (peer_info) for a stateless request so that
+    /// `context.protocol_version()` returns the correct value inside handlers.
+    ///
+    /// `serve_directly` skips the MCP handshake and accepts `peer_info = None`,
+    /// which means `context.protocol_version()` is always `None` in stateless mode.
+    /// We reconstruct the protocol version from the available signal per request type:
+    /// - initialize: version is in the request body params (authoritative)
+    /// - all other requests: version is in the MCP-Protocol-Version header
+    ///   (validated before this point; absent header defaults to 2025-03-26)
+    fn peer_info_for_stateless_request(
+        request: &crate::model::JsonRpcRequest<ClientRequest>,
+        headers: &HeaderMap,
+    ) -> Option<InitializeRequestParams> {
+        let version = if let ClientRequest::InitializeRequest(ref init) = request.request {
+            init.params.protocol_version.clone()
+        } else {
+            headers
+                .get(HEADER_MCP_PROTOCOL_VERSION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| serde_json::from_value(serde_json::Value::String(s.to_owned())).ok())
+                .unwrap_or(ProtocolVersion::V_2025_03_26)
+        };
+        Some(InitializeRequestParams {
+            meta: None,
+            protocol_version: version,
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation::default(),
+        })
     }
 }

@@ -12,6 +12,7 @@ members = [
 exclude = [
   "winptyrs",
   "portable-pty",
+  "third_party",
   ".worktrees",
 ]
 resolver = "3"
@@ -46,7 +47,7 @@ portable-pty = { path = "portable-pty" }
 rand = "0.10"
 rcgen = "0.14"
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
-rmcp = { version = "1", default-features = false, features = ["server"] }
+rmcp = { version = "2.1", default-features = false, features = ["server"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "2"
 schemars = "1"

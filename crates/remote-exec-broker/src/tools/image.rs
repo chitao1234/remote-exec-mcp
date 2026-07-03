@@ -1,7 +1,7 @@
 use anyhow::Context;
 use remote_exec_proto::public::{ViewImageInput, ViewImageResult};
 use remote_exec_proto::rpc::ImageReadRequest;
-use rmcp::model::Content;
+use rmcp::model::ContentBlock;
 
 use crate::mcp_server::ToolCallOutput;
 
@@ -51,7 +51,7 @@ pub async fn view_image(
     ))
 }
 
-fn content_from_data_url(image_url: &str) -> anyhow::Result<Content> {
+fn content_from_data_url(image_url: &str) -> anyhow::Result<ContentBlock> {
     let (metadata, data) = image_url
         .split_once(',')
         .context("image read did not return a valid data URL")?;
@@ -60,5 +60,5 @@ fn content_from_data_url(image_url: &str) -> anyhow::Result<Content> {
         .and_then(|prefix| prefix.strip_suffix(";base64"))
         .context("image read did not return a base64 data URL")?;
 
-    Ok(Content::image(data.to_string(), mime_type.to_string()))
+    Ok(ContentBlock::image(data.to_string(), mime_type.to_string()))
 }

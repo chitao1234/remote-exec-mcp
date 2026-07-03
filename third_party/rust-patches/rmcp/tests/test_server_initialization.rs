@@ -4,8 +4,11 @@ mod common;
 
 use common::handlers::TestServer;
 use rmcp::{
-    ServiceExt,
-    model::{ClientJsonRpcMessage, ServerJsonRpcMessage, ServerResult},
+    ServerHandler, ServiceExt,
+    model::{
+        ClientJsonRpcMessage, ProtocolVersion, ServerCapabilities, ServerInfo,
+        ServerJsonRpcMessage, ServerResult,
+    },
     transport::{IntoTransport, Transport},
 };
 
@@ -218,6 +221,143 @@ async fn server_init_buffers_request_before_initialized() {
         "server should initialize successfully when buffering pre-init messages"
     );
     result.unwrap().cancel().await.unwrap();
+}
+
+fn init_request_with_version(v: &str) -> ClientJsonRpcMessage {
+    msg(&format!(
+        r#"{{
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {{
+                "protocolVersion": "{v}",
+                "capabilities": {{}},
+                "clientInfo": {{ "name": "test-client", "version": "0.0.1" }}
+            }}
+        }}"#
+    ))
+}
+
+async fn negotiate_version<H>(handler: H, client_version: &str) -> ProtocolVersion
+where
+    H: ServerHandler + 'static,
+{
+    let (server_transport, client_transport) = tokio::io::duplex(4096);
+    let _server = tokio::spawn(async move { handler.serve(server_transport).await });
+    let mut client = IntoTransport::<rmcp::RoleClient, _, _>::into_transport(client_transport);
+
+    client
+        .send(init_request_with_version(client_version))
+        .await
+        .unwrap();
+    let response = client.receive().await.unwrap();
+    let ServerJsonRpcMessage::Response(r) = response else {
+        panic!("expected initialize response, got {response:?}");
+    };
+    let ServerResult::InitializeResult(init) = r.result else {
+        panic!("expected InitializeResult");
+    };
+    init.protocol_version
+}
+
+#[tokio::test]
+async fn server_echoes_client_protocol_version_when_known_old() {
+    let negotiated = negotiate_version(TestServer::new(), "2024-11-05").await;
+    assert_eq!(negotiated, ProtocolVersion::V_2024_11_05);
+}
+
+#[tokio::test]
+async fn server_echoes_client_protocol_version_when_latest() {
+    let negotiated = negotiate_version(TestServer::new(), "2025-11-25").await;
+    assert_eq!(negotiated, ProtocolVersion::LATEST);
+}
+
+#[tokio::test]
+async fn server_falls_back_when_client_protocol_version_unknown() {
+    let negotiated = negotiate_version(TestServer::new(), "2099-99-99").await;
+    assert_eq!(negotiated, ProtocolVersion::LATEST);
+}
+
+struct PinnedServer;
+
+impl ServerHandler for PinnedServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(ServerCapabilities::builder().build())
+            .with_protocol_version(ProtocolVersion::V_2025_06_18)
+    }
+}
+
+#[tokio::test]
+async fn server_pinned_version_does_not_override_known_client_request() {
+    let negotiated = negotiate_version(PinnedServer, "2025-11-25").await;
+    assert_eq!(negotiated, ProtocolVersion::LATEST);
+}
+
+#[tokio::test]
+async fn server_pinned_version_used_as_fallback_for_unknown_client_request() {
+    let negotiated = negotiate_version(PinnedServer, "2099-99-99").await;
+    assert_eq!(negotiated, ProtocolVersion::V_2025_06_18);
+}
+
+fn duplicate_init_request(id: u64, version: &str) -> ClientJsonRpcMessage {
+    msg(&format!(
+        r#"{{
+            "jsonrpc": "2.0",
+            "id": {id},
+            "method": "initialize",
+            "params": {{
+                "protocolVersion": "{version}",
+                "capabilities": {{ "sampling": {{}} }},
+                "clientInfo": {{ "name": "renegotiated-client", "version": "9.9.9" }}
+            }}
+        }}"#
+    ))
+}
+
+#[tokio::test]
+async fn server_accepts_duplicate_initialize() {
+    let (server_transport, client_transport) = tokio::io::duplex(4096);
+    let _server = tokio::spawn(async move { TestServer::new().serve(server_transport).await });
+    let mut client = IntoTransport::<rmcp::RoleClient, _, _>::into_transport(client_transport);
+
+    do_initialize(&mut client).await;
+    client.send(initialized_notification()).await.unwrap();
+
+    client
+        .send(duplicate_init_request(2, "2025-11-25"))
+        .await
+        .unwrap();
+    let response = client.receive().await.unwrap();
+    assert!(
+        matches!(response, ServerJsonRpcMessage::Response(_)),
+        "expected successful InitializeResult, got: {response:?}"
+    );
+}
+
+#[tokio::test]
+async fn server_session_remains_usable_after_renegotiation() {
+    let (server_transport, client_transport) = tokio::io::duplex(4096);
+    let _server = tokio::spawn(async move { TestServer::new().serve(server_transport).await });
+    let mut client = IntoTransport::<rmcp::RoleClient, _, _>::into_transport(client_transport);
+
+    do_initialize(&mut client).await;
+    client.send(initialized_notification()).await.unwrap();
+    client
+        .send(duplicate_init_request(2, "2025-11-25"))
+        .await
+        .unwrap();
+    let _renegotiated = client.receive().await.unwrap();
+
+    client.send(ping_request(3)).await.unwrap();
+    let pong = client.receive().await.unwrap();
+    assert!(
+        matches!(
+            pong,
+            ServerJsonRpcMessage::Response(ref r)
+                if matches!(r.result, ServerResult::EmptyResult(_))
+        ),
+        "expected EmptyResult ping after renegotiation, got: {pong:?}"
+    );
 }
 
 // Server buffers multiple requests before initialized and processes them in order.
