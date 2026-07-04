@@ -249,7 +249,7 @@ pub(crate) enum TargetTransportKind {
 
 const DEFAULT_TARGET_CONNECT_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_TARGET_READ_TIMEOUT_MS: u64 = 310_000;
-const DEFAULT_TARGET_REQUEST_TIMEOUT_MS: u64 = 310_000;
+const DEFAULT_TARGET_REQUEST_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_TARGET_STARTUP_PROBE_TIMEOUT_MS: u64 = 5_000;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]

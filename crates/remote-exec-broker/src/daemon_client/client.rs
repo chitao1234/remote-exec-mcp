@@ -12,6 +12,8 @@ use super::{
     DaemonClientError, RpcCallContext, RpcCallKind, RpcErrorDecodePolicy, decode_rpc_error,
 };
 
+const EXEC_RPC_TIMEOUT_MARGIN: std::time::Duration = std::time::Duration::from_secs(5);
+
 macro_rules! trace_health_or_warn {
     ($path:expr, $($fields:tt)*) => {
         if $path == "/v1/health" {
@@ -94,14 +96,24 @@ impl DaemonClient {
         &self,
         req: &ExecStartRequest,
     ) -> Result<ExecResponse, DaemonClientError> {
-        self.post("/v1/exec/start", req).await
+        self.post_with_timeout(
+            "/v1/exec/start",
+            req,
+            self.exec_rpc_timeout(req.yield_time_ms),
+        )
+        .await
     }
 
     pub async fn exec_write(
         &self,
         req: &ExecWriteRequest,
     ) -> Result<ExecResponse, DaemonClientError> {
-        self.post("/v1/exec/write", req).await
+        self.post_with_timeout(
+            "/v1/exec/write",
+            req,
+            self.exec_rpc_timeout(req.yield_time_ms),
+        )
+        .await
     }
 
     pub async fn patch_apply(
@@ -152,6 +164,20 @@ impl DaemonClient {
             .await
     }
 
+    async fn post_with_timeout<Req, Resp>(
+        &self,
+        path: &str,
+        body: &Req,
+        timeout: std::time::Duration,
+    ) -> Result<Resp, DaemonClientError>
+    where
+        Req: serde::Serialize + ?Sized,
+        Resp: serde::de::DeserializeOwned,
+    {
+        self.post_with_retry_policy_and_timeout(path, body, RpcRetryPolicy::None, timeout)
+            .await
+    }
+
     async fn post_idempotent<Req, Resp>(
         &self,
         path: &str,
@@ -161,8 +187,13 @@ impl DaemonClient {
         Req: serde::Serialize + ?Sized,
         Resp: serde::de::DeserializeOwned,
     {
-        self.post_with_retry_policy(path, body, RpcRetryPolicy::IdempotentMetadata)
-            .await
+        self.post_with_retry_policy_and_timeout(
+            path,
+            body,
+            RpcRetryPolicy::IdempotentMetadata,
+            self.request_timeout,
+        )
+        .await
     }
 
     async fn post_with_retry_policy<Req, Resp>(
@@ -170,6 +201,21 @@ impl DaemonClient {
         path: &str,
         body: &Req,
         retry_policy: RpcRetryPolicy,
+    ) -> Result<Resp, DaemonClientError>
+    where
+        Req: serde::Serialize + ?Sized,
+        Resp: serde::de::DeserializeOwned,
+    {
+        self.post_with_retry_policy_and_timeout(path, body, retry_policy, self.request_timeout)
+            .await
+    }
+
+    async fn post_with_retry_policy_and_timeout<Req, Resp>(
+        &self,
+        path: &str,
+        body: &Req,
+        retry_policy: RpcRetryPolicy,
+        timeout: std::time::Duration,
     ) -> Result<Resp, DaemonClientError>
     where
         Req: serde::Serialize + ?Sized,
@@ -189,7 +235,7 @@ impl DaemonClient {
             path,
             "sending daemon rpc"
         );
-        let result = tokio::time::timeout(self.request_timeout, async {
+        let result = tokio::time::timeout(timeout, async {
             let mut retried = false;
             let response = loop {
                 let response = self.request(path).json(body).send().await;
@@ -233,7 +279,7 @@ impl DaemonClient {
         match result {
             Ok(result) => result,
             Err(_) => {
-                let timeout_ms = self.request_timeout.as_millis() as u64;
+                let timeout_ms = timeout.as_millis() as u64;
                 let elapsed_ms = started.elapsed().as_millis() as u64;
                 trace_health_or_warn!(
                     path,
@@ -249,6 +295,15 @@ impl DaemonClient {
                 )))
             }
         }
+    }
+
+    fn exec_rpc_timeout(&self, yield_time_ms: Option<u64>) -> std::time::Duration {
+        let Some(yield_time_ms) = yield_time_ms else {
+            return self.request_timeout;
+        };
+        let requested =
+            std::time::Duration::from_millis(yield_time_ms).saturating_add(EXEC_RPC_TIMEOUT_MARGIN);
+        self.request_timeout.max(requested)
     }
 
     pub(super) async fn send_request_with_policy<Send, LogTransport, LogStatus>(

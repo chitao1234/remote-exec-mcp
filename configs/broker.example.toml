@@ -65,7 +65,9 @@ expected_daemon_name = "builder-a"
 #[targets.builder-a.timeouts]
 #connect_ms = 5000
 #read_ms = 310000
-#request_ms = 310000
+# Bounds normal daemon RPCs. exec_command and write_stdin extend this when
+# yield_time_ms asks the daemon to wait longer.
+#request_ms = 30000
 # Also bounds broker startup and periodic health probes; a timed-out health
 # probe marks the target unhealthy.
 #startup_probe_ms = 5000

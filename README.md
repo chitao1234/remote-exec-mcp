@@ -124,7 +124,8 @@ Broker config covers:
 - explicit `allow_insecure_http = true` for plain-HTTP targets
 - optional bearer auth for broker-to-daemon requests
 - optional certificate pinning and hostname-verification override
-- per-target connect/read/request/startup probe timeouts
+- per-target connect/read/request/startup probe timeouts; exec calls extend the
+  request timeout when `yield_time_ms` asks the daemon to wait longer
 - optional broker-host `[local]` target
 - optional broker-host filesystem sandbox
 - optional structured-content toggle
@@ -459,6 +460,9 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 - Hung health probes are bounded by the target `timeouts.startup_probe_ms`;
   timing out a health probe marks the target unhealthy in the broker cache.
 - Broker-daemon calls are bounded by per-target connect/read/request timeouts.
+- `exec_command` and `write_stdin` use at least `yield_time_ms` plus a small
+  slow-host margin for their daemon RPC timeout, so long polls can exceed the
+  normal `timeouts.request_ms` deadline.
 - Rust daemon live exec sessions are capped by `max_open_sessions` and prune
   older sessions under pressure, preferring completed sessions. Broker-host
   local runtime uses the same default cap.

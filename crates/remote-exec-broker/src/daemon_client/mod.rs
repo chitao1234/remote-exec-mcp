@@ -22,8 +22,9 @@ mod tests {
 
     use remote_exec_proto::request_id::{REQUEST_ID_HEADER, RequestId};
     use remote_exec_proto::rpc::{
-        DaemonIdentity, ExecStartRequest, ExecWriteRequest, RpcErrorCode, TargetCapabilities,
-        TargetInfoResponse, TransferStreamProtocolVersion,
+        DaemonIdentity, ExecCompletedResponse, ExecOutputResponse, ExecResponse, ExecStartRequest,
+        ExecWriteRequest, RpcErrorCode, TargetCapabilities, TargetInfoResponse,
+        TransferStreamProtocolVersion,
     };
     use reqwest::header::HeaderValue;
 
@@ -65,6 +66,33 @@ mod tests {
             authorization: None,
             request_timeout: timeout,
             health_probe_timeout: timeout,
+        };
+
+        (client, server)
+    }
+
+    async fn delayed_response_client(
+        request_timeout: Duration,
+        delay: Duration,
+        response_body: String,
+    ) -> (DaemonClient, tokio::task::JoinHandle<()>) {
+        crate::install_crypto_provider().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let _ = read_http_request(&mut stream).await;
+            tokio::time::sleep(delay).await;
+            write_json_response(&mut stream, &response_body).await;
+        });
+
+        let client = DaemonClient {
+            client: reqwest::Client::builder().build().unwrap(),
+            target_name: DEFAULT_TEST_TARGET.to_string(),
+            base_url: format!("http://{addr}"),
+            authorization: None,
+            request_timeout,
+            health_probe_timeout: request_timeout,
         };
 
         (client, server)
@@ -131,6 +159,22 @@ mod tests {
             )
             .await
             .unwrap();
+    }
+
+    fn completed_exec_response_body() -> String {
+        serde_json::to_string(&ExecResponse::Completed(ExecCompletedResponse {
+            output: ExecOutputResponse {
+                daemon_instance_id: "daemon-1".to_string(),
+                running: false,
+                chunk_id: Some("chunk-1".to_string()),
+                wall_time_seconds: 0.1,
+                exit_code: Some(0),
+                original_token_count: Some(1),
+                output: "ok\n".to_string(),
+                warnings: Vec::new(),
+            },
+        }))
+        .unwrap()
     }
 
     #[tokio::test]
@@ -229,6 +273,56 @@ mod tests {
             "unexpected error: {err}"
         );
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn daemon_exec_start_timeout_accounts_for_requested_yield_time() {
+        let (client, server) = delayed_response_client(
+            Duration::from_millis(50),
+            Duration::from_millis(125),
+            completed_exec_response_body(),
+        )
+        .await;
+
+        let response = client
+            .exec_start(&ExecStartRequest {
+                cmd: "slow command".to_string(),
+                workdir: None,
+                shell: None,
+                tty: false,
+                yield_time_ms: Some(100),
+                max_output_tokens: None,
+                login: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(!response.running());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn daemon_exec_write_timeout_accounts_for_requested_yield_time() {
+        let (client, server) = delayed_response_client(
+            Duration::from_millis(50),
+            Duration::from_millis(125),
+            completed_exec_response_body(),
+        )
+        .await;
+
+        let response = client
+            .exec_write(&ExecWriteRequest {
+                daemon_session_id: "daemon-session-1".to_string(),
+                chars: String::new(),
+                yield_time_ms: Some(100),
+                max_output_tokens: None,
+                pty_size: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(!response.running());
+        server.await.unwrap();
     }
 
     #[test]
