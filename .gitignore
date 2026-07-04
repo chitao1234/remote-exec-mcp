@@ -1,5 +1,5 @@
 .worktrees/
-target/
+/target
 broker*.toml
 daemon*.toml
 remote-exec-certs/
