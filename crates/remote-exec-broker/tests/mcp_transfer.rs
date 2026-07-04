@@ -6,7 +6,7 @@ use std::process::Command;
 use remote_exec_test_support::test_helpers::{
     DEFAULT_TEST_TARGET, TEST_BEARER_SECRET, XP_TEST_TARGET,
 };
-use rmcp::model::{CallToolRequestParams, PaginatedRequestParams};
+use rmcp::model::PaginatedRequestParams;
 use support::transfer_archive::{
     SINGLE_FILE_ENTRY, decode_archive, raw_tar_file_with_path, read_archive_paths,
     read_single_file_archive,
@@ -913,15 +913,7 @@ async fn transfer_files_rejects_public_compression_field() {
         "create_parent": true,
         "compression": "zstd"
     });
-    let error = fixture
-        .client
-        .call_tool(
-            CallToolRequestParams::new("transfer_files")
-                .with_arguments(arguments.as_object().unwrap().clone()),
-        )
-        .await
-        .unwrap_err()
-        .to_string();
+    let error = fixture.call_tool_error("transfer_files", arguments).await;
 
     assert!(error.contains("unknown field `compression`"), "{error}");
 }
