@@ -120,6 +120,9 @@ pub(crate) struct StubDaemonState {
 #[derive(Debug, Clone)]
 pub(crate) enum StubHealthResponse {
     Ok,
+    DelayedOk {
+        delay: Duration,
+    },
     RpcError {
         status: StatusCode,
         body: RpcErrorBody,
@@ -504,6 +507,15 @@ async fn health(State(state): State<StubDaemonState>) -> Response {
             daemon_instance_id: state.daemon_instance_id.lock().await.clone(),
         })
         .into_response(),
+        StubHealthResponse::DelayedOk { delay } => {
+            tokio::time::sleep(delay).await;
+            Json(HealthCheckResponse {
+                status: HealthStatus::Ok,
+                daemon_version: "0.1.0".to_string(),
+                daemon_instance_id: state.daemon_instance_id.lock().await.clone(),
+            })
+            .into_response()
+        }
         StubHealthResponse::RpcError { status, body } => (status, Json(body)).into_response(),
     }
 }

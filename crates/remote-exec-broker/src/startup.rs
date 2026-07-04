@@ -277,7 +277,8 @@ async fn periodic_target_refresh_loop(state: BrokerState, cancel: CancellationTo
                 return;
             }
 
-            let refresh = state.refresh_remote_target_health_and_dependents(&name);
+            let refresh =
+                state.refresh_remote_target_health_and_dependents_with_configured_timeout(&name);
             let result = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => return,

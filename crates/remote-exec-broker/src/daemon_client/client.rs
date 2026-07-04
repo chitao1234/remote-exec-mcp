@@ -29,6 +29,7 @@ pub struct DaemonClient {
     pub(super) base_url: String,
     pub(super) authorization: Option<HeaderValue>,
     pub(super) request_timeout: std::time::Duration,
+    pub(super) health_probe_timeout: std::time::Duration,
 }
 
 #[derive(Clone, Copy)]
@@ -71,6 +72,7 @@ impl DaemonClient {
             base_url: config.base_url.clone(),
             authorization,
             request_timeout: timeouts.request_timeout(),
+            health_probe_timeout: timeouts.startup_probe_timeout(),
         })
     }
 
@@ -82,6 +84,10 @@ impl DaemonClient {
     pub async fn health(&self) -> Result<HealthCheckResponse, DaemonClientError> {
         self.post_idempotent("/v1/health", &serde_json::json!({}))
             .await
+    }
+
+    pub fn health_probe_timeout(&self) -> std::time::Duration {
+        self.health_probe_timeout
     }
 
     pub async fn exec_start(

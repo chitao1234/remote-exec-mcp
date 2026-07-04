@@ -66,6 +66,8 @@ expected_daemon_name = "builder-a"
 #connect_ms = 5000
 #read_ms = 310000
 #request_ms = 310000
+# Also bounds broker startup and periodic health probes; a timed-out health
+# probe marks the target unhealthy.
 #startup_probe_ms = 5000
 
 [targets.builder-b]

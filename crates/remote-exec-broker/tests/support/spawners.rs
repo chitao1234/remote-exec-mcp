@@ -388,6 +388,28 @@ pub async fn spawn_broker_with_stub_daemon_and_extra_config(
     .await
 }
 
+pub async fn spawn_broker_with_stub_daemon_and_extra_target_config(
+    extra_target_config: &str,
+    extra_top_level: Option<&str>,
+) -> BrokerFixture {
+    let tempdir = tempfile::tempdir().unwrap();
+    let (addr, stub_state) = spawn_plain_http_stub_daemon().await;
+    spawn_broker_fixture_from_config(
+        tempdir,
+        &[BrokerConfigTarget {
+            name: DEFAULT_TEST_TARGET,
+            addr,
+            transport: BrokerTargetTransport::Http,
+            extra_config: Some(extra_target_config),
+        }],
+        None,
+        None,
+        extra_top_level,
+        stub_state,
+    )
+    .await
+}
+
 pub async fn spawn_broker_with_stub_daemon_without_file_tool_support(
     extra_top_level: &str,
 ) -> BrokerFixture {

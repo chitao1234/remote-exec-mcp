@@ -40,6 +40,8 @@ mod tests {
             base_url: "http://127.0.0.1:9".to_string(),
             authorization,
             request_timeout: crate::config::TargetTimeoutConfig::default().request_timeout(),
+            health_probe_timeout: crate::config::TargetTimeoutConfig::default()
+                .startup_probe_timeout(),
         }
     }
 
@@ -62,6 +64,7 @@ mod tests {
             base_url: format!("http://{addr}"),
             authorization: None,
             request_timeout: timeout,
+            health_probe_timeout: timeout,
         };
 
         (client, server)
@@ -172,6 +175,7 @@ mod tests {
             base_url: format!("http://{addr}"),
             authorization: None,
             request_timeout: Duration::from_secs(5),
+            health_probe_timeout: Duration::from_secs(5),
         };
 
         let info = client.target_info().await.unwrap();
@@ -374,6 +378,8 @@ mod tests {
             base_url: format!("http://{addr}"),
             authorization: None,
             request_timeout: crate::config::TargetTimeoutConfig::default().request_timeout(),
+            health_probe_timeout: crate::config::TargetTimeoutConfig::default()
+                .startup_probe_timeout(),
         }
         .port_tunnel()
         .await

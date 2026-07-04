@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::SystemTime;
 
 use anyhow::Context;
@@ -67,12 +68,16 @@ impl CachedTargetHealth {
     }
 
     fn unhealthy(error: &DaemonClientError) -> Self {
+        Self::unhealthy_message(error.to_string())
+    }
+
+    fn unhealthy_message(error: String) -> Self {
         Self {
             healthy: false,
             daemon_version: None,
             daemon_instance_id: None,
             last_checked_at: SystemTime::now(),
-            last_error: Some(error.to_string()),
+            last_error: Some(error),
         }
     }
 }
@@ -144,6 +149,10 @@ impl TargetRuntimeState {
 
     fn set_unhealthy(&mut self, error: &DaemonClientError) {
         self.snapshot.health = Some(CachedTargetHealth::unhealthy(error));
+    }
+
+    fn set_unhealthy_message(&mut self, error: String) {
+        self.snapshot.health = Some(CachedTargetHealth::unhealthy_message(error));
     }
 
     fn set_verified_target_info(&mut self, info: &TargetInfoResponse) {
@@ -273,6 +282,10 @@ impl TargetHandle {
     pub(crate) async fn needs_status_recheck(&self) -> bool {
         let snapshot = self.runtime_snapshot().await;
         !snapshot.available()
+    }
+
+    pub(crate) fn health_probe_timeout(&self) -> Option<Duration> {
+        self.backend.health_probe_timeout()
     }
 
     pub(crate) async fn cached_daemon_info_after_verification(
@@ -453,6 +466,31 @@ impl TargetHandle {
                 }
                 Err(err.into())
             }
+        }
+    }
+
+    pub(crate) async fn mark_health_probe_timed_out(&self, name: &str, timeout: Duration) {
+        let timeout_ms = timeout.as_millis();
+        let error = format!("target health probe timed out after {timeout_ms} ms");
+        let (previous_snapshot, current_snapshot) = {
+            let mut runtime = self.runtime.lock().await;
+            let previous_snapshot = runtime.snapshot();
+            runtime.set_unhealthy_message(error.clone());
+            let current_snapshot = runtime.snapshot();
+            (previous_snapshot, current_snapshot)
+        };
+
+        if !log_target_availability_transition(
+            name,
+            &previous_snapshot,
+            &current_snapshot,
+            Some(error.as_str()),
+        ) {
+            tracing::debug!(
+                target = %name,
+                timeout_ms = timeout_ms as u64,
+                "target health probe timed out"
+            );
         }
     }
 

@@ -64,6 +64,10 @@ trait TargetBackendClient: Send + Sync {
     fn remote_client(&self) -> Option<&DaemonClient> {
         None
     }
+
+    fn health_probe_timeout(&self) -> Option<std::time::Duration> {
+        None
+    }
 }
 
 impl TargetBackend {
@@ -140,6 +144,10 @@ impl TargetBackend {
 
     pub(crate) fn remote_client(&self) -> Option<&DaemonClient> {
         self.client.remote_client()
+    }
+
+    pub(crate) fn health_probe_timeout(&self) -> Option<std::time::Duration> {
+        self.client.health_probe_timeout()
     }
 
     pub(crate) async fn port_tunnel(
@@ -222,6 +230,10 @@ impl TargetBackendClient for DaemonClient {
 
     fn remote_client(&self) -> Option<&DaemonClient> {
         Some(self)
+    }
+
+    fn health_probe_timeout(&self) -> Option<std::time::Duration> {
+        Some(DaemonClient::health_probe_timeout(self))
     }
 }
 

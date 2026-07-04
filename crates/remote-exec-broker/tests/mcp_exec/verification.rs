@@ -56,6 +56,48 @@ async fn daemon_tool_error_triggers_health_recheck() {
 }
 
 #[tokio::test]
+async fn hanging_health_probe_marks_target_unhealthy() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon_and_extra_target_config(
+        r#"[targets.builder-a.timeouts]
+startup_probe_ms = 50
+"#,
+        Some(
+            r#"[health_refresh]
+healthy_interval_ms = 20
+unhealthy_interval_ms = 20
+"#,
+        ),
+    )
+    .await;
+
+    let before = fixture
+        .call_tool("list_targets", serde_json::json!({}))
+        .await;
+    assert_eq!(before.structured_content["targets"][0]["healthy"], true);
+
+    fixture
+        .set_health_response(support::stub_daemon::StubHealthResponse::DelayedOk {
+            delay: Duration::from_secs(5),
+        })
+        .await;
+
+    let outcome = support::test_helpers::poll_until_ready(
+        50,
+        Duration::from_millis(20),
+        || async {
+            let result = fixture
+                .call_tool("list_targets", serde_json::json!({}))
+                .await;
+            result.structured_content["targets"][0]["healthy"] == false
+        },
+        || false,
+    )
+    .await;
+
+    assert_eq!(outcome, support::test_helpers::ReadinessWaitOutcome::Ready);
+}
+
+#[tokio::test]
 async fn broker_rejects_unverified_target_if_it_returns_as_the_wrong_daemon() {
     let fixture = support::spawners::spawn_broker_with_late_target().await;
     fixture

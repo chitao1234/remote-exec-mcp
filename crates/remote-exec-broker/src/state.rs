@@ -74,6 +74,7 @@ pub(crate) struct TargetStatusSnapshot {
 }
 
 const TARGET_STATUS_RECHECK_TIMEOUT: Duration = Duration::from_secs(1);
+const DEFAULT_TARGET_HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy)]
 pub(crate) struct TargetHealthRefreshIntervals {
@@ -163,25 +164,19 @@ impl BrokerState {
         let refreshes = names.into_iter().map(|name| {
             let state = self.clone();
             async move {
-                match tokio::time::timeout(
-                    TARGET_STATUS_RECHECK_TIMEOUT,
-                    state.refresh_remote_target_health_and_dependents(&name),
-                )
-                .await
+                match state
+                    .refresh_remote_target_health_and_dependents_with_timeout(
+                        &name,
+                        TARGET_STATUS_RECHECK_TIMEOUT,
+                    )
+                    .await
                 {
-                    Ok(Ok(())) => {}
-                    Ok(Err(err)) => {
+                    Ok(()) => {}
+                    Err(err) => {
                         tracing::debug!(
                             target = %name,
                             error = %err,
                             "target status recheck did not update cached daemon metadata"
-                        );
-                    }
-                    Err(_) => {
-                        tracing::debug!(
-                            target = %name,
-                            timeout_ms = TARGET_STATUS_RECHECK_TIMEOUT.as_millis(),
-                            "target status recheck timed out"
                         );
                     }
                 }
@@ -268,6 +263,63 @@ impl BrokerState {
         }
     }
 
+    pub(crate) async fn refresh_remote_target_health_and_dependents_with_configured_timeout(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<()> {
+        let timeout = self.remote_target_health_probe_timeout(name)?;
+        self.refresh_remote_target_health_and_dependents_with_timeout(name, timeout)
+            .await
+    }
+
+    async fn refresh_remote_target_health_and_dependents_with_timeout(
+        &self,
+        name: &str,
+        timeout: Duration,
+    ) -> anyhow::Result<()> {
+        match tokio::time::timeout(
+            timeout,
+            self.refresh_remote_target_health_and_dependents(name),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                self.mark_remote_target_health_probe_timed_out(name, timeout)
+                    .await?;
+                anyhow::bail!(
+                    "target health probe timed out after {} ms",
+                    timeout.as_millis()
+                );
+            }
+        }
+    }
+
+    fn remote_target_health_probe_timeout(&self, name: &str) -> anyhow::Result<Duration> {
+        let handle = self.configured_target(name)?;
+        anyhow::ensure!(
+            handle.as_remote().is_some(),
+            "target `{name}` is not a remote target"
+        );
+        Ok(handle
+            .health_probe_timeout()
+            .unwrap_or(DEFAULT_TARGET_HEALTH_PROBE_TIMEOUT))
+    }
+
+    async fn mark_remote_target_health_probe_timed_out(
+        &self,
+        name: &str,
+        timeout: Duration,
+    ) -> anyhow::Result<()> {
+        let handle = self.configured_target(name)?;
+        anyhow::ensure!(
+            handle.as_remote().is_some(),
+            "target `{name}` is not a remote target"
+        );
+        handle.mark_health_probe_timed_out(name, timeout).await;
+        Ok(())
+    }
+
     pub(crate) fn trigger_remote_target_health_recheck(&self, name: &str) {
         let Ok(handle) = self.configured_target(name) else {
             return;
@@ -280,7 +332,7 @@ impl BrokerState {
         let name = name.to_string();
         tokio::spawn(async move {
             if let Err(err) = state
-                .refresh_remote_target_health_and_dependents(&name)
+                .refresh_remote_target_health_and_dependents_with_configured_timeout(&name)
                 .await
             {
                 tracing::debug!(

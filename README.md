@@ -456,6 +456,8 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 - Broker target health refresh runs periodically in the background with separate
   healthy and unhealthy intervals. `list_targets` also performs a bounded
   recheck for unavailable or unhealthy remote targets.
+- Hung health probes are bounded by the target `timeouts.startup_probe_ms`;
+  timing out a health probe marks the target unhealthy in the broker cache.
 - Broker-daemon calls are bounded by per-target connect/read/request timeouts.
 - Rust daemon live exec sessions are capped by `max_open_sessions` and prune
   older sessions under pressure, preferring completed sessions. Broker-host
