@@ -22,7 +22,6 @@ type BoxIo = Box<dyn ReverseIo>;
 struct ReverseLane {
     io: BoxIo,
     daemon_instance_id: String,
-    connection_reset: CancellationToken,
 }
 
 const MAX_RETIRED_DAEMON_INSTANCES: usize = 64;
@@ -31,7 +30,6 @@ struct LanePoolState {
     lanes: VecDeque<ReverseLane>,
     active_daemon_instance_id: Option<String>,
     retired_daemon_instance_ids: VecDeque<String>,
-    connection_reset: CancellationToken,
 }
 
 enum LaneInsertOutcome {
@@ -55,14 +53,13 @@ impl LanePool {
                 lanes: VecDeque::new(),
                 active_daemon_instance_id: None,
                 retired_daemon_instance_ids: VecDeque::new(),
-                connection_reset: CancellationToken::new(),
             }),
             notify: Notify::new(),
             closed: AtomicBool::new(false),
         }
     }
 
-    async fn insert(&self, mut lane: ReverseLane) -> anyhow::Result<LaneInsertOutcome> {
+    async fn insert(&self, lane: ReverseLane) -> anyhow::Result<LaneInsertOutcome> {
         anyhow::ensure!(
             !self.closed.load(Ordering::Acquire),
             "reverse lane pool is closed"
@@ -99,19 +96,16 @@ impl LanePool {
                 LaneInsertOutcome::Added
             }
         };
-        lane.connection_reset = state.connection_reset.clone();
         state.lanes.push_back(lane);
         drop(state);
         self.notify.notify_one();
         Ok(outcome)
     }
 
-    async fn reset_connections(&self) -> usize {
+    async fn reset_idle_connections(&self) -> usize {
         let mut state = self.state.lock().await;
         let dropped_lanes = state.lanes.len();
         state.lanes.clear();
-        state.connection_reset.cancel();
-        state.connection_reset = CancellationToken::new();
         dropped_lanes
     }
 
@@ -165,8 +159,8 @@ impl ReverseTargetConnection {
         &self.base_url
     }
 
-    pub(crate) async fn reset_connections(&self) -> usize {
-        self.pool.reset_connections().await
+    pub(crate) async fn reset_idle_connections(&self) -> usize {
+        self.pool.reset_idle_connections().await
     }
 }
 
@@ -308,15 +302,9 @@ async fn serve_bridge(
             match pool.take(lane_timeout).await {
                 Ok(mut lane) => {
                     tracing::debug!(target = %target, daemon_instance_id = %lane.daemon_instance_id, "paired reverse lane");
-                    tokio::select! {
-                        result = tokio::io::copy_bidirectional(&mut local, &mut lane.io) => {
-                            if let Err(err) = result {
-                                tracing::debug!(target = %target, error = %err, "reverse bridge connection ended with error");
-                            }
-                        }
-                        _ = lane.connection_reset.cancelled() => {
-                            tracing::debug!(target = %target, daemon_instance_id = %lane.daemon_instance_id, "reset reverse bridge connection");
-                        }
+                    if let Err(err) = tokio::io::copy_bidirectional(&mut local, &mut lane.io).await
+                    {
+                        tracing::debug!(target = %target, error = %err, "reverse bridge connection ended with error");
                     }
                 }
                 Err(err) => {
@@ -426,7 +414,6 @@ async fn accept_reverse_lane(
         .insert(ReverseLane {
             io,
             daemon_instance_id: registration.daemon_instance_id.clone(),
-            connection_reset: CancellationToken::new(),
         })
         .await?;
     if let LaneInsertOutcome::Replaced {
@@ -505,7 +492,6 @@ mod tests {
         ReverseLane {
             io: Box::new(io),
             daemon_instance_id: daemon_instance_id.to_string(),
-            connection_reset: CancellationToken::new(),
         }
     }
 
@@ -539,18 +525,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connection_reset_drops_queued_and_cancels_checked_out_lanes() {
+    async fn connection_reset_drops_queued_but_preserves_checked_out_lanes() {
         let pool = LanePool::new();
+        let (active_io, mut active_peer) = tokio::io::duplex(64);
+        pool.insert(ReverseLane {
+            io: Box::new(active_io),
+            daemon_instance_id: "instance".to_string(),
+        })
+        .await
+        .unwrap();
         pool.insert(lane("instance")).await.unwrap();
-        pool.insert(lane("instance")).await.unwrap();
-        let checked_out = pool.take(Duration::from_millis(10)).await.unwrap();
+        let mut checked_out = pool.take(Duration::from_millis(10)).await.unwrap();
 
-        assert_eq!(pool.reset_connections().await, 1);
-        checked_out.connection_reset.cancelled().await;
+        assert_eq!(pool.reset_idle_connections().await, 1);
         assert!(
             pool.take(Duration::from_millis(10)).await.is_err(),
             "queued lanes should be discarded after reset"
         );
+        active_peer.write_all(b"ok").await.unwrap();
+        let mut received = [0u8; 2];
+        checked_out.io.read_exact(&mut received).await.unwrap();
+        assert_eq!(&received, b"ok");
     }
 
     #[tokio::test]
@@ -558,7 +553,7 @@ mod tests {
         let pool = Arc::new(LanePool::new());
         pool.insert(lane("instance")).await.unwrap();
         pool.insert(lane("instance")).await.unwrap();
-        let checked_out = pool.take(Duration::from_millis(10)).await.unwrap();
+        let _checked_out = pool.take(Duration::from_millis(10)).await.unwrap();
         let reverse_connection = ReverseTargetConnection {
             base_url: "http://127.0.0.1:9".to_string(),
             pool: pool.clone(),
@@ -586,13 +581,11 @@ mod tests {
             .recover_connection_after_timeout("test request", None)
             .await;
         assert!(first.contains("connection was retained"));
-        assert!(!checked_out.connection_reset.is_cancelled());
 
         let second = client
             .recover_connection_after_timeout("test request", None)
             .await;
         assert!(second.contains("connection was reset"));
-        assert!(checked_out.connection_reset.is_cancelled());
         assert!(
             pool.take(Duration::from_millis(10)).await.is_err(),
             "queued reverse lanes should be discarded after escalation"

@@ -489,9 +489,10 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 - Timed-out broker-daemon requests are never replayed. One isolated timeout is
   treated as a transient fluctuation; after two consecutive timeouts without a
   successful HTTP response, the broker replaces the direct target's HTTP
-  client pool. Reverse targets additionally close their queued and active lanes
-  so the daemon reconnects them. Any successful response clears the timeout
-  streak.
+  client pool. Reverse targets additionally discard queued idle lanes so the
+  daemon replenishes them; unrelated active requests are preserved. The
+  timed-out request's own lane closes when that request is cancelled. Any
+  successful response clears the timeout streak.
 - `exec_command` and `write_stdin` use at least `yield_time_ms` plus a small
   slow-host margin for their daemon RPC timeout, so long polls can exceed the
   normal `timeouts.request_ms` deadline.

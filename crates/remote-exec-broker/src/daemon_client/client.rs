@@ -629,7 +629,7 @@ impl DaemonClient {
             }
             Ok(TimeoutRecoveryOutcome::Reset) => {
                 let dropped_reverse_lanes = if let Some(reverse) = &self.reverse_connection {
-                    reverse.reset_connections().await
+                    reverse.reset_idle_connections().await
                 } else {
                     0
                 };
