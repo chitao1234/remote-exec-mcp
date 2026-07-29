@@ -178,12 +178,13 @@ targets and `https://` broker URLs. If the Rust daemon is built without `tls`,
 it only supports `transport = "http"`. C++ daemon targets are plain HTTP and
 must be configured in the broker with `allow_insecure_http = true`.
 
-Reverse TLS uses separate role-specific certificates: the broker reverse
-listener has a server-auth certificate and each Rust daemon has a client-auth
-certificate whose common name equals its configured target. `dev-init`
-generates these under `reverse/` alongside the direct-mode files. Plain reverse
-mode requires the configured bearer token for lane registration and normal RPC
-authentication.
+Generated broker and daemon leaf certificates are usable for both direct and
+reverse TLS. The broker leaf has client-auth usage for direct daemon requests
+and server-auth usage for the reverse listener, with a DNS SAN matching the
+broker common name. Each daemon leaf has server-auth usage for direct mode and
+client-auth usage for reverse lane registration, with its common name matching
+the configured target. Plain reverse mode requires the configured bearer token
+for lane registration and normal RPC authentication.
 
 Preferred development bootstrap:
 

@@ -192,6 +192,6 @@ expected_daemon_name = "builder-xp"
 #max_connections = 1024
 #
 #[reverse.tls]
-#cert_pem = "/etc/remote-exec/reverse/broker.pem"
-#key_pem = "/etc/remote-exec/reverse/broker.key"
+#cert_pem = "/etc/remote-exec/broker.pem"
+#key_pem = "/etc/remote-exec/broker.key"
 #ca_pem = "/etc/remote-exec/ca.pem"

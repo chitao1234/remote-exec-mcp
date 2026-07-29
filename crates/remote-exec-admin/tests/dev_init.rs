@@ -59,22 +59,7 @@ fn dev_init_writes_expected_files_and_config_snippets() {
     assert!(out_dir.join("certs-manifest.json").exists());
     assert!(out_dir.join("daemons").join("builder-a.pem").exists());
     assert!(out_dir.join("daemons").join("builder-a.key").exists());
-    assert!(out_dir.join("reverse").join("broker.pem").exists());
-    assert!(out_dir.join("reverse").join("broker.key").exists());
-    assert!(
-        out_dir
-            .join("reverse")
-            .join("daemons")
-            .join("builder-a.pem")
-            .exists()
-    );
-    assert!(
-        out_dir
-            .join("reverse")
-            .join("daemons")
-            .join("builder-a.key")
-            .exists()
-    );
+    assert!(!out_dir.join("reverse").exists());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("client_cert_pem"));
@@ -82,9 +67,13 @@ fn dev_init_writes_expected_files_and_config_snippets() {
     assert!(stdout.contains("cert_pem"));
     assert!(stdout.contains("builder-a.example.com"));
     assert!(stdout.contains("# base_url = \"https://builder-a.example.com:9443\""));
+    assert!(stdout.contains("#   base_url = \"reverse://\""));
     assert!(stdout.contains("# listen = \"0.0.0.0:9443\""));
     assert!(stdout.contains("[reverse]"));
-    assert!(stdout.contains("Reverse broker cert"));
+    assert!(stdout.contains("reverse listener"));
+    assert!(stdout.contains("# [reverse.tls]"));
+    assert!(stdout.contains("# server_name = \"remote-exec-broker\""));
+    assert!(!stdout.contains("Reverse broker cert"));
     assert!(!stdout.contains("\nbase_url = \"https://builder-a.example.com:9443\""));
     assert!(!stdout.contains("\nlisten = \"0.0.0.0:9443\""));
 }

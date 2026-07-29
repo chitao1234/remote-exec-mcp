@@ -784,7 +784,7 @@ mod tests {
 
     #[cfg(feature = "broker-tls")]
     #[tokio::test]
-    async fn reverse_tls_target_uses_role_specific_certificates() {
+    async fn reverse_tls_target_uses_dev_init_certificates() {
         use crate::config::{ReverseListenerConfig, ReverseListenerTlsConfig, ReverseTransport};
         use remote_exec_daemon::config::{
             DaemonConfig, DaemonConnectionMode, DaemonTransport, ReverseClientTlsConfig,
@@ -849,8 +849,8 @@ mod tests {
                     transport: ReverseTransport::Tls,
                     allow_insecure_http: false,
                     tls: Some(ReverseListenerTlsConfig {
-                        cert_pem: manifest.reverse_broker.cert_pem.clone(),
-                        key_pem: manifest.reverse_broker.key_pem.clone(),
+                        cert_pem: manifest.broker.cert_pem.clone(),
+                        key_pem: manifest.broker.key_pem.clone(),
                         ca_pem: manifest.ca.cert_pem.clone(),
                     }),
                     registration_timeout_ms: 2_000,
@@ -864,7 +864,7 @@ mod tests {
         .await
         .unwrap();
 
-        let reverse_daemon = &manifest.reverse_daemons["reverse-tls"];
+        let reverse_daemon = &manifest.daemons["reverse-tls"];
         let daemon = DaemonConfig {
             target: "reverse-tls".to_string(),
             listen: "127.0.0.1:0".parse().unwrap(),
@@ -880,8 +880,8 @@ mod tests {
                 reconnect_max_ms: 100,
                 registration_timeout_ms: 2_000,
                 tls: Some(ReverseClientTlsConfig {
-                    cert_pem: reverse_daemon.cert_pem.clone(),
-                    key_pem: reverse_daemon.key_pem.clone(),
+                    cert_pem: reverse_daemon.cert_pem().to_path_buf(),
+                    key_pem: reverse_daemon.key_pem().to_path_buf(),
                     ca_pem: manifest.ca.cert_pem.clone(),
                     server_name: "localhost".to_string(),
                     pinned_server_cert_pem: None,

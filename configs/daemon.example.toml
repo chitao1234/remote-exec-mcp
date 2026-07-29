@@ -122,7 +122,7 @@ ca_pem = "/etc/remote-exec/ca.pem"
 #registration_timeout_ms = 5000
 #
 #[reverse.tls]
-#cert_pem = "/etc/remote-exec/reverse/daemons/builder-a.pem"
-#key_pem = "/etc/remote-exec/reverse/daemons/builder-a.key"
+#cert_pem = "/etc/remote-exec/daemons/builder-a.pem"
+#key_pem = "/etc/remote-exec/daemons/builder-a.key"
 #ca_pem = "/etc/remote-exec/ca.pem"
 #server_name = "remote-exec-broker"

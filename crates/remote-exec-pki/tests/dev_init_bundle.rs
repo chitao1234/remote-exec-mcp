@@ -95,10 +95,23 @@ fn generates_bundle_for_requested_targets() {
     let bundle = build_dev_init_bundle(&spec).expect("bundle should generate");
     assert_pem_pair(&bundle.ca.cert_pem, bundle.ca.key_pem.as_str());
     assert_pem_pair(&bundle.broker.cert_pem, bundle.broker.key_pem.as_str());
+    assert_eq!(bundle.reverse_broker.cert_pem, bundle.broker.cert_pem);
+    assert_eq!(
+        bundle.reverse_broker.key_pem.as_str(),
+        bundle.broker.key_pem.as_str()
+    );
     assert!(bundle.daemons.contains_key("builder-a"));
     assert_pem_pair(
         &bundle.daemons["builder-a"].cert_pem,
         bundle.daemons["builder-a"].key_pem.as_str(),
+    );
+    assert_eq!(
+        bundle.reverse_daemons["builder-a"].cert_pem,
+        bundle.daemons["builder-a"].cert_pem
+    );
+    assert_eq!(
+        bundle.reverse_daemons["builder-a"].key_pem.as_str(),
+        bundle.daemons["builder-a"].key_pem.as_str()
     );
 }
 
@@ -120,14 +133,8 @@ fn writes_dev_init_bundle_with_expected_paths() {
     assert_eq!(manifest.ca.key_pem, out_dir.join(CA_KEY_FILENAME));
     assert_eq!(manifest.broker.cert_pem, out_dir.join("broker.pem"));
     assert_eq!(manifest.broker.key_pem, out_dir.join("broker.key"));
-    assert_eq!(
-        manifest.reverse_broker.cert_pem,
-        out_dir.join("reverse").join("broker.pem")
-    );
-    assert_eq!(
-        manifest.reverse_broker.key_pem,
-        out_dir.join("reverse").join("broker.key")
-    );
+    assert_eq!(manifest.reverse_broker.cert_pem, manifest.broker.cert_pem);
+    assert_eq!(manifest.reverse_broker.key_pem, manifest.broker.key_pem);
     assert_eq!(
         manifest.daemons["builder-a"].cert_pem(),
         out_dir.join("daemons").join("builder-a.pem").as_path()
@@ -138,18 +145,13 @@ fn writes_dev_init_bundle_with_expected_paths() {
     );
     assert_eq!(
         manifest.reverse_daemons["builder-a"].cert_pem,
-        out_dir
-            .join("reverse")
-            .join("daemons")
-            .join("builder-a.pem")
+        manifest.daemons["builder-a"].cert_pem().to_path_buf()
     );
     assert_eq!(
         manifest.reverse_daemons["builder-a"].key_pem,
-        out_dir
-            .join("reverse")
-            .join("daemons")
-            .join("builder-a.key")
+        manifest.daemons["builder-a"].key_pem().to_path_buf()
     );
+    assert!(!out_dir.join("reverse").exists());
     assert!(out_dir.join("certs-manifest.json").exists());
 }
 

@@ -105,16 +105,14 @@ pub fn build_dev_init_bundle_from_ca(
     spec.validate()?;
 
     let broker = ca.issue_broker_cert(&spec.broker_common_name)?;
-    let reverse_broker = ca.issue_reverse_broker_cert(&spec.broker_common_name)?;
+    let reverse_broker = broker.clone();
     let mut daemons = BTreeMap::new();
     let mut reverse_daemons = BTreeMap::new();
 
     for daemon in &spec.daemon_specs {
-        daemons.insert(daemon.target.clone(), ca.issue_daemon_cert(daemon)?);
-        reverse_daemons.insert(
-            daemon.target.clone(),
-            ca.issue_reverse_daemon_cert(&daemon.target)?,
-        );
+        let pair = ca.issue_daemon_cert(daemon)?;
+        daemons.insert(daemon.target.clone(), pair.clone());
+        reverse_daemons.insert(daemon.target.clone(), pair);
     }
 
     Ok(GeneratedDevInitBundle {
@@ -228,11 +226,14 @@ fn issue_role_cert(
 }
 
 fn broker_params(common_name: &str) -> anyhow::Result<CertificateParams> {
-    let mut params = CertificateParams::new(Vec::new())?;
+    let mut params = CertificateParams::new(vec![common_name.to_string()])?;
     params
         .distinguished_name
         .push(DnType::CommonName, common_name);
-    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+    params.extended_key_usages = vec![
+        ExtendedKeyUsagePurpose::ClientAuth,
+        ExtendedKeyUsagePurpose::ServerAuth,
+    ];
     Ok(params)
 }
 
@@ -250,7 +251,10 @@ fn daemon_params(daemon: &DaemonCertSpec) -> anyhow::Result<CertificateParams> {
     params
         .distinguished_name
         .push(DnType::CommonName, daemon.target.clone());
-    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    params.extended_key_usages = vec![
+        ExtendedKeyUsagePurpose::ServerAuth,
+        ExtendedKeyUsagePurpose::ClientAuth,
+    ];
 
     for san in &daemon.sans {
         if let SubjectAltName::Ip(addr) = san {
@@ -269,20 +273,27 @@ mod tests {
     use crate::spec::DaemonCertSpec;
 
     #[test]
-    fn broker_params_use_client_auth_only() {
+    fn broker_params_use_client_and_server_auth_with_dns_san() {
         let params = broker_params("remote-exec-broker").expect("broker params");
         assert_eq!(
             params.extended_key_usages,
-            vec![ExtendedKeyUsagePurpose::ClientAuth]
+            vec![
+                ExtendedKeyUsagePurpose::ClientAuth,
+                ExtendedKeyUsagePurpose::ServerAuth
+            ]
         );
+        assert!(!params.subject_alt_names.is_empty());
     }
 
     #[test]
-    fn daemon_params_use_server_auth_and_copy_sans() {
+    fn daemon_params_use_server_and_client_auth_and_copy_sans() {
         let params = daemon_params(&DaemonCertSpec::localhost("builder-a")).expect("daemon params");
         assert_eq!(
             params.extended_key_usages,
-            vec![ExtendedKeyUsagePurpose::ServerAuth]
+            vec![
+                ExtendedKeyUsagePurpose::ServerAuth,
+                ExtendedKeyUsagePurpose::ClientAuth
+            ]
         );
         assert!(!params.subject_alt_names.is_empty());
     }
