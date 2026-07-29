@@ -33,12 +33,20 @@ public:
     ConnectionManager& operator=(const ConnectionManager&) = delete;
 
 private:
+    class ConnectionStartGate;
     struct WorkerRecord;
     void run_worker(const std::shared_ptr<WorkerRecord>& record);
     static void close_worker_socket(const std::shared_ptr<WorkerRecord>& record);
     static void shutdown_worker_socket(const std::shared_ptr<WorkerRecord>& record);
     static void join_worker_thread(const std::shared_ptr<WorkerRecord>& record);
     void erase_worker_record_locked(const std::shared_ptr<WorkerRecord>& record);
+    // Spawns the worker thread for `record`; called under mutex_. On failure,
+    // cleans up the record and returns false. On success, broadcasts
+    // state_changed_ and returns true.
+    bool launch_worker_locked(
+        const std::shared_ptr<WorkerRecord>& record,
+        const std::shared_ptr<ConnectionStartGate>& start_gate
+    );
 
     unsigned long max_active_connections_;
     mutable BasicMutex mutex_;

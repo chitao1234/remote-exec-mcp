@@ -8,9 +8,7 @@
 #include "http/connection_transport.h"
 #include "runtime/daemon_thread.h"
 
-namespace {
-
-class ConnectionStartGate {
+class ConnectionManager::ConnectionStartGate {
 public:
     ConnectionStartGate() : released_(false) {}
 
@@ -32,8 +30,6 @@ private:
     BasicCondVar cond_;
     bool released_;
 };
-
-} // namespace
 
 struct ConnectionManager::WorkerRecord {
     WorkerRecord(
@@ -118,6 +114,44 @@ void ConnectionManager::erase_worker_record_locked(const std::shared_ptr<WorkerR
     state_changed_.broadcast();
 }
 
+bool ConnectionManager::launch_worker_locked(
+    const std::shared_ptr<WorkerRecord>& record,
+    const std::shared_ptr<ConnectionStartGate>& start_gate
+) {
+    try {
+        record->thread.reset(new std::thread([this, record, start_gate]() {
+            start_gate->wait();
+            run_worker(record);
+        }));
+    } catch (const std::exception& ex) {
+        log_message(
+            LOG_WARN,
+            "connection_manager",
+            LogMessageBuilder("worker thread spawn failed")
+                .field("worker_id", record->worker_id)
+                .raw(std::string("error=") + ex.what())
+                .str()
+        );
+        close_worker_socket(record);
+        erase_worker_record_locked(record);
+        return false;
+    } catch (...) {
+        log_message(
+            LOG_WARN,
+            "connection_manager",
+            LogMessageBuilder("worker thread spawn failed")
+                .field("worker_id", record->worker_id)
+                .raw("error=unknown exception")
+                .str()
+        );
+        close_worker_socket(record);
+        erase_worker_record_locked(record);
+        return false;
+    }
+    state_changed_.broadcast();
+    return true;
+}
+
 bool ConnectionManager::try_start(UniqueSocket client, std::function<void(SOCKET)> worker_main) {
     std::shared_ptr<WorkerRecord> record;
     std::shared_ptr<ConnectionStartGate> start_gate(new ConnectionStartGate());
@@ -136,37 +170,9 @@ bool ConnectionManager::try_start(UniqueSocket client, std::function<void(SOCKET
         ));
         workers_[worker_id] = record;
         client.release();
-        try {
-            record->thread.reset(new std::thread([this, record, start_gate]() {
-                start_gate->wait();
-                run_worker(record);
-            }));
-        } catch (const std::exception& ex) {
-            log_message(
-                LOG_WARN,
-                "connection_manager",
-                LogMessageBuilder("worker thread spawn failed")
-                    .field("worker_id", record->worker_id)
-                    .raw(std::string("error=") + ex.what())
-                    .str()
-            );
-            close_worker_socket(record);
-            erase_worker_record_locked(record);
-            return false;
-        } catch (...) {
-            log_message(
-                LOG_WARN,
-                "connection_manager",
-                LogMessageBuilder("worker thread spawn failed")
-                    .field("worker_id", record->worker_id)
-                    .raw("error=unknown exception")
-                    .str()
-            );
-            close_worker_socket(record);
-            erase_worker_record_locked(record);
+        if (!launch_worker_locked(record, start_gate)) {
             return false;
         }
-        state_changed_.broadcast();
     }
 
     start_gate->release();
@@ -192,37 +198,9 @@ bool ConnectionManager::try_start_transport(
             client
         ));
         workers_[worker_id] = record;
-        try {
-            record->thread.reset(new std::thread([this, record, start_gate]() {
-                start_gate->wait();
-                run_worker(record);
-            }));
-        } catch (const std::exception& ex) {
-            log_message(
-                LOG_WARN,
-                "connection_manager",
-                LogMessageBuilder("worker thread spawn failed")
-                    .field("worker_id", record->worker_id)
-                    .raw(std::string("error=") + ex.what())
-                    .str()
-            );
-            close_worker_socket(record);
-            erase_worker_record_locked(record);
-            return false;
-        } catch (...) {
-            log_message(
-                LOG_WARN,
-                "connection_manager",
-                LogMessageBuilder("worker thread spawn failed")
-                    .field("worker_id", record->worker_id)
-                    .raw("error=unknown exception")
-                    .str()
-            );
-            close_worker_socket(record);
-            erase_worker_record_locked(record);
+        if (!launch_worker_locked(record, start_gate)) {
             return false;
         }
-        state_changed_.broadcast();
     }
 
     start_gate->release();
