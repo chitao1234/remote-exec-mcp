@@ -128,16 +128,23 @@ fn spawn_lane_worker(
             if cancel.is_cancelled() {
                 break;
             }
-            if let Err(err) = result {
-                tracing::debug!(target = %daemon_config.target, lane_id = id, error = %err, "reverse lane disconnected");
+            match result {
+                Ok(()) => {
+                    // Lane closed cleanly; reset backoff so the next attempt
+                    // starts at the minimum delay rather than an inflated value.
+                    backoff = Duration::from_millis(reverse.reconnect_min_ms);
+                }
+                Err(err) => {
+                    tracing::debug!(target = %daemon_config.target, lane_id = id, error = %err, "reverse lane disconnected");
+                    tokio::select! {
+                        _ = cancel.cancelled() => break,
+                        _ = tokio::time::sleep(backoff) => {}
+                    }
+                    backoff = backoff
+                        .saturating_mul(2)
+                        .min(Duration::from_millis(reverse.reconnect_max_ms));
+                }
             }
-            tokio::select! {
-                _ = cancel.cancelled() => break,
-                _ = tokio::time::sleep(backoff) => {}
-            }
-            backoff = backoff
-                .saturating_mul(2)
-                .min(Duration::from_millis(reverse.reconnect_max_ms));
         }
     });
 }

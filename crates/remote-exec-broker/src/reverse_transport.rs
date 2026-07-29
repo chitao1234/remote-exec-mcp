@@ -112,6 +112,13 @@ impl LanePool {
     async fn take(&self, timeout: Duration) -> anyhow::Result<ReverseLane> {
         tokio::time::timeout(timeout, async {
             loop {
+                // Create and enable the notification future BEFORE checking the
+                // queue.  This ensures any notify_one() that fires between the
+                // check and the await is captured rather than lost to another
+                // waiter.
+                let notified = self.notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
                 if let Some(lane) = self.state.lock().await.lanes.pop_front() {
                     return Ok(lane);
                 }
@@ -119,7 +126,7 @@ impl LanePool {
                     !self.closed.load(Ordering::Acquire),
                     "reverse lane pool is closed"
                 );
-                self.notify.notified().await;
+                notified.await;
             }
         })
         .await
