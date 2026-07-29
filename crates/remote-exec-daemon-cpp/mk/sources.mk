@@ -349,6 +349,20 @@ HOST_TLS_TRANSPORT_SRCS = \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_error.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_socket_ops.cpp
 
+WINDOWS_TLS_TRANSPORT_SRCS = \
+	$(SOURCE_PREFIX)tests/test_tls_transport.cpp \
+	$(TLS_SRCS) \
+	$(CONNECTION_TRANSPORT_SRCS) \
+	$(SOCKET_WINDOWS_SRCS) \
+	$(BASIC_MUTEX_WINDOWS_SRCS) \
+	$(DAEMON_THREAD_SRCS) \
+	$(PLATFORM_SRCS) \
+	$(TEXT_UTILS_SRCS) \
+	$(WIN32_ERROR_SRCS) \
+	$(SOURCE_PREFIX)src/port_forward/port_forward_endpoint.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_forward_error.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_forward_socket_ops.cpp
+
 WINDOWS_CONNECTION_MANAGER_TEST_SRCS = \
 	$(HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS) \
 	$(SERVER_TRANSPORT_WINDOWS_SRCS) \

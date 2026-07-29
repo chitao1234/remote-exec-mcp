@@ -215,6 +215,10 @@ Compatibility aliases remain:
 - `make all-windows-native`
 - `make check-windows-native`
 
+The XP, x64, XP ANSI, and native aliases resolve `TLS=auto` to OpenSSL and
+therefore require a compatible OpenSSL installation. Pass `OPENSSL_ROOT`, or
+use `TLS=off` when intentionally validating only the plain-HTTP build.
+
 Host-native Windows MSVC/NMAKE build:
 
 - Open a Visual Studio developer prompt. Use an x86 prompt for the same 32-bit
@@ -234,8 +238,8 @@ Windows XP-compatible MSVC/NMAKE build:
 
 - Open an x86 Visual Studio developer prompt with an XP-capable C++11 VS 2017
   toolset, such as `vcvarsall.bat x86 -vcvars_ver=14.16`.
-- `nmake /f NMakefile all-msvc-xp`
-- `nmake /f NMakefile check-msvc-xp`
+- `nmake /f NMakefile all-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp`
+- `nmake /f NMakefile check-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp`
 - `nmake /f NMakefile test-msvc-xp-console-output`
 - `nmake /f NMakefile test-msvc-xp-session-store`
 - `nmake /f NMakefile test-msvc-xp-transfer`
@@ -293,6 +297,7 @@ Use the same target names with `bmake ...` for the BSD make path.
 - `make test-host-server-transport`
 - `make test-host-session-store`
 - `make test-host-connection-manager`
+- `make test-host-tls-transport`
 - `make test-host-server-runtime`
 - `make test-host-server-routes`
 - `make test-host-server-streaming`
@@ -301,6 +306,12 @@ Use the same target names with `bmake ...` for the BSD make path.
 ## Run
 
 ### TLS Build
+
+`TLS=auto` is the default. On POSIX it probes the selected compiler, OpenSSL
+headers, minimum 1.0.2 version, and link libraries; TLS is enabled only when the
+probe succeeds. Windows XP and newer GNU/MSVC targets resolve auto to OpenSSL,
+while Windows 2000, NT 4.0, NT 3.x, and 9x targets resolve auto to off. Explicit
+`TLS=openssl` and `TLS=off` always override the automatic choice.
 
 Use an installed OpenSSL:
 
@@ -322,10 +333,26 @@ make TLS=openssl OPENSSL_ROOT="$PWD/build/deps/openssl-3.5.7"
 `no-shared no-module no-tests no-asm`. External OpenSSL 1.x installs remain
 supported through `OPENSSL_ROOT`, `OPENSSL_CPPFLAGS`, and `OPENSSL_LDLIBS`.
 
-Windows TLS builds use the same `TLS=openssl` knob. GNU and NMAKE output/object
-names are TLS-tagged to avoid mixing objects from disabled and enabled builds.
-No Windows family, API-floor, or Winsock combination is rejected merely for
-enabling TLS; old combinations are best-effort and may fail in the selected
+For an XP GNU cross-build, use a complete `i686-w64-mingw32-` tool prefix and
+build the pinned dependency with OpenSSL's `mingw` target:
+
+```sh
+CROSS_COMPILE=i686-w64-mingw32- make prepare-openssl \
+  OPENSSL_DEPS_DIR="$PWD/build/deps-mingw-xp" \
+  OPENSSL_CONFIGURE_TARGET=mingw \
+  OPENSSL_CONFIGURE_OPTIONS=no-apps \
+  OPENSSL_JOBS=8
+make check-windows-xp \
+  OPENSSL_ROOT="$PWD/build/deps-mingw-xp/openssl-3.5.7"
+```
+
+The XP GNU path is tested with the pinned OpenSSL 3.5.7 static libraries,
+including the mutual-TLS full-duplex transport and client-pin rejection test.
+
+Windows TLS builds use the same knob. GNU and NMAKE output/object names are
+TLS-tagged to avoid mixing objects from disabled and enabled builds. No Windows
+family, API-floor, or Winsock combination is rejected merely for explicitly
+enabling TLS; pre-XP combinations are best-effort and may fail in the selected
 OpenSSL/toolchain build because they are not all tested.
 
 POSIX:
@@ -337,13 +364,13 @@ build/remote-exec-daemon-cpp config/daemon-cpp.example.ini
 Windows XP-compatible GNU Winsock 2:
 
 ```bat
-build\remote-exec-daemon-cpp-xp-ws2.exe config\daemon-cpp.example.ini
+build\remote-exec-daemon-cpp-xp-ws2-tls-openssl.exe config\daemon-cpp.example.ini
 ```
 
 Windows x64 GNU XP/Winsock 2:
 
 ```bat
-build\remote-exec-daemon-cpp-x64-xp-ws2.exe config\daemon-cpp.example.ini
+build\remote-exec-daemon-cpp-x64-xp-ws2-tls-openssl.exe config\daemon-cpp.example.ini
 ```
 
 Windows 2000-compatible GNU Winsock 2:
@@ -355,7 +382,7 @@ build\remote-exec-daemon-cpp-2000-ws2.exe config\daemon-cpp.example.ini
 Windows host-native GNU XP/Winsock 2:
 
 ```bat
-build\remote-exec-daemon-cpp-native-xp-ws2.exe config\daemon-cpp.example.ini
+build\remote-exec-daemon-cpp-native-xp-ws2-tls-openssl.exe config\daemon-cpp.example.ini
 ```
 
 Windows NT 3.51/4.0-compatible GNU Winsock 1.1:
@@ -397,7 +424,7 @@ build\remote-exec-daemon-cpp-nt4-ws2.exe config\daemon-cpp.example.ini
 Windows XP-compatible MSVC/NMAKE:
 
 ```bat
-build\msvc-xp\remote-exec-daemon-cpp-xp-msvc.exe config\daemon-cpp.example.ini
+build\msvc-xp\remote-exec-daemon-cpp-xp-msvc-tls-openssl.exe config\daemon-cpp.example.ini
 ```
 
 Logs go to `stderr`. Set `REMOTE_EXEC_LOG=debug` to raise the level, or use a
@@ -659,7 +686,8 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 
 ## Limitations
 
-- TLS is opt-in at build time; `TLS=off` remains the default
+- `TLS=auto` enables usable OpenSSL on POSIX and enables it for Windows XP and
+  newer targets; pre-XP Windows targets default to TLS off
 - daemon RPC is HTTP/1.1-only; sequential requests may reuse a persistent connection, but HTTP pipelining is not supported
 - OpenSSL older than 1.0.2 is rejected; TLS 1.0 and 1.1 are disabled
 - POSIX PTY support depends on host PTY allocation

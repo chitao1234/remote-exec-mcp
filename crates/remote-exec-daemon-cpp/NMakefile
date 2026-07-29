@@ -29,12 +29,7 @@ CXX=cl
 !ENDIF
 
 !IFNDEF TLS
-TLS=off
-!ENDIF
-!IF "$(TLS)" == "openssl"
-MSVC_TLS_TAG=-tls-openssl
-!ELSE
-MSVC_TLS_TAG=
+TLS=auto
 !ENDIF
 
 MSVC_VARIANT_NATIVE=native
@@ -42,6 +37,27 @@ MSVC_VARIANT_XP=xp
 
 !IFNDEF MSVC_VARIANT
 MSVC_VARIANT=$(MSVC_VARIANT_NATIVE)
+!ENDIF
+
+!IF "$(TLS)" == "auto"
+!IF "$(MSVC_VARIANT)" == "$(MSVC_VARIANT_NATIVE)"
+MSVC_TLS=openssl
+!ELSEIF "$(MSVC_VARIANT)" == "$(MSVC_VARIANT_XP)"
+MSVC_TLS=openssl
+!ELSE
+MSVC_TLS=off
+!ENDIF
+!ELSEIF "$(TLS)" == "openssl"
+MSVC_TLS=openssl
+!ELSEIF "$(TLS)" == "off"
+MSVC_TLS=off
+!ELSE
+!ERROR Unsupported TLS '$(TLS)'; use auto, off, or openssl.
+!ENDIF
+!IF "$(MSVC_TLS)" == "openssl"
+MSVC_TLS_TAG=-tls-openssl
+!ELSE
+MSVC_TLS_TAG=
 !ENDIF
 
 MSVC_NATIVE_BINARY_TAG=msvc$(MSVC_TLS_TAG)
@@ -81,7 +97,7 @@ OPENSSL_CPPFLAGS=
 !IFNDEF OPENSSL_LDLIBS
 OPENSSL_LDLIBS=
 !ENDIF
-!IF "$(TLS)" == "openssl"
+!IF "$(MSVC_TLS)" == "openssl"
 MSVC_OPENSSL_CPPFLAGS=/DREMOTE_EXEC_CPP_HAS_OPENSSL $(OPENSSL_CPPFLAGS)
 !IF "$(OPENSSL_ROOT)" != ""
 MSVC_OPENSSL_CPPFLAGS=$(MSVC_OPENSSL_CPPFLAGS) /I"$(OPENSSL_ROOT)\include"
@@ -91,11 +107,9 @@ MSVC_OPENSSL_LDLIBS=/LIBPATH:"$(OPENSSL_ROOT)\lib" libssl.lib libcrypto.lib cryp
 !ELSE
 MSVC_OPENSSL_LDLIBS=$(OPENSSL_LDLIBS)
 !ENDIF
-!ELSEIF "$(TLS)" == "off"
+!ELSE
 MSVC_OPENSSL_CPPFLAGS=
 MSVC_OPENSSL_LDLIBS=
-!ELSE
-!ERROR Unsupported TLS '$(TLS)'; use off or openssl.
 !ENDIF
 MSVC_COMMON_CPPFLAGS=$(MSVC_COMMON_CPPFLAGS) $(MSVC_OPENSSL_CPPFLAGS)
 MSVC_WINPTY_VENDOR_DIR=$(DAEMON_CPP_DIR)\..\..\winptyrs\crates\winptyrs-sys\vendor\winpty
@@ -231,6 +245,7 @@ MSVC_CONFIG_TEST_SRCS=$(WINDOWS_CONFIG_TEST_SRCS)
 MSVC_HTTP_REQUEST_TEST_SRCS=$(HOST_HTTP_REQUEST_SRCS)
 MSVC_SERVER_TRANSPORT_TEST_SRCS=$(WINDOWS_SERVER_TRANSPORT_TEST_SRCS)
 MSVC_CONNECTION_MANAGER_TEST_SRCS=$(WINDOWS_CONNECTION_MANAGER_TEST_SRCS)
+MSVC_TLS_TRANSPORT_TEST_SRCS=$(WINDOWS_TLS_TRANSPORT_SRCS)
 MSVC_SERVER_ROUTES_COMMON_TEST_SRCS=$(WINDOWS_SERVER_ROUTES_COMMON_TEST_SRCS) $(MSVC_WINPTY_LIB_SRCS)
 MSVC_SERVER_ROUTES_TEST_SRCS=$(WINDOWS_SERVER_ROUTES_TEST_SRCS) $(MSVC_WINPTY_LIB_SRCS)
 MSVC_SERVER_RUNTIME_TEST_SRCS=$(WINDOWS_SERVER_RUNTIME_TEST_SRCS) $(MSVC_WINPTY_LIB_SRCS)
@@ -321,6 +336,7 @@ MSVC_CONFIG_TEST=$(MSVC_SELECTED_BIN_DIR)\test_config-$(MSVC_SELECTED_BINARY_TAG
 MSVC_HTTP_REQUEST_TEST=$(MSVC_SELECTED_BIN_DIR)\test_http_request-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_SERVER_TRANSPORT_TEST=$(MSVC_SELECTED_BIN_DIR)\test_server_transport-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_CONNECTION_MANAGER_TEST=$(MSVC_SELECTED_BIN_DIR)\test_connection_manager-$(MSVC_SELECTED_BINARY_TAG).exe
+MSVC_TLS_TRANSPORT_TEST=$(MSVC_SELECTED_BIN_DIR)\test_tls_transport-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_SERVER_ROUTES_COMMON_TEST=$(MSVC_SELECTED_BIN_DIR)\test_server_routes_common-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_SERVER_ROUTES_TEST=$(MSVC_SELECTED_BIN_DIR)\test_server_routes-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_SERVER_RUNTIME_TEST=$(MSVC_SELECTED_BIN_DIR)\test_server_runtime-$(MSVC_SELECTED_BINARY_TAG).exe
@@ -338,6 +354,7 @@ MSVC_TEST_PHONY_TARGETS= \
     test-msvc-http-request \
     test-msvc-server-transport \
     test-msvc-connection-manager \
+    test-msvc-tls-transport \
     test-msvc-server-routes-common \
     test-msvc-server-routes \
     test-msvc-server-runtime \
@@ -378,6 +395,9 @@ test-msvc-server-transport: $(MSVC_SERVER_TRANSPORT_TEST)
 	$(MSVC_RUN_TEST)
 
 test-msvc-connection-manager: $(MSVC_CONNECTION_MANAGER_TEST)
+	$(MSVC_RUN_TEST)
+
+test-msvc-tls-transport: $(MSVC_TLS_TRANSPORT_TEST)
 	$(MSVC_RUN_TEST)
 
 test-msvc-server-routes-common: $(MSVC_SERVER_ROUTES_COMMON_TEST)
@@ -445,6 +465,9 @@ test-msvc-native-server-transport:
 test-msvc-native-connection-manager:
 	@$(MSVC_REENTER_NATIVE) test-msvc-connection-manager
 
+test-msvc-native-tls-transport:
+	@$(MSVC_REENTER_NATIVE) test-msvc-tls-transport
+
 test-msvc-native-server-routes-common:
 	@$(MSVC_REENTER_NATIVE) test-msvc-server-routes-common
 
@@ -489,6 +512,9 @@ test-msvc-xp-server-transport:
 
 test-msvc-xp-connection-manager:
 	@$(MSVC_REENTER_XP) test-msvc-connection-manager
+
+test-msvc-xp-tls-transport:
+	@$(MSVC_REENTER_XP) test-msvc-tls-transport
 
 test-msvc-xp-server-routes-common:
 	@$(MSVC_REENTER_XP) test-msvc-server-routes-common
@@ -569,6 +595,11 @@ $(MSVC_CONNECTION_MANAGER_TEST): $(MSVC_CONNECTION_MANAGER_TEST_SRCS)
 	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
 	$(MSVC_BUILD_SELECTED_TEST_PREFIX) $(MSVC_CONNECTION_MANAGER_TEST_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
 
+$(MSVC_TLS_TRANSPORT_TEST): $(MSVC_TLS_TRANSPORT_TEST_SRCS)
+	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
+	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
+	$(MSVC_BUILD_SELECTED_TEST_PREFIX) $(MSVC_TLS_TRANSPORT_TEST_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
+
 $(MSVC_SERVER_ROUTES_COMMON_TEST): $(MSVC_SERVER_ROUTES_COMMON_TEST_SRCS) $(MSVC_SELECTED_WINPTY_AGENT)
 	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
 	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
@@ -616,6 +647,7 @@ clean:
     test-msvc-native-http-request \
     test-msvc-native-server-transport \
     test-msvc-native-connection-manager \
+    test-msvc-native-tls-transport \
     test-msvc-native-server-routes-common \
     test-msvc-native-server-routes \
     test-msvc-native-server-runtime \
@@ -632,6 +664,7 @@ clean:
     test-msvc-xp-http-request \
     test-msvc-xp-server-transport \
     test-msvc-xp-connection-manager \
+    test-msvc-xp-tls-transport \
     test-msvc-xp-server-routes-common \
     test-msvc-xp-server-routes \
     test-msvc-xp-server-runtime \

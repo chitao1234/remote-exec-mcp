@@ -174,9 +174,11 @@ Rust broker and Rust daemon targets use mutual TLS by default:
 
 If the broker is built without `broker-tls`, it rejects `https://` daemon
 targets and `https://` broker URLs. If the Rust daemon is built without `tls`,
-it only supports `transport = "http"`. The C++ daemon uses `TLS=off` by default;
-build with `TLS=openssl` and OpenSSL 1.0.2 or newer for direct and reverse mTLS.
-Plain C++ targets still require broker `allow_insecure_http = true`.
+it only supports `transport = "http"`. The C++ daemon defaults to `TLS=auto`.
+On POSIX, auto enables TLS when OpenSSL 1.0.2 or newer can be compiled and
+linked. Windows XP and newer targets enable OpenSSL TLS automatically, while
+older Windows targets disable it. Use `TLS=off` or `TLS=openssl` to override
+auto. Plain C++ targets still require broker `allow_insecure_http = true`.
 
 Generated broker and daemon leaf certificates are usable for both direct and
 reverse TLS. The broker leaf has client-auth usage for direct daemon requests
@@ -556,8 +558,8 @@ Build paths:
 ```bash
 make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-2000
-make -C crates/remote-exec-daemon-cpp check-windows-xp
-make -C crates/remote-exec-daemon-cpp check-windows-x64
+make -C crates/remote-exec-daemon-cpp check-windows-xp OPENSSL_ROOT=/path/to/openssl-xp
+make -C crates/remote-exec-daemon-cpp check-windows-x64 OPENSSL_ROOT=/path/to/openssl-mingw64
 make -C crates/remote-exec-daemon-cpp check-windows-xp-ansi
 make -C crates/remote-exec-daemon-cpp check-windows-nt3x-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
@@ -588,14 +590,14 @@ aliases require x86.
 From an x86 Visual Studio developer prompt:
 
 ```bat
-nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
+nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native OPENSSL_ROOT=C:\path\to\openssl
 ```
 
 From an x86 Visual Studio developer prompt with a `v141_xp`-capable C++11
 toolset:
 
 ```bat
-nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-xp
+nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp
 ```
 
 More C++ daemon details live in `crates/remote-exec-daemon-cpp/README.md`.
