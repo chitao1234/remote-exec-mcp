@@ -13,6 +13,7 @@ HOST_POSIX_TESTS = \
 	SERVER_STREAMING \
 	SESSION_STORE \
 	CONNECTION_MANAGER \
+	TLS_TRANSPORT \
 	SERVER_RUNTIME \
 	SERVER_ROUTES \
 	SANDBOX \
@@ -27,6 +28,7 @@ HOST_SERVER_TRANSPORT_BIN = test_server_transport
 HOST_SERVER_STREAMING_BIN = test_server_streaming
 HOST_SESSION_STORE_BIN = test_session_store
 HOST_CONNECTION_MANAGER_BIN = test_connection_manager
+HOST_TLS_TRANSPORT_BIN = test_tls_transport
 HOST_SERVER_RUNTIME_BIN = test_server_runtime
 HOST_SERVER_ROUTES_BIN = test_server_routes
 HOST_SANDBOX_BIN = test_sandbox
@@ -41,6 +43,7 @@ HOST_SERVER_TRANSPORT_TEST_TARGET = test-host-server-transport
 HOST_SERVER_STREAMING_TEST_TARGET = test-host-server-streaming
 HOST_SESSION_STORE_TEST_TARGET = test-host-session-store
 HOST_CONNECTION_MANAGER_TEST_TARGET = test-host-connection-manager
+HOST_TLS_TRANSPORT_TEST_TARGET = test-host-tls-transport
 HOST_SERVER_RUNTIME_TEST_TARGET = test-host-server-runtime
 HOST_SERVER_ROUTES_TEST_TARGET = test-host-server-routes
 HOST_SANDBOX_TEST_TARGET = test-host-sandbox

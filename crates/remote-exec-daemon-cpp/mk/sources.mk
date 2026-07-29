@@ -68,7 +68,9 @@ HTTP_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/http/http_request.cpp
 
-TLS_SRCS = $(SOURCE_PREFIX)src/tls/openssl_compat.cpp
+TLS_SRCS = \
+	$(SOURCE_PREFIX)src/tls/openssl_compat.cpp \
+	$(SOURCE_PREFIX)src/tls/tls_connection_transport.cpp
 
 ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/rpc/capabilities_http_codec.cpp \
@@ -333,6 +335,19 @@ HOST_CONNECTION_MANAGER_SRCS = \
 	$(HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS) \
 	$(SERVER_TRANSPORT_POSIX_SRCS) \
 	$(BASIC_MUTEX_POSIX_SRCS)
+
+HOST_TLS_TRANSPORT_SRCS = \
+	$(SOURCE_PREFIX)tests/test_tls_transport.cpp \
+	$(TLS_SRCS) \
+	$(CONNECTION_TRANSPORT_SRCS) \
+	$(SOCKET_POSIX_SRCS) \
+	$(BASIC_MUTEX_POSIX_SRCS) \
+	$(DAEMON_THREAD_SRCS) \
+	$(PLATFORM_SRCS) \
+	$(TEXT_UTILS_SRCS) \
+	$(SOURCE_PREFIX)src/port_forward/port_forward_endpoint.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_forward_error.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_forward_socket_ops.cpp
 
 WINDOWS_CONNECTION_MANAGER_TEST_SRCS = \
 	$(HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS) \

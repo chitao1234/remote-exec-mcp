@@ -17,6 +17,9 @@
 
 namespace {
 
+BasicMutex initialization_mutex;
+bool initialized = false;
+
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
 BasicMutex* legacy_locks = nullptr;
 int legacy_lock_count = 0;
@@ -53,6 +56,10 @@ namespace openssl_compat {
 
 void initialize() {
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
+    BasicLockGuard lock(initialization_mutex);
+    if (initialized) {
+        return;
+    }
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
     SSL_library_init();
     SSL_load_error_strings();
@@ -64,16 +71,22 @@ void initialize() {
         throw std::runtime_error("OpenSSL initialization failed");
     }
 #endif
+    initialized = true;
 #endif
 }
 
 void cleanup() {
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
+    BasicLockGuard lock(initialization_mutex);
+    if (!initialized) {
+        return;
+    }
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
     cleanup_legacy_locks();
     EVP_cleanup();
     ERR_free_strings();
 #endif
+    initialized = false;
 #endif
 }
 

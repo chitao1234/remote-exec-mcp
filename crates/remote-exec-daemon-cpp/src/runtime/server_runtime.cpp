@@ -21,6 +21,7 @@
 #include "port_forward/port_tunnel.h"
 #include "runtime/app_context.h"
 #include "runtime/daemon_thread.h"
+#include "tls/tls_connection_transport.h"
 
 namespace {
 
@@ -138,6 +139,12 @@ ServerRuntime::ServerRuntime(const DaemonConfig& config)
         sandbox_.compiled = compile_filesystem_sandbox(config.sandbox);
     }
     services_.port_tunnel = create_port_tunnel_service(config.port_forward_limits);
+    if (config_.connection_mode == "listen" && config_.transport == "tls") {
+        tls_server_context_ = make_tls_server_context(config_);
+    }
+    if (config_.connection_mode == "reverse" && config_.reverse_transport == "tls") {
+        tls_client_context_ = make_tls_client_context(config_);
+    }
 }
 
 void ServerRuntime::start_reverse_loop() {
@@ -307,18 +314,32 @@ void ServerRuntime::accept_loop() {
             }
 
             if (!connections_.try_start(std::move(client), [this](SOCKET socket) {
-                    std::shared_ptr<ConnectionTransport> client =
-                        make_plain_connection_transport(UniqueSocket(socket));
-                    handle_client(
-                        make_http_connection_context(
-                            this->config_,
-                            this->metadata_,
-                            this->sandbox_,
-                            this->services_,
-                            this->shutdown_
-                        ),
-                        client
-                    );
+                    try {
+                        std::shared_ptr<ConnectionTransport> client =
+                            this->config_.transport == "tls"
+                                ? make_tls_server_connection_transport(
+                                      UniqueSocket(socket),
+                                      this->tls_server_context_,
+                                      this->config_.tls_handshake_timeout_ms
+                                  )
+                                : make_plain_connection_transport(UniqueSocket(socket));
+                        handle_client(
+                            make_http_connection_context(
+                                this->config_,
+                                this->metadata_,
+                                this->sandbox_,
+                                this->services_,
+                                this->shutdown_
+                            ),
+                            client
+                        );
+                    } catch (const std::exception& ex) {
+                        log_message(
+                            LOG_WARN,
+                            "server",
+                            std::string("client connection failed: ") + ex.what()
+                        );
+                    }
                 })) {
                 log_message(LOG_WARN, "server", "dropping client connection during shutdown");
             }

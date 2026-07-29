@@ -9,6 +9,8 @@
 #include "runtime/app_state.h"
 #include "runtime/connection_manager.h"
 
+class TlsContext;
+
 class ServerRuntime {
 public:
     explicit ServerRuntime(const DaemonConfig& config);
@@ -43,6 +45,8 @@ private:
     AppServices services_;
     AppShutdownState shutdown_;
     ConnectionManager connections_;
+    std::shared_ptr<TlsContext> tls_server_context_;
+    std::shared_ptr<TlsContext> tls_client_context_;
     mutable BasicMutex mutex_;
     UniqueSocket listener_;
     WakeupPipe shutdown_wakeup_;
