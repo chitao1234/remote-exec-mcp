@@ -1,4 +1,5 @@
 #include "test_assert.h"
+#include <atomic>
 #include <cstdint>
 #include <thread>
 #include <vector>
@@ -6,21 +7,31 @@
 #include "platform/basic_mutex.h"
 #include "platform/platform.h"
 
+static void wait_until_count(const std::atomic<int>& count, int expected) {
+    const std::uint64_t deadline = platform::monotonic_ms() + 1000UL;
+    while (count.load() < expected && platform::monotonic_ms() < deadline) {
+        platform::sleep_ms(10UL);
+    }
+    TEST_ASSERT(count.load() == expected);
+}
+
 int main() {
     BasicMutex mutex;
     bool ready = false;
+    std::atomic<int> waiting(0);
 
     {
         BasicCondVar cond;
         std::thread waiter([&]() {
             BasicLockGuard lock(mutex);
+            ++waiting;
             while (!ready) {
                 const bool woke = cond.timed_wait_ms(mutex, 500UL);
                 TEST_ASSERT(woke);
             }
         });
 
-        platform::sleep_ms(50);
+        wait_until_count(waiting, 1);
         {
             BasicLockGuard lock(mutex);
             ready = true;
@@ -40,6 +51,7 @@ int main() {
     }
 
     ready = false;
+    waiting.store(0);
     int released = 0;
     {
         BasicCondVar cond;
@@ -47,6 +59,7 @@ int main() {
         for (int i = 0; i < 2; ++i) {
             waiters.push_back(std::thread([&]() {
                 BasicLockGuard lock(mutex);
+                ++waiting;
                 while (!ready) {
                     const bool woke = cond.timed_wait_ms(mutex, 500UL);
                     TEST_ASSERT(woke);
@@ -54,7 +67,7 @@ int main() {
                 ++released;
             }));
         }
-        platform::sleep_ms(50);
+        wait_until_count(waiting, 2);
         {
             BasicLockGuard lock(mutex);
             ready = true;

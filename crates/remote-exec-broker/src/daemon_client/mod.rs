@@ -209,18 +209,13 @@ mod tests {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 let request = read_http_request(&mut stream).await;
                 assert!(request.starts_with("POST /v1/target-info "));
-                hung_connections.push(tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    drop(stream);
-                }));
+                hung_connections.push(stream);
             }
             let (mut stream, _) = listener.accept().await.unwrap();
             let request = read_http_request(&mut stream).await;
             assert!(request.starts_with("POST /v1/target-info "));
             write_json_response(&mut stream, &target_info_response_body()).await;
-            for connection in hung_connections {
-                connection.await.unwrap();
-            }
+            drop(hung_connections);
         });
         let client = DaemonClient::from_test_client(
             reqwest::Client::builder().build().unwrap(),
@@ -246,14 +241,11 @@ mod tests {
         crate::install_crypto_provider().unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
         let server = tokio::spawn(async move {
             let (mut first, _) = listener.accept().await.unwrap();
             let request = read_http_request(&mut first).await;
             assert!(request.starts_with("POST /v1/target-info "));
-            let first_hung = tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                drop(first);
-            });
 
             let (mut second, _) = listener.accept().await.unwrap();
             let request = read_http_request(&mut second).await;
@@ -264,8 +256,8 @@ mod tests {
             let (mut third, _) = listener.accept().await.unwrap();
             let request = read_http_request(&mut third).await;
             assert!(request.starts_with("POST /v1/target-info "));
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            first_hung.await.unwrap();
+            let _ = release_rx.await;
+            drop((first, third));
         });
         let client = DaemonClient::from_test_client(
             reqwest::Client::builder().build().unwrap(),
@@ -281,6 +273,7 @@ mod tests {
         let third = client.target_info().await.unwrap_err();
         assert!(third.to_string().contains("connection was retained"));
         assert!(!third.to_string().contains("connection was reset;"));
+        let _ = release_tx.send(());
         server.await.unwrap();
     }
 

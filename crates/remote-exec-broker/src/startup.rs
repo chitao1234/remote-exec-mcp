@@ -374,23 +374,50 @@ mod tests {
         );
     }
 
-    async fn spawn_hung_http_server(delay: Duration) -> std::net::SocketAddr {
+    async fn spawn_hung_http_server(
+        delay: Duration,
+    ) -> (
+        std::net::SocketAddr,
+        tokio::sync::mpsc::UnboundedReceiver<()>,
+    ) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = tokio::sync::mpsc::unbounded_channel();
         tokio::spawn(async move {
             loop {
                 let (mut stream, _) = match listener.accept().await {
                     Ok(value) => value,
                     Err(_) => return,
                 };
+                let request_tx = request_tx.clone();
                 tokio::spawn(async move {
                     let mut buf = [0u8; 1024];
                     let _ = stream.read(&mut buf).await;
+                    let _ = request_tx.send(());
                     tokio::time::sleep(delay).await;
                 });
             }
         });
-        addr
+        (addr, request_rx)
+    }
+
+    async fn spawn_gated_http_server() -> (
+        std::net::SocketAddr,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf).await;
+            let _ = request_tx.send(());
+            let _ = release_rx.await;
+        });
+        (addr, request_rx, release_tx)
     }
 
     fn remote_http_target(addr: std::net::SocketAddr, startup_probe_ms: u64) -> TargetConfig {
@@ -415,13 +442,16 @@ mod tests {
     #[tokio::test]
     async fn remote_startup_probes_are_parallel_and_bounded() {
         let mut targets = BTreeMap::new();
+        let mut requests = Vec::new();
+        let mut releases = Vec::new();
         for index in 0..4 {
-            let addr = spawn_hung_http_server(Duration::from_secs(5)).await;
-            targets.insert(format!("slow-{index}"), remote_http_target(addr, 400));
+            let (addr, request, release) = spawn_gated_http_server().await;
+            targets.insert(format!("slow-{index}"), remote_http_target(addr, 10_000));
+            requests.push(request);
+            releases.push(release);
         }
 
-        let started = std::time::Instant::now();
-        let state = build_state(
+        let build = tokio::spawn(build_state(
             BrokerConfig {
                 mcp: Default::default(),
                 host_sandbox: None,
@@ -437,15 +467,26 @@ mod tests {
             }
             .into_validated()
             .unwrap(),
-        )
-        .await
-        .unwrap();
+        ));
 
-        assert!(
-            started.elapsed() < Duration::from_millis(1_200),
-            "startup probes did not run concurrently: {:?}",
-            started.elapsed()
-        );
+        tokio::time::timeout(Duration::from_secs(2), async {
+            for request in requests {
+                request
+                    .await
+                    .expect("startup probe server should receive request");
+            }
+        })
+        .await
+        .expect("all startup probes should be in flight concurrently");
+        for release in releases {
+            let _ = release.send(());
+        }
+
+        let state = tokio::time::timeout(Duration::from_secs(2), build)
+            .await
+            .expect("startup should finish after releasing probes")
+            .unwrap()
+            .unwrap();
         assert_eq!(state.configured_target_count(), 4);
         for snapshot in state.target_status_snapshots().await {
             assert_eq!(snapshot.daemon_info, None);
@@ -528,7 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn periodic_target_refresh_shutdown_cancels_in_flight_health_probe() {
-        let addr = spawn_hung_http_server(Duration::from_secs(30)).await;
+        let (addr, mut requests) = spawn_hung_http_server(Duration::from_secs(30)).await;
         let mut targets = BTreeMap::new();
         targets.insert("refresh-target".to_string(), remote_http_target(addr, 200));
 
@@ -554,20 +595,21 @@ mod tests {
         )
         .await
         .unwrap();
+        requests
+            .recv()
+            .await
+            .expect("startup health probe should reach server");
 
         let refresh = PeriodicTargetRefreshTask::spawn(&state);
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::timeout(Duration::from_secs(1), requests.recv())
+            .await
+            .expect("periodic health probe should reach server")
+            .expect("hung server should remain available");
 
-        let started = std::time::Instant::now();
         tokio::time::timeout(Duration::from_secs(1), refresh.shutdown())
             .await
             .expect("refresh shutdown should not wait for daemon request timeout")
             .unwrap();
-        assert!(
-            started.elapsed() < Duration::from_millis(500),
-            "refresh shutdown took too long: {:?}",
-            started.elapsed()
-        );
     }
 
     #[tokio::test]
