@@ -156,8 +156,7 @@ SessionSnapshot session_snapshot_locked(const LiveSession& session) {
 
 PollResult wait_for_session_activity(
     const std::shared_ptr<LiveSession>& session,
-    unsigned long timeout_ms,
-    unsigned long max_output_tokens
+    unsigned long timeout_ms
 ) {
     platform::MonotonicDeadline deadline(timeout_ms);
     BasicLockGuard session_lock(session->mutex_);
@@ -168,17 +167,13 @@ PollResult wait_for_session_activity(
         mark_session_exit_locked(session.get());
         const SessionSnapshot snapshot = session_snapshot_locked(*session);
         if (!snapshot.buffered_output.empty()) {
-            output += take_session_output_locked(session.get(), max_output_tokens);
+            output += take_session_output_locked(session.get());
             seen_generation = session->output_.generation;
         }
         if (snapshot.exited) {
             const SessionOutputDrainPolicy drain_policy = default_session_output_drain_policy();
-            const SessionOutputDrainResult drain_result = drain_exited_session_output_locked(
-                session.get(),
-                &output,
-                max_output_tokens,
-                drain_policy
-            );
+            const SessionOutputDrainResult drain_result =
+                drain_exited_session_output_locked(session.get(), &output, drain_policy);
             if (!drain_result.completed) {
                 return PollResult{output, false, 0, drain_result.reason};
             }
@@ -359,20 +354,6 @@ private:
     PendingStartReservation& operator=(const PendingStartReservation&);
 };
 
-void erase_session_if_current(
-    BasicMutex& mutex,
-    std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
-    const std::string& daemon_session_id,
-    const std::shared_ptr<LiveSession>& session
-) {
-    BasicLockGuard lock(mutex);
-    std::map<std::string, std::shared_ptr<LiveSession>>::iterator it =
-        sessions.find(daemon_session_id);
-    if (it != sessions.end() && it->second == session) {
-        sessions.erase(it);
-    }
-}
-
 bool remove_session_if_current(
     BasicMutex& mutex,
     std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
@@ -389,6 +370,16 @@ bool remove_session_if_current(
     *removed = it->second;
     sessions.erase(it);
     return true;
+}
+
+void erase_session_if_current(
+    BasicMutex& mutex,
+    std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
+    const std::string& daemon_session_id,
+    const std::shared_ptr<LiveSession>& session
+) {
+    std::shared_ptr<LiveSession> discard;
+    remove_session_if_current(mutex, sessions, daemon_session_id, session, &discard);
 }
 
 bool SessionStore::reserve_pending_start(unsigned long max_open_sessions) {
@@ -527,7 +518,7 @@ ExecSessionResult SessionStore::start_command(
             request.yield_time_ms
         );
         BasicLockGuard operation_lock(session->operation_mutex_);
-        poll_result = wait_for_session_activity(session, timeout_ms, request.max_output_tokens);
+        poll_result = wait_for_session_activity(session, timeout_ms);
     } catch (...) {
         retire_and_join_session(session);
         throw;
@@ -595,6 +586,7 @@ ExecSessionResult SessionStore::write_stdin(
     unsigned short pty_rows,
     unsigned short pty_cols
 ) {
+    (void)max_output_tokens;
     std::shared_ptr<LiveSession> session;
     {
         BasicLockGuard lock(mutex_);
@@ -644,7 +636,7 @@ ExecSessionResult SessionStore::write_stdin(
             chars.empty() ? yield_time.write_stdin_poll : yield_time.write_stdin_input;
         const unsigned long timeout_ms =
             resolve_yield_time_ms(operation_config, has_yield_time_ms, yield_time_ms);
-        poll_result = wait_for_session_activity(session, timeout_ms, max_output_tokens);
+        poll_result = wait_for_session_activity(session, timeout_ms);
     }
 
     if (poll_result.completed) {

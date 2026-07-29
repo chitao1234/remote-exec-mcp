@@ -112,7 +112,6 @@ static void assert_explicit_drain_stop_reasons() {
         const SessionOutputDrainResult result = drain_exited_session_output_locked(
             &session,
             &output,
-            DEFAULT_MAX_OUTPUT_TOKENS,
             test_drain_policy(100UL, 0UL, 0UL)
         );
         TEST_ASSERT(!result.completed);
@@ -128,7 +127,6 @@ static void assert_explicit_drain_stop_reasons() {
         const SessionOutputDrainResult second_result = drain_exited_session_output_locked(
             &session,
             &output,
-            DEFAULT_MAX_OUTPUT_TOKENS,
             test_drain_policy(100UL, 0UL, 0UL)
         );
         TEST_ASSERT(!second_result.completed);
@@ -149,7 +147,6 @@ static void assert_explicit_drain_stop_reasons() {
         const SessionOutputDrainResult result = drain_exited_session_output_locked(
             &session,
             &output,
-            DEFAULT_MAX_OUTPUT_TOKENS,
             test_drain_policy(100UL, 0UL, 0UL)
         );
         TEST_ASSERT(!result.completed);
@@ -165,7 +162,6 @@ static void assert_explicit_drain_stop_reasons() {
         const SessionOutputDrainResult second_result = drain_exited_session_output_locked(
             &session,
             &output,
-            DEFAULT_MAX_OUTPUT_TOKENS,
             test_drain_policy(100UL, 0UL, 0UL)
         );
         TEST_ASSERT(!second_result.completed);
@@ -184,12 +180,8 @@ static void assert_explicit_drain_stop_reasons() {
 
         std::string output;
         BasicLockGuard lock(session.mutex_);
-        const SessionOutputDrainResult result = drain_exited_session_output_locked(
-            &session,
-            &output,
-            DEFAULT_MAX_OUTPUT_TOKENS,
-            test_drain_policy(0UL, 0UL, 0UL)
-        );
+        const SessionOutputDrainResult result =
+            drain_exited_session_output_locked(&session, &output, test_drain_policy(0UL, 0UL, 0UL));
         TEST_ASSERT(result.completed);
         TEST_ASSERT(result.reason == SessionOutputDrainStopReason::PumpError);
         TEST_ASSERT(

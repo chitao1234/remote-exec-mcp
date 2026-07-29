@@ -28,11 +28,10 @@ struct SessionOutputDrainResult {
 SessionOutputDrainPolicy default_session_output_drain_policy();
 bool mark_session_exit_locked(LiveSession* session);
 void finish_session_output_locked(LiveSession* session, SessionOutputDrainStopReason reason);
-std::string take_session_output_locked(LiveSession* session, unsigned long max_output_tokens);
+std::string take_session_output_locked(LiveSession* session);
 SessionOutputDrainResult drain_exited_session_output_locked(
     LiveSession* session,
     std::string* output,
-    unsigned long max_output_tokens,
     const SessionOutputDrainPolicy& policy
 );
 void wait_for_generation_change_locked(

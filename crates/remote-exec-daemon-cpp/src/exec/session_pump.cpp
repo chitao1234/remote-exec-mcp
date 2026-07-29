@@ -115,8 +115,11 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
         std::string carry;
         std::string chunk;
         {
+            // Move the carry out under lock. The lock must be released before
+            // read_output because it is a blocking I/O call. The carry is
+            // moved back under lock after the call completes or throws.
             BasicLockGuard lock(session->mutex_);
-            carry = session->output_.decode_carry;
+            carry = std::move(session->output_.decode_carry);
         }
 
         try {
@@ -128,7 +131,7 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
                 std::string("session output pump failed: ") + ex.what()
             );
             BasicLockGuard lock(session->mutex_);
-            session->output_.decode_carry = carry;
+            session->output_.decode_carry = std::move(carry);
             finish_session_output_locked(session.get(), SessionOutputDrainStopReason::PumpError);
             session->retired = true;
             return;
@@ -138,7 +141,7 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
         if (session->closing) {
             return;
         }
-        session->output_.decode_carry = carry;
+        session->output_.decode_carry = std::move(carry);
         append_session_output_locked(session.get(), chunk);
         if (eof) {
             finish_session_output_locked(session.get(), SessionOutputDrainStopReason::OutputEof);
@@ -260,17 +263,15 @@ void join_session_pump(LiveSession* session) {
     join_daemon_thread(&thread);
 }
 
-std::string take_session_output_locked(LiveSession* session, unsigned long max_output_tokens) {
-    (void)max_output_tokens;
-    std::string output = session->output_.buffered_output;
-    session->output_.buffered_output.clear();
+std::string take_session_output_locked(LiveSession* session) {
+    std::string output;
+    output.swap(session->output_.buffered_output);
     return output;
 }
 
 SessionOutputDrainResult drain_exited_session_output_locked(
     LiveSession* session,
     std::string* output,
-    unsigned long max_output_tokens,
     const SessionOutputDrainPolicy& policy
 ) {
     ensure_session_drain_started_locked(session);
@@ -278,7 +279,7 @@ SessionOutputDrainResult drain_exited_session_output_locked(
     SessionOutputDrainStopReason grace_stop_reason = SessionOutputDrainStopReason::None;
     for (;;) {
         if (!session->output_.buffered_output.empty()) {
-            *output += take_session_output_locked(session, max_output_tokens);
+            *output += take_session_output_locked(session);
             note_session_drain_output_locked(session);
         }
         if (session->output_.eof) {
@@ -319,7 +320,7 @@ SessionOutputDrainResult drain_exited_session_output_locked(
 
     for (;;) {
         if (!session->output_.buffered_output.empty()) {
-            *output += take_session_output_locked(session, max_output_tokens);
+            *output += take_session_output_locked(session);
         }
         if (session->output_.eof) {
             return make_session_drain_result_locked(session, true, eof_stop_reason_locked(session));
