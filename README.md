@@ -558,7 +558,8 @@ Build paths:
 ```bash
 make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-2000
-make -C crates/remote-exec-daemon-cpp check-windows-xp OPENSSL_ROOT=/path/to/openssl-xp
+make -C crates/remote-exec-daemon-cpp prepare-openssl-xp OPENSSL_DEPS_DIR=/path/to/deps
+make -C crates/remote-exec-daemon-cpp check-windows-xp OPENSSL_ROOT=/path/to/deps/openssl-1.0.2u
 make -C crates/remote-exec-daemon-cpp check-windows-x64 OPENSSL_ROOT=/path/to/openssl-mingw64
 make -C crates/remote-exec-daemon-cpp check-windows-xp-ansi
 make -C crates/remote-exec-daemon-cpp check-windows-nt3x-ws1

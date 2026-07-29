@@ -12,6 +12,7 @@ configure_target=${OPENSSL_CONFIGURE_TARGET:-}
 configure_options=${OPENSSL_CONFIGURE_OPTIONS:-}
 jobs=${OPENSSL_JOBS:-1}
 make_command=${OPENSSL_BUILD_MAKE:-make}
+build_mode=${OPENSSL_BUILD_MODE:-default}
 
 mkdir -p "$(dirname "$archive")" "$deps_dir/src"
 
@@ -66,8 +67,19 @@ if [ ! -f "$install_dir/lib/libssl.a" ] && [ ! -f "$install_dir/lib/libssl.lib" 
             $configure_options \
             --prefix="$install_dir" --openssldir="$install_dir/ssl" --libdir=lib
     fi
-    "$make_command" -j "$jobs"
-    "$make_command" install_sw
+    if [ "$build_mode" = "static-libraries-only" ]; then
+        "$make_command" -j "$jobs" build_crypto build_ssl
+        mkdir -p "$install_dir/include" "$install_dir/lib"
+        rm -rf "$install_dir/include/openssl"
+        cp -R -L include/openssl "$install_dir/include/"
+        cp libssl.a libcrypto.a "$install_dir/lib/"
+    elif [ "$build_mode" = "default" ]; then
+        "$make_command" -j "$jobs"
+        "$make_command" install_sw
+    else
+        echo "unsupported OPENSSL_BUILD_MODE '$build_mode'" >&2
+        exit 1
+    fi
 fi
 
 printf '%s\n' "$install_dir"
