@@ -32,7 +32,7 @@ bool is_http_token_char(char ch) {
 }
 
 std::string trim_ascii(const std::string& raw) {
-    const std::string whitespace = " \t\r\n";
+    static const char* const whitespace = " \t\r\n";
     const std::size_t start = raw.find_first_not_of(whitespace);
     if (start == std::string::npos) {
         return "";

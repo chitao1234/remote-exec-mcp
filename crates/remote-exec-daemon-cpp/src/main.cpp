@@ -22,6 +22,9 @@ int main(int argc, char** argv) {
         );
         return run_server(config);
     } catch (const std::exception& ex) {
+        // log_message is suppressed when LOG_OFF is configured; keep the
+        // fprintf so fatal startup errors always reach stderr regardless of
+        // the configured log level.
         log_message(LOG_ERROR, "main", ex.what());
         std::fprintf(stderr, "%s\n", ex.what());
         return 1;

@@ -16,6 +16,14 @@
 #include "core/logging.h"
 #include "core/text_utils.h"
 
+// Component filter keys recognized in REMOTE_EXEC_LOG / RUST_LOG filter strings.
+// The "_xp" variants are legacy aliases kept for backward compatibility with
+// configs that used the XP-targeted binary name.
+static const char* const kFilterKeyFull = "remote_exec_daemon_cpp";
+static const char* const kFilterKeyShort = "daemon_cpp";
+static const char* const kFilterKeyXpFull = "remote_exec_daemon_xp";
+static const char* const kFilterKeyXpShort = "daemon_xp";
+
 static bool parse_level_token(const std::string& raw, LogLevel* level) {
     const std::string token = lowercase_ascii(trim_ascii(raw));
     if (token == "trace") {
@@ -80,8 +88,8 @@ static LogLevel parse_filter_value(const char* raw) {
 
         const std::string key = lowercase_ascii(trim_ascii(token.substr(0, equals)));
         const std::string value = token.substr(equals + 1);
-        if (key == "remote_exec_daemon_cpp" || key == "daemon_cpp" || key == "remote_exec_daemon_xp"
-            || key == "daemon_xp") {
+        if (key == kFilterKeyFull || key == kFilterKeyShort || key == kFilterKeyXpFull
+            || key == kFilterKeyXpShort) {
             LogLevel parsed = LOG_INFO;
             if (parse_level_token(value, &parsed)) {
                 component_level = parsed;
