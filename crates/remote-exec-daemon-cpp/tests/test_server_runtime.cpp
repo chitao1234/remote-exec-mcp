@@ -16,10 +16,16 @@
 #include "platform/platform.h"
 #include "runtime/server_runtime.h"
 #include "test_filesystem.h"
+#include "tls/tls_connection_transport.h"
 
 namespace fs = test_fs;
 
 static const unsigned long TEST_TIMEOUT_MS = 1000UL;
+
+static std::unique_ptr<ServerRuntime> start_runtime(
+    const DaemonConfig& config,
+    unsigned short* port
+);
 
 static DaemonConfig make_runtime_test_config(const fs::path& root) {
     DaemonConfig config;
@@ -139,6 +145,61 @@ static void assert_health_request(ServerRuntime& runtime, unsigned short port) {
     TEST_ASSERT(wait_for_active_connections(runtime.connection_manager(), 0UL, TEST_TIMEOUT_MS));
 }
 
+#ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
+static std::string read_all_from_transport(ConnectionTransport& client) {
+    std::string output;
+    char buffer[4096];
+    for (;;) {
+        TEST_ASSERT(client.wait_readable(TEST_TIMEOUT_MS) > 0);
+        const int received = client.read(buffer, sizeof(buffer));
+        if (received <= 0) {
+            break;
+        }
+        output.append(buffer, static_cast<std::size_t>(received));
+    }
+    return output;
+}
+
+static void assert_tls_health_request(const DaemonConfig& base_config) {
+    DaemonConfig config = base_config;
+    config.transport = "tls";
+    config.tls_cert_pem = "tests/fixtures/tls/server.pem";
+    config.tls_key_pem = "tests/fixtures/tls/server.key";
+    config.tls_ca_pem = "tests/fixtures/tls/ca.pem";
+    config.tls_pinned_client_cert_pem = "tests/fixtures/tls/client.pem";
+
+    unsigned short port = 0;
+    std::unique_ptr<ServerRuntime> runtime = start_runtime(config, &port);
+    UniqueSocket socket(connect_client(port));
+    DaemonConfig client_config;
+    client_config.reverse_tls_cert_pem = "tests/fixtures/tls/client.pem";
+    client_config.reverse_tls_key_pem = "tests/fixtures/tls/client.key";
+    client_config.reverse_tls_ca_pem = "tests/fixtures/tls/ca.pem";
+    const std::shared_ptr<TlsContext> context = make_tls_client_context(client_config);
+    std::shared_ptr<ConnectionTransport> client = make_tls_client_connection_transport(
+        std::move(socket),
+        context,
+        "localhost",
+        TEST_TIMEOUT_MS
+    );
+    TEST_ASSERT(wait_for_active_connections(runtime->connection_manager(), 1UL, TEST_TIMEOUT_MS));
+
+    send_all(
+        *client,
+        "POST /v1/health HTTP/1.1\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n"
+    );
+    const std::string response = read_all_from_transport(*client);
+    TEST_ASSERT(response.find("HTTP/1.1 200 OK\r\n") == 0);
+    TEST_ASSERT(response.find("\"status\":\"ok\"") != std::string::npos);
+    TEST_ASSERT(wait_for_active_connections(runtime->connection_manager(), 0UL, TEST_TIMEOUT_MS));
+    runtime->request_shutdown();
+    runtime->join();
+}
+#endif
+
 static std::unique_ptr<ServerRuntime> start_runtime(
     const DaemonConfig& config,
     unsigned short* port
@@ -223,4 +284,7 @@ int main() {
     assert_runtime_shutdown_with_idle_connection(config);
     assert_runtime_shutdown_with_blocked_request_body(config);
     assert_runtime_shutdown_with_upgraded_tunnel_connection(config);
+#ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
+    assert_tls_health_request(config);
+#endif
 }

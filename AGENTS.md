@@ -66,9 +66,10 @@ The architecture is intentionally split:
   by default, optional plain HTTP, command sessions, patching, text file
   reads/writes/edits, image reads, transfer import/export, sandbox checks, and
   v4 port-forward upgrade tunnels.
-- `remote-exec-daemon-cpp`: standalone plain-HTTP C++11 daemon. It shares the
-  broker-daemon protocol where implemented, supports native POSIX and legacy
-  Windows builds, and intentionally omits TLS and transfer compression.
+- `remote-exec-daemon-cpp`: standalone C++11 daemon. It shares the
+  broker-daemon protocol where implemented, supports optional OpenSSL mTLS,
+  explicit plain HTTP, native POSIX and legacy Windows builds, and
+  intentionally omits transfer compression.
 - `remote-exec-proto`: shared MCP tool schemas, broker-daemon RPC payloads,
   path helpers, sandbox helpers, and port-forward protocol types.
 - `remote-exec-admin`: operator CLI for certificate/bootstrap workflows.

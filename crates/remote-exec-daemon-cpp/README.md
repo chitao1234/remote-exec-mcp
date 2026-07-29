@@ -1,5 +1,10 @@
 # remote-exec-daemon-cpp
 
+The standalone C++11 daemon supports explicit plain HTTP by default and
+optional OpenSSL mutual TLS for direct listeners and reverse connections.
+TLS requires OpenSSL 1.0.2 or newer, negotiates TLS 1.2 or newer, and supports
+the OpenSSL 1.0.x, 1.1.x, and 3.x API families.
+
 Standalone C++11 daemon for `remote-exec-mcp`.
 
 This daemon is intentionally narrower than the Rust daemon, but it now has these
@@ -294,6 +299,34 @@ Use the same target names with `bmake ...` for the BSD make path.
 - `make test-host-sandbox`
 
 ## Run
+
+### TLS Build
+
+Use an installed OpenSSL:
+
+```sh
+make TLS=openssl OPENSSL_ROOT=/opt/openssl
+```
+
+Or prepare the checksum-pinned preferred OpenSSL 3.5.7 static dependency and
+build against it:
+
+```sh
+make prepare-openssl OPENSSL_JOBS=8
+make TLS=openssl OPENSSL_ROOT="$PWD/build/deps/openssl-3.5.7"
+```
+
+`prepare-openssl` accepts `OPENSSL_ARCHIVE` for offline use,
+`OPENSSL_CONFIGURE_TARGET` for cross builds, and
+`OPENSSL_CONFIGURE_OPTIONS` for target-specific OpenSSL options. It builds with
+`no-shared no-module no-tests no-asm`. External OpenSSL 1.x installs remain
+supported through `OPENSSL_ROOT`, `OPENSSL_CPPFLAGS`, and `OPENSSL_LDLIBS`.
+
+Windows TLS builds use the same `TLS=openssl` knob. GNU and NMAKE output/object
+names are TLS-tagged to avoid mixing objects from disabled and enabled builds.
+No Windows family, API-floor, or Winsock combination is rejected merely for
+enabling TLS; old combinations are best-effort and may fail in the selected
+OpenSSL/toolchain build because they are not all tested.
 
 POSIX:
 
@@ -626,9 +659,9 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 
 ## Limitations
 
-- plain HTTP only, with optional bearer-auth request authentication
+- TLS is opt-in at build time; `TLS=off` remains the default
 - daemon RPC is HTTP/1.1-only; sequential requests may reuse a persistent connection, but HTTP pipelining is not supported
-- no TLS support
+- OpenSSL older than 1.0.2 is rejected; TLS 1.0 and 1.1 are disabled
 - POSIX PTY support depends on host PTY allocation
 - Windows GNU PTY support depends on `winpty` being enabled for the build and
   available at runtime; Wine intentionally disables PTY capability reporting
@@ -668,5 +701,7 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
   denial, and unmatched hunks are rejected before writing, but runtime races and
   write/remove failures after preflight remain non-transactional and earlier
   executed actions remain applied
-- broker targets that point at this daemon must use `http://...` plus `allow_insecure_http = true`
-- optional `http_auth_bearer_token` can require `Authorization: Bearer ...` from the broker, but it still does not encrypt plain-HTTP traffic
+- broker targets use `https://...` for TLS builds; plain targets use
+  `http://...` plus `allow_insecure_http = true`
+- optional `http_auth_bearer_token` can additionally authenticate requests;
+  on plain HTTP it still does not encrypt traffic

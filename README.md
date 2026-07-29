@@ -66,9 +66,9 @@ drops daemon-local command sessions and forwarded sockets.
   serves v4 port-forward upgrade tunnels.
 - `remote-exec-host`: shared Rust host runtime reused by the Rust daemon and the
   broker-host `local` target.
-- `remote-exec-daemon-cpp`: standalone plain-HTTP C++11 daemon with native
-  POSIX, MinGW legacy Windows, host-native MSVC, and MSVC
-  v141_xp-compatible build paths.
+- `remote-exec-daemon-cpp`: standalone C++11 daemon with optional OpenSSL mTLS,
+  explicit plain HTTP, native POSIX, MinGW legacy Windows, host-native MSVC,
+  and MSVC v141_xp-compatible build paths.
 - `remote-exec-proto`: public MCP schemas, broker-daemon RPC schemas, path and
   sandbox helpers, and port-forward protocol types.
 - `remote-exec-admin`: administrative CLI for certificate/bootstrap workflows.
@@ -155,10 +155,9 @@ Daemon config covers:
   timing
 
 Reverse mode maintains a bounded adaptive lane pool because transfers and
-port-tunnel upgrades can occupy HTTP/1.1 connections for long periods. Rust
-reverse mode supports TLS and explicit insecure HTTP. The legacy-compatible C++
-daemon supports reverse mode over explicit plaintext HTTP only, matching its
-existing no-TLS transport boundary.
+port-tunnel upgrades can occupy HTTP/1.1 connections for long periods. Both
+daemons support reverse TLS and explicit insecure HTTP. The C++ daemon requires
+an OpenSSL-enabled build for TLS.
 
 `default_workdir` must already exist when a broker `[local]` target or daemon
 starts.
@@ -175,8 +174,9 @@ Rust broker and Rust daemon targets use mutual TLS by default:
 
 If the broker is built without `broker-tls`, it rejects `https://` daemon
 targets and `https://` broker URLs. If the Rust daemon is built without `tls`,
-it only supports `transport = "http"`. C++ daemon targets are plain HTTP and
-must be configured in the broker with `allow_insecure_http = true`.
+it only supports `transport = "http"`. The C++ daemon uses `TLS=off` by default;
+build with `TLS=openssl` and OpenSSL 1.0.2 or newer for direct and reverse mTLS.
+Plain C++ targets still require broker `allow_insecure_http = true`.
 
 Generated broker and daemon leaf certificates are usable for both direct and
 reverse TLS. The broker leaf has client-auth usage for direct daemon requests
@@ -515,7 +515,7 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 
 The C++ daemon intentionally supports a smaller surface than the Rust daemon:
 
-- plain HTTP only
+- optional OpenSSL direct/reverse mTLS, or explicit plain HTTP
 - no transfer compression
 - POSIX PTY support when the host can allocate a PTY
 - GNU Windows NT 4.0, Windows 2000, and XP API-floor builds can expose

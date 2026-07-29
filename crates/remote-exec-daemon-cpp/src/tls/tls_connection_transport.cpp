@@ -74,6 +74,9 @@ void configure_context_identity(
     if (!openssl_compat::set_minimum_tls12(context)) {
         throw std::runtime_error(openssl_compat::error_string("setting TLS minimum version"));
     }
+#ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
+    SSL_CTX_set_options(context, SSL_OP_IGNORE_UNEXPECTED_EOF);
+#endif
 }
 
 void verify_peer(SSL* ssl, const std::vector<unsigned char>& pinned_peer) {
@@ -319,7 +322,9 @@ private:
             }
             const int read_ready = wait_socket_readable(socket_.get(), TLS_PUMP_WAIT_MS);
             if (read_ready < 0 && !stopped()) {
-                fail(socket_error_message("waiting for TLS socket"));
+                BasicLockGuard lock(mutex_);
+                eof_ = true;
+                condition_.broadcast();
                 return;
             }
             (void)wait_socket_writable(socket_.get(), 1UL);
