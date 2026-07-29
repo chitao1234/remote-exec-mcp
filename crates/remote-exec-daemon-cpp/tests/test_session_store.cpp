@@ -790,7 +790,25 @@ static bool process_exists(pid_t pid) {
 
 static pid_t read_pid_file(const fs::path& path) {
     TEST_ASSERT(fs::exists(path));
-    return static_cast<pid_t>(std::strtol(fs::read_file_bytes(path).c_str(), NULL, 10));
+    const pid_t pid = static_cast<pid_t>(std::strtol(fs::read_file_bytes(path).c_str(), NULL, 10));
+    TEST_ASSERT(pid > 0);
+    return pid;
+}
+
+static bool wait_until_pid_file_ready(const fs::path& path, unsigned long timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
+        if (fs::exists(path)) {
+            const std::string contents = fs::read_file_bytes(path);
+            char* end = NULL;
+            const long pid = std::strtol(contents.c_str(), &end, 10);
+            if (pid > 0 && end != contents.c_str() && *end == '\0') {
+                return true;
+            }
+        }
+        platform::sleep_ms(10UL);
+    }
+    return false;
 }
 
 static bool wait_until_process_exits(pid_t pid, unsigned long timeout_ms) {
@@ -1235,6 +1253,7 @@ static void assert_posix_sigchld_reaper_reaps_exited_session_children(
     const unsigned long baseline_zombies = zombie_children_of_current_process();
     SessionStore zombie_store;
     const YieldTimeConfig fast_yield = fast_yield_time_config();
+    std::vector<std::string> session_ids;
     for (int index = 0; index < 5; ++index) {
         const Json running = start_test_command(
             zombie_store,
@@ -1248,6 +1267,10 @@ static void assert_posix_sigchld_reaper_reaps_exited_session_children(
             64UL
         );
         TEST_ASSERT(running.at("running").get<bool>());
+        session_ids.push_back(running.at("daemon_session_id").get<std::string>());
+    }
+    for (std::size_t index = 0; index < session_ids.size(); ++index) {
+        TEST_ASSERT(wait_until_session_exits(zombie_store, session_ids[index], fast_yield, 2000UL));
     }
 
     TEST_ASSERT(wait_until_zombie_delta_at_most(baseline_zombies, 0UL, 2000UL));
@@ -1775,8 +1798,8 @@ static void assert_session_store_destruction_terminates_process_group(
             64UL
         );
         TEST_ASSERT(running.at("running").get<bool>());
-        TEST_ASSERT(test_exec_pty::wait_until_file_contains(parent_pid_path, "", 2000UL));
-        TEST_ASSERT(test_exec_pty::wait_until_file_contains(child_pid_path, "", 2000UL));
+        TEST_ASSERT(wait_until_pid_file_ready(parent_pid_path, 2000UL));
+        TEST_ASSERT(wait_until_pid_file_ready(child_pid_path, 2000UL));
     }
 
     const pid_t parent_pid = read_pid_file(parent_pid_path);

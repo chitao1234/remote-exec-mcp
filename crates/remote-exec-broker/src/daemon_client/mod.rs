@@ -35,15 +35,13 @@ mod tests {
 
     fn test_client(authorization: Option<HeaderValue>) -> DaemonClient {
         crate::install_crypto_provider().unwrap();
-        DaemonClient {
-            client: reqwest::Client::builder().build().unwrap(),
-            target_name: DEFAULT_TEST_TARGET.to_string(),
-            base_url: "http://127.0.0.1:9".to_string(),
+        DaemonClient::from_test_client(
+            reqwest::Client::builder().build().unwrap(),
+            "http://127.0.0.1:9".to_string(),
             authorization,
-            request_timeout: crate::config::TargetTimeoutConfig::default().request_timeout(),
-            health_probe_timeout: crate::config::TargetTimeoutConfig::default()
-                .startup_probe_timeout(),
-        }
+            crate::config::TargetTimeoutConfig::default().request_timeout(),
+            crate::config::TargetTimeoutConfig::default().startup_probe_timeout(),
+        )
     }
 
     async fn hung_response_client(
@@ -59,14 +57,13 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(5)).await;
         });
 
-        let client = DaemonClient {
-            client: reqwest::Client::builder().build().unwrap(),
-            target_name: DEFAULT_TEST_TARGET.to_string(),
-            base_url: format!("http://{addr}"),
-            authorization: None,
-            request_timeout: timeout,
-            health_probe_timeout: timeout,
-        };
+        let client = DaemonClient::from_test_client(
+            reqwest::Client::builder().build().unwrap(),
+            format!("http://{addr}"),
+            None,
+            timeout,
+            timeout,
+        );
 
         (client, server)
     }
@@ -86,14 +83,13 @@ mod tests {
             write_json_response(&mut stream, &response_body).await;
         });
 
-        let client = DaemonClient {
-            client: reqwest::Client::builder().build().unwrap(),
-            target_name: DEFAULT_TEST_TARGET.to_string(),
-            base_url: format!("http://{addr}"),
-            authorization: None,
+        let client = DaemonClient::from_test_client(
+            reqwest::Client::builder().build().unwrap(),
+            format!("http://{addr}"),
+            None,
             request_timeout,
-            health_probe_timeout: request_timeout,
-        };
+            request_timeout,
+        );
 
         (client, server)
     }
@@ -193,7 +189,199 @@ mod tests {
                 .contains("daemon rpc `/v1/target-info` timed out after 50 ms"),
             "unexpected error: {err}"
         );
+        assert!(
+            err.to_string().contains(
+                "connection was retained after 1 consecutive timeout; request was not replayed"
+            ),
+            "unexpected recovery message: {err}"
+        );
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn consecutive_direct_timeouts_reset_connection_without_replay() {
+        crate::install_crypto_provider().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut hung_connections = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let request = read_http_request(&mut stream).await;
+                assert!(request.starts_with("POST /v1/target-info "));
+                hung_connections.push(stream);
+            }
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut stream).await;
+            assert!(request.starts_with("POST /v1/target-info "));
+            write_json_response(&mut stream, &target_info_response_body()).await;
+            drop(hung_connections);
+        });
+        let client = DaemonClient::from_test_client(
+            reqwest::Client::builder().build().unwrap(),
+            format!("http://{addr}"),
+            None,
+            Duration::from_millis(50),
+            Duration::from_millis(50),
+        );
+
+        let first = client.target_info().await.unwrap_err();
+        assert!(first.to_string().contains("connection was retained"));
+        let second = client.target_info().await.unwrap_err();
+        assert!(second.to_string().contains("connection was reset"));
+        assert!(second.to_string().contains("request was not replayed"));
+
+        let recovered = client.target_info().await.unwrap();
+        assert_eq!(recovered.daemon_instance_id, "daemon-retry");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn successful_response_clears_direct_timeout_streak() {
+        crate::install_crypto_provider().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut first, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut first).await;
+            assert!(request.starts_with("POST /v1/target-info "));
+
+            let (mut second, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut second).await;
+            assert!(request.starts_with("POST /v1/target-info "));
+            write_json_response(&mut second, &target_info_response_body()).await;
+            drop(second);
+
+            let (mut third, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut third).await;
+            assert!(request.starts_with("POST /v1/target-info "));
+            let _ = release_rx.await;
+            drop((first, third));
+        });
+        let client = DaemonClient::from_test_client(
+            reqwest::Client::builder().build().unwrap(),
+            format!("http://{addr}"),
+            None,
+            Duration::from_millis(50),
+            Duration::from_millis(50),
+        );
+
+        let first = client.target_info().await.unwrap_err();
+        assert!(first.to_string().contains("connection was retained"));
+        client.target_info().await.unwrap();
+        let third = client.target_info().await.unwrap_err();
+        assert!(third.to_string().contains("connection was retained"));
+        assert!(!third.to_string().contains("connection was reset;"));
+        let _ = release_tx.send(());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn response_headers_without_body_do_not_clear_timeout_streak() {
+        crate::install_crypto_provider().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut stalled_connections = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let request = read_http_request(&mut stream).await;
+                assert!(request.starts_with("POST /v1/target-info "));
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1024\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+                stalled_connections.push(stream);
+            }
+
+            let (mut recovered, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut recovered).await;
+            assert!(request.starts_with("POST /v1/target-info "));
+            write_json_response(&mut recovered, &target_info_response_body()).await;
+            drop(stalled_connections);
+        });
+        let client = DaemonClient::from_test_client(
+            reqwest::Client::builder().build().unwrap(),
+            format!("http://{addr}"),
+            None,
+            Duration::from_millis(50),
+            Duration::from_millis(50),
+        );
+
+        let first = client.target_info().await.unwrap_err();
+        assert!(first.to_string().contains("connection was retained"));
+        let second = client.target_info().await.unwrap_err();
+        assert!(second.to_string().contains("connection was reset"));
+        assert!(second.to_string().contains("request was not replayed"));
+
+        let recovered = client.target_info().await.unwrap();
+        assert_eq!(recovered.daemon_instance_id, "daemon-retry");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn response_body_read_timeouts_reset_connection_without_replay() {
+        crate::install_crypto_provider().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut stalled_connections = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let request = read_http_request(&mut stream).await;
+                assert!(request.starts_with("POST /v1/target-info "));
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1024\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+                stalled_connections.push(stream);
+            }
+
+            let (mut recovered, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut recovered).await;
+            assert!(request.starts_with("POST /v1/target-info "));
+            write_json_response(&mut recovered, &target_info_response_body()).await;
+            drop(stalled_connections);
+        });
+        let defaults = crate::config::TargetTimeoutConfig::default();
+        let client = DaemonClient::new(
+            DEFAULT_TEST_TARGET,
+            &crate::config::TargetConfig {
+                base_url: format!("http://{addr}"),
+                http_auth: None,
+                timeouts: crate::config::TargetTimeoutConfig {
+                    connect_ms: defaults.connect_ms,
+                    read_ms: 50,
+                    request_ms: 500,
+                    startup_probe_ms: 500,
+                },
+                ca_pem: None,
+                client_cert_pem: None,
+                client_key_pem: None,
+                allow_insecure_http: true,
+                skip_server_name_verification: false,
+                pinned_server_cert_pem: None,
+                expected_daemon_name: None,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+        let first = client.target_info().await.unwrap_err();
+        assert!(first.to_string().contains("connection was retained"));
+        let second = client.target_info().await.unwrap_err();
+        assert!(second.to_string().contains("connection was reset"));
+        assert!(second.to_string().contains("request was not replayed"));
+
+        let recovered = client.target_info().await.unwrap();
+        assert_eq!(recovered.daemon_instance_id, "daemon-retry");
+        server.await.unwrap();
     }
 
     #[tokio::test]
@@ -213,14 +401,13 @@ mod tests {
             write_json_response(&mut second, &target_info_response_body()).await;
         });
 
-        let client = DaemonClient {
-            client: reqwest::Client::builder().build().unwrap(),
-            target_name: DEFAULT_TEST_TARGET.to_string(),
-            base_url: format!("http://{addr}"),
-            authorization: None,
-            request_timeout: Duration::from_secs(5),
-            health_probe_timeout: Duration::from_secs(5),
-        };
+        let client = DaemonClient::from_test_client(
+            reqwest::Client::builder().build().unwrap(),
+            format!("http://{addr}"),
+            None,
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+        );
 
         let info = client.target_info().await.unwrap();
         assert_eq!(info.daemon_instance_id, "daemon-retry");
@@ -466,15 +653,13 @@ mod tests {
             assert_eq!(&preface, b"REPFWD1\n");
         });
 
-        let upgraded = DaemonClient {
-            client: reqwest::Client::builder().build().unwrap(),
-            target_name: DEFAULT_TEST_TARGET.to_string(),
-            base_url: format!("http://{addr}"),
-            authorization: None,
-            request_timeout: crate::config::TargetTimeoutConfig::default().request_timeout(),
-            health_probe_timeout: crate::config::TargetTimeoutConfig::default()
-                .startup_probe_timeout(),
-        }
+        let upgraded = DaemonClient::from_test_client(
+            reqwest::Client::builder().build().unwrap(),
+            format!("http://{addr}"),
+            None,
+            crate::config::TargetTimeoutConfig::default().request_timeout(),
+            crate::config::TargetTimeoutConfig::default().startup_probe_timeout(),
+        )
         .port_tunnel()
         .await
         .unwrap();

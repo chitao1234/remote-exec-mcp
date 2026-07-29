@@ -26,6 +26,9 @@ does not require repository knowledge.
 - Connectivity may be direct or daemon-initiated reverse mode. This is
   transparent to MCP callers; reverse-lane loss surfaces as ordinary target
   unavailability or transport failure.
+- Timed-out target operations return an error and are not replayed. After two
+  consecutive timeouts without a successful response, the broker resets the
+  target transport; one isolated timeout does not force a connection reset.
 - Choosing a target grants broad access on that machine unless static sandbox
   config narrows the relevant path operation.
 - A single command runs on one endpoint. Use `transfer_files` to move bytes

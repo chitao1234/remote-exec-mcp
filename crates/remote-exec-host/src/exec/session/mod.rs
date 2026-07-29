@@ -97,6 +97,31 @@ mod tests {
         session
     }
 
+    #[cfg(unix)]
+    fn descendant_pid(output: &str) -> nix::unistd::Pid {
+        let raw_pid = output
+            .trim()
+            .strip_prefix("ready:")
+            .expect("ready output should include descendant pid")
+            .parse::<i32>()
+            .expect("descendant pid should parse");
+        nix::unistd::Pid::from_raw(raw_pid)
+    }
+
+    #[cfg(unix)]
+    async fn wait_until_process_exits(pid: nix::unistd::Pid) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                match nix::sys::signal::kill(pid, None) {
+                    Err(nix::errno::Errno::ESRCH) => return,
+                    Ok(()) | Err(_) => tokio::time::sleep(Duration::from_millis(25)).await,
+                }
+            }
+        })
+        .await
+        .expect("descendant process should exit");
+    }
+
     #[tokio::test]
     async fn drain_after_exit_waits_for_delayed_pipe_output_until_channel_closes() {
         let (sender, receiver) = unbounded_channel();
@@ -123,17 +148,13 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn exec_session_termination_kills_pipe_process_group_descendants() {
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
 
         use crate::config::ProcessEnvironment;
 
         let tempdir = tempfile::tempdir().expect("tempdir");
-        let marker = tempdir.path().join("descendant-marker");
-        let script = format!(
-            "trap 'exit 0' TERM; (trap 'exit 0' TERM; while :; do touch {}; sleep 0.05; done) & echo ready; while :; do sleep 1; done",
-            marker.display()
-        );
-        let cmd = vec![TEST_SHELL.to_string(), "-c".to_string(), script];
+        let script = "trap 'exit 0' TERM; (trap 'exit 0' TERM; while :; do sleep 1; done) & echo ready:$!; while :; do sleep 1; done";
+        let cmd = vec![TEST_SHELL.to_string(), "-c".to_string(), script.to_string()];
 
         let mut session = super::spawn::spawn(
             &cmd,
@@ -147,48 +168,25 @@ mod tests {
             .wait_for_output(Duration::from_secs(2))
             .await
             .expect("wait should succeed");
-        match output {
-            super::live::OutputWait::Chunk(chunk) => assert!(chunk.contains("ready")),
+        let pid = match output {
+            super::live::OutputWait::Chunk(chunk) => descendant_pid(&chunk),
             _ => panic!("expected ready output"),
-        }
-
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while !marker.exists() && Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-        assert!(marker.exists(), "descendant did not create marker");
+        };
 
         session.terminate().await.expect("terminate should succeed");
-        let modified_after_terminate = std::fs::metadata(&marker)
-            .expect("marker metadata")
-            .modified()
-            .expect("marker modified time");
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        let modified_later = std::fs::metadata(&marker)
-            .expect("marker metadata after terminate")
-            .modified()
-            .expect("marker modified time after terminate");
-
-        assert_eq!(
-            modified_after_terminate, modified_later,
-            "descendant kept running after session termination"
-        );
+        wait_until_process_exits(pid).await;
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn live_session_drop_kills_pipe_process_group_descendants() {
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
 
         use crate::config::ProcessEnvironment;
 
         let tempdir = tempfile::tempdir().expect("tempdir");
-        let marker = tempdir.path().join("drop-descendant-marker");
-        let script = format!(
-            "trap 'exit 0' TERM; (trap 'exit 0' TERM; i=0; while [ \"$i\" -lt 100 ]; do touch {}; i=$((i + 1)); sleep 0.05; done) & echo ready; while :; do sleep 1; done",
-            marker.display()
-        );
-        let cmd = vec![TEST_SHELL.to_string(), "-c".to_string(), script];
+        let script = "trap 'exit 0' TERM; (trap 'exit 0' TERM; while :; do sleep 1; done) & echo ready:$!; while :; do sleep 1; done";
+        let cmd = vec![TEST_SHELL.to_string(), "-c".to_string(), script.to_string()];
 
         let mut session = super::spawn::spawn(
             &cmd,
@@ -202,31 +200,12 @@ mod tests {
             .wait_for_output(Duration::from_secs(2))
             .await
             .expect("wait should succeed");
-        match output {
-            super::live::OutputWait::Chunk(chunk) => assert!(chunk.contains("ready")),
+        let pid = match output {
+            super::live::OutputWait::Chunk(chunk) => descendant_pid(&chunk),
             _ => panic!("expected ready output"),
-        }
-
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while !marker.exists() && Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-        assert!(marker.exists(), "descendant did not create marker");
+        };
 
         drop(session);
-        let modified_after_drop = std::fs::metadata(&marker)
-            .expect("marker metadata")
-            .modified()
-            .expect("marker modified time");
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        let modified_later = std::fs::metadata(&marker)
-            .expect("marker metadata after drop")
-            .modified()
-            .expect("marker modified time after drop");
-
-        assert_eq!(
-            modified_after_drop, modified_later,
-            "descendant kept running after LiveSession drop"
-        );
+        wait_until_process_exits(pid).await;
     }
 }

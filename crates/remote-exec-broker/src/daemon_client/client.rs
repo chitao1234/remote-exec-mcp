@@ -1,3 +1,5 @@
+use std::sync::{Arc, RwLock};
+
 use remote_exec_proto::request_id::REQUEST_ID_HEADER;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, FileEditRequest, FileEditResponse,
@@ -7,12 +9,14 @@ use remote_exec_proto::rpc::{
 use reqwest::header::{AUTHORIZATION, HeaderValue};
 
 use crate::config::{TargetConfig, TargetTimeoutConfig, TargetTransportKind};
+use crate::reverse_transport::ReverseTargetConnection;
 
 use super::{
     DaemonClientError, RpcCallContext, RpcCallKind, RpcErrorDecodePolicy, decode_rpc_error,
 };
 
 const EXEC_RPC_TIMEOUT_MARGIN: std::time::Duration = std::time::Duration::from_secs(5);
+const CONSECUTIVE_TIMEOUTS_BEFORE_RESET: u8 = 2;
 
 macro_rules! trace_health_or_warn {
     ($path:expr, $($fields:tt)*) => {
@@ -26,12 +30,111 @@ macro_rules! trace_health_or_warn {
 
 #[derive(Clone)]
 pub struct DaemonClient {
-    pub(super) client: reqwest::Client,
+    connection: Arc<DaemonConnection>,
+    reverse_connection: Option<ReverseTargetConnection>,
     pub(super) target_name: String,
     pub(super) base_url: String,
     pub(super) authorization: Option<HeaderValue>,
     pub(super) request_timeout: std::time::Duration,
     pub(super) health_probe_timeout: std::time::Duration,
+}
+
+#[derive(Clone)]
+struct DaemonClientFactory {
+    target_config: TargetConfig,
+    reverse: bool,
+}
+
+impl DaemonClientFactory {
+    async fn build(&self) -> anyhow::Result<reqwest::Client> {
+        let timeouts = self.target_config.timeouts;
+        if self.reverse {
+            return apply_daemon_client_timeouts(reqwest::Client::builder(), timeouts)
+                .pool_max_idle_per_host(0)
+                .build()
+                .map_err(anyhow::Error::from);
+        }
+        match self.target_config.transport_kind() {
+            TargetTransportKind::Http => build_http_daemon_client(timeouts),
+            TargetTransportKind::Https => {
+                crate::broker_tls::build_daemon_https_client(&self.target_config).await
+            }
+        }
+    }
+}
+
+struct DaemonConnectionState {
+    client: reqwest::Client,
+    generation: u64,
+    consecutive_timeouts: u8,
+}
+
+struct DaemonConnection {
+    state: RwLock<DaemonConnectionState>,
+    recovery_lock: tokio::sync::Mutex<()>,
+    factory: DaemonClientFactory,
+}
+
+struct DaemonConnectionSnapshot {
+    client: reqwest::Client,
+    generation: u64,
+}
+
+enum TimeoutRecoveryOutcome {
+    Deferred { consecutive_timeouts: u8 },
+    Superseded,
+    Reset,
+}
+
+impl DaemonConnection {
+    fn snapshot(&self) -> DaemonConnectionSnapshot {
+        let state = self.state.read().expect("daemon connection lock poisoned");
+        DaemonConnectionSnapshot {
+            client: state.client.clone(),
+            generation: state.generation,
+        }
+    }
+
+    fn record_success(&self, generation: u64) {
+        let mut state = self.state.write().expect("daemon connection lock poisoned");
+        if state.generation == generation {
+            state.consecutive_timeouts = 0;
+        }
+    }
+
+    async fn recover_after_timeout(
+        &self,
+        expected_generation: Option<u64>,
+    ) -> anyhow::Result<TimeoutRecoveryOutcome> {
+        let _recovery_guard = self.recovery_lock.lock().await;
+        let recovery_generation = {
+            let mut state = self.state.write().expect("daemon connection lock poisoned");
+            if expected_generation
+                .is_some_and(|expected_generation| state.generation != expected_generation)
+            {
+                return Ok(TimeoutRecoveryOutcome::Superseded);
+            }
+            state.consecutive_timeouts = state.consecutive_timeouts.saturating_add(1);
+            if state.consecutive_timeouts < CONSECUTIVE_TIMEOUTS_BEFORE_RESET {
+                return Ok(TimeoutRecoveryOutcome::Deferred {
+                    consecutive_timeouts: state.consecutive_timeouts,
+                });
+            }
+            state.generation
+        };
+
+        let client = self.factory.build().await?;
+        let mut state = self.state.write().expect("daemon connection lock poisoned");
+        if state.generation != recovery_generation
+            || state.consecutive_timeouts < CONSECUTIVE_TIMEOUTS_BEFORE_RESET
+        {
+            return Ok(TimeoutRecoveryOutcome::Superseded);
+        }
+        state.client = client;
+        state.generation = state.generation.wrapping_add(1);
+        state.consecutive_timeouts = 0;
+        Ok(TimeoutRecoveryOutcome::Reset)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -52,23 +155,16 @@ impl DaemonClient {
     pub async fn new(
         target_name: impl Into<String>,
         config: &TargetConfig,
-        base_url_override: Option<&str>,
+        reverse_connection: Option<ReverseTargetConnection>,
     ) -> anyhow::Result<Self> {
         let target_name = target_name.into();
         crate::install_crypto_provider()?;
         let timeouts = config.timeouts;
-        let client = if base_url_override.is_some() {
-            apply_daemon_client_timeouts(reqwest::Client::builder(), timeouts)
-                .pool_max_idle_per_host(0)
-                .build()?
-        } else {
-            match config.transport_kind() {
-                TargetTransportKind::Http => build_http_daemon_client(timeouts)?,
-                TargetTransportKind::Https => {
-                    crate::broker_tls::build_daemon_https_client(config).await?
-                }
-            }
+        let factory = DaemonClientFactory {
+            target_config: config.clone(),
+            reverse: reverse_connection.is_some(),
         };
+        let client = factory.build().await?;
         let authorization = config
             .http_auth
             .as_ref()
@@ -76,13 +172,73 @@ impl DaemonClient {
             .transpose()?;
 
         Ok(Self {
-            client,
+            connection: Arc::new(DaemonConnection {
+                state: RwLock::new(DaemonConnectionState {
+                    client,
+                    generation: 0,
+                    consecutive_timeouts: 0,
+                }),
+                recovery_lock: tokio::sync::Mutex::new(()),
+                factory,
+            }),
+            base_url: reverse_connection.as_ref().map_or_else(
+                || config.base_url.clone(),
+                |connection| connection.base_url().into(),
+            ),
+            reverse_connection,
             target_name,
-            base_url: base_url_override.unwrap_or(&config.base_url).to_string(),
             authorization,
             request_timeout: timeouts.request_timeout(),
             health_probe_timeout: timeouts.startup_probe_timeout(),
         })
+    }
+
+    #[cfg(test)]
+    pub(super) fn from_test_client(
+        client: reqwest::Client,
+        base_url: String,
+        authorization: Option<HeaderValue>,
+        request_timeout: std::time::Duration,
+        health_probe_timeout: std::time::Duration,
+    ) -> Self {
+        let defaults = TargetTimeoutConfig::default();
+        let target_config = TargetConfig {
+            base_url: base_url.clone(),
+            http_auth: None,
+            timeouts: TargetTimeoutConfig {
+                connect_ms: defaults.connect_ms,
+                read_ms: defaults.read_ms,
+                request_ms: request_timeout.as_millis() as u64,
+                startup_probe_ms: health_probe_timeout.as_millis() as u64,
+            },
+            ca_pem: None,
+            client_cert_pem: None,
+            client_key_pem: None,
+            allow_insecure_http: true,
+            skip_server_name_verification: false,
+            pinned_server_cert_pem: None,
+            expected_daemon_name: None,
+        };
+        Self {
+            connection: Arc::new(DaemonConnection {
+                state: RwLock::new(DaemonConnectionState {
+                    client,
+                    generation: 0,
+                    consecutive_timeouts: 0,
+                }),
+                recovery_lock: tokio::sync::Mutex::new(()),
+                factory: DaemonClientFactory {
+                    target_config,
+                    reverse: false,
+                },
+            }),
+            reverse_connection: None,
+            target_name: remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET.to_string(),
+            base_url,
+            authorization,
+            request_timeout,
+            health_probe_timeout,
+        }
     }
 
     pub async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {
@@ -229,6 +385,7 @@ impl DaemonClient {
         Resp: serde::de::DeserializeOwned,
     {
         let started = std::time::Instant::now();
+        let connection = self.connection.snapshot();
         let context = RpcCallContext::path(
             &self.target_name,
             &self.base_url,
@@ -245,9 +402,16 @@ impl DaemonClient {
         let result = tokio::time::timeout(timeout, async {
             let mut retried = false;
             let response = loop {
-                let response = self.request(path).json(body).send().await;
+                let response = self
+                    .request_with_client(&connection.client, path)
+                    .json(body)
+                    .send()
+                    .await;
                 match response {
                     Ok(response) => {
+                        if !response.status().is_success() {
+                            self.connection.record_success(connection.generation);
+                        }
                         break self
                             .ensure_success(response, RpcErrorDecodePolicy::Strict, |status| {
                                 context.log_status_error(status)
@@ -266,6 +430,14 @@ impl DaemonClient {
                     }
                     Err(err) => {
                         context.log_transport_error(&err);
+                        if err.is_timeout() {
+                            let recovery = self
+                                .recover_connection_after_timeout(path, Some(connection.generation))
+                                .await;
+                            return Err(DaemonClientError::Transport(anyhow::anyhow!(
+                                "daemon rpc `{path}` timed out; {recovery}"
+                            )));
+                        }
                         return Err(DaemonClientError::Transport(err.into()));
                     }
                 }
@@ -274,6 +446,8 @@ impl DaemonClient {
             let decoded = self
                 .decode_json_response(
                     response,
+                    connection.generation,
+                    path,
                     |err| context.log_read_error(err),
                     |err| context.log_decode_error(err),
                 )
@@ -297,8 +471,11 @@ impl DaemonClient {
                     timeout_ms,
                     "daemon rpc timed out"
                 );
+                let recovery = self
+                    .recover_connection_after_timeout(path, Some(connection.generation))
+                    .await;
                 Err(DaemonClientError::Transport(anyhow::anyhow!(
-                    "daemon rpc `{path}` timed out after {timeout_ms} ms"
+                    "daemon rpc `{path}` timed out after {timeout_ms} ms; {recovery}"
                 )))
             }
         }
@@ -316,6 +493,8 @@ impl DaemonClient {
     pub(super) async fn send_request_with_policy<Send, LogTransport, LogStatus>(
         &self,
         send: Send,
+        connection_generation: u64,
+        operation: &str,
         decode_policy: RpcErrorDecodePolicy,
         log_transport_error: LogTransport,
         log_status_error: LogStatus,
@@ -325,10 +504,26 @@ impl DaemonClient {
         LogTransport: FnOnce(&reqwest::Error),
         LogStatus: FnOnce(reqwest::StatusCode),
     {
-        let response = send.await.map_err(|err| {
-            log_transport_error(&err);
-            DaemonClientError::Transport(err.into())
-        })?;
+        let response = match send.await {
+            Ok(response) => {
+                if !response.status().is_success() {
+                    self.connection.record_success(connection_generation);
+                }
+                response
+            }
+            Err(err) => {
+                log_transport_error(&err);
+                if err.is_timeout() {
+                    let recovery = self
+                        .recover_connection_after_timeout(operation, Some(connection_generation))
+                        .await;
+                    return Err(DaemonClientError::Transport(anyhow::anyhow!(
+                        "{operation} timed out; {recovery}"
+                    )));
+                }
+                return Err(DaemonClientError::Transport(err.into()));
+            }
+        };
         self.ensure_success(response, decode_policy, log_status_error)
             .await
     }
@@ -336,6 +531,8 @@ impl DaemonClient {
     pub(super) async fn decode_json_response<Resp, LogRead, LogDecode>(
         &self,
         response: reqwest::Response,
+        connection_generation: u64,
+        operation: &str,
         log_read_error: LogRead,
         log_decode_error: LogDecode,
     ) -> Result<Resp, DaemonClientError>
@@ -344,10 +541,22 @@ impl DaemonClient {
         LogRead: FnOnce(&reqwest::Error),
         LogDecode: FnOnce(&serde_json::Error),
     {
-        let bytes = response.bytes().await.map_err(|err| {
-            log_read_error(&err);
-            DaemonClientError::Decode(err.into())
-        })?;
+        let bytes = match response.bytes().await {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                log_read_error(&err);
+                if err.is_timeout() {
+                    let recovery = self
+                        .recover_connection_after_timeout(operation, Some(connection_generation))
+                        .await;
+                    return Err(DaemonClientError::Transport(anyhow::anyhow!(
+                        "{operation} timed out while reading the response body; {recovery}"
+                    )));
+                }
+                return Err(DaemonClientError::Decode(err.into()));
+            }
+        };
+        self.connection.record_success(connection_generation);
         serde_json::from_slice(&bytes).map_err(|err| {
             log_decode_error(&err);
             DaemonClientError::Decode(err.into())
@@ -390,10 +599,83 @@ impl DaemonClient {
         DaemonClientError::Transport(err.into())
     }
 
+    pub(crate) async fn recover_connection_after_timeout(
+        &self,
+        operation: &str,
+        expected_generation: Option<u64>,
+    ) -> String {
+        match self
+            .connection
+            .recover_after_timeout(expected_generation)
+            .await
+        {
+            Ok(TimeoutRecoveryOutcome::Deferred {
+                consecutive_timeouts,
+            }) => {
+                tracing::debug!(
+                    target = %self.target_name,
+                    base_url = %self.base_url,
+                    operation,
+                    consecutive_timeouts,
+                    "retained daemon connections after isolated timeout"
+                );
+                format!(
+                    "connection was retained after {consecutive_timeouts} consecutive timeout; request was not replayed"
+                )
+            }
+            Ok(TimeoutRecoveryOutcome::Superseded) => {
+                "connection recovery was already completed or no longer needed; request was not replayed"
+                    .to_string()
+            }
+            Ok(TimeoutRecoveryOutcome::Reset) => {
+                let dropped_reverse_lanes = if let Some(reverse) = &self.reverse_connection {
+                    reverse.reset_idle_connections().await
+                } else {
+                    0
+                };
+                tracing::warn!(
+                    target = %self.target_name,
+                    base_url = %self.base_url,
+                    operation,
+                    dropped_reverse_lanes,
+                    "reset daemon connection after timeout"
+                );
+                "connection was reset; request was not replayed".to_string()
+            }
+            Err(err) => {
+                tracing::warn!(
+                    target = %self.target_name,
+                    base_url = %self.base_url,
+                    operation,
+                    error = %err,
+                    "failed to reset daemon connection after timeout"
+                );
+                format!("connection reset failed: {err}; request was not replayed")
+            }
+        }
+    }
+
+    #[cfg(test)]
     pub(super) fn request(&self, path: &str) -> reqwest::RequestBuilder {
+        let connection = self.connection.snapshot();
+        self.request_with_client(&connection.client, path)
+    }
+
+    pub(super) fn request_with_generation(&self, path: &str) -> (reqwest::RequestBuilder, u64) {
+        let connection = self.connection.snapshot();
+        (
+            self.request_with_client(&connection.client, path),
+            connection.generation,
+        )
+    }
+
+    pub(super) fn record_connection_success(&self, generation: u64) {
+        self.connection.record_success(generation);
+    }
+
+    fn request_with_client(&self, client: &reqwest::Client, path: &str) -> reqwest::RequestBuilder {
         let request_id = crate::request_context::current_request_id().unwrap_or_default();
-        let mut request = self
-            .client
+        let mut request = client
             .post(format!("{}{}", self.base_url, path))
             .header(REQUEST_ID_HEADER, request_id.as_str());
         if let Some(authorization) = &self.authorization {

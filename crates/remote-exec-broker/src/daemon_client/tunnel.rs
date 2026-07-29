@@ -15,33 +15,78 @@ const PORT_TUNNEL_PREFACE_TIMEOUT: std::time::Duration = std::time::Duration::fr
 impl DaemonClient {
     pub async fn port_tunnel(&self) -> Result<reqwest::Upgraded, DaemonClientError> {
         let started = std::time::Instant::now();
-        let request = self
-            .request("/v1/port/tunnel")
+        let (request, connection_generation) = self.request_with_generation("/v1/port/tunnel");
+        let request = request
             .header(CONNECTION, "Upgrade")
             .header(UPGRADE, UPGRADE_TOKEN)
             .header(TUNNEL_PROTOCOL_VERSION_HEADER, TUNNEL_PROTOCOL_VERSION)
             .header(CONTENT_LENGTH, "0");
-        let response = tokio::time::timeout(PORT_TUNNEL_UPGRADE_TIMEOUT, request.send())
-            .await
-            .map_err(|_| {
-                DaemonClientError::Transport(anyhow::anyhow!("port tunnel upgrade timed out"))
-            })?
-            .map_err(|err| self.rpc_transport_error("/v1/port/tunnel", started, err))?;
+        let response = match tokio::time::timeout(PORT_TUNNEL_UPGRADE_TIMEOUT, request.send()).await
+        {
+            Ok(Ok(response)) => response,
+            Ok(Err(err)) if err.is_timeout() => {
+                let recovery = self
+                    .recover_connection_after_timeout(
+                        "port tunnel upgrade",
+                        Some(connection_generation),
+                    )
+                    .await;
+                return Err(DaemonClientError::Transport(anyhow::anyhow!(
+                    "port tunnel upgrade timed out; {recovery}"
+                )));
+            }
+            Ok(Err(err)) => {
+                return Err(self.rpc_transport_error("/v1/port/tunnel", started, err));
+            }
+            Err(_) => {
+                let recovery = self
+                    .recover_connection_after_timeout(
+                        "port tunnel upgrade",
+                        Some(connection_generation),
+                    )
+                    .await;
+                return Err(DaemonClientError::Transport(anyhow::anyhow!(
+                    "port tunnel upgrade timed out; {recovery}"
+                )));
+            }
+        };
         if response.status() != reqwest::StatusCode::SWITCHING_PROTOCOLS {
+            self.record_connection_success(connection_generation);
             return Err(decode_rpc_error(response, RpcErrorDecodePolicy::Lenient).await);
         }
-        let mut upgraded = tokio::time::timeout(PORT_TUNNEL_UPGRADE_TIMEOUT, response.upgrade())
-            .await
-            .map_err(|_| {
-                DaemonClientError::Transport(anyhow::anyhow!("port tunnel upgrade timed out"))
-            })?
+        let mut upgraded =
+            match tokio::time::timeout(PORT_TUNNEL_UPGRADE_TIMEOUT, response.upgrade()).await {
+                Ok(upgraded) => upgraded,
+                Err(_) => {
+                    let recovery = self
+                        .recover_connection_after_timeout(
+                            "port tunnel upgrade",
+                            Some(connection_generation),
+                        )
+                        .await;
+                    return Err(DaemonClientError::Transport(anyhow::anyhow!(
+                        "port tunnel upgrade timed out; {recovery}"
+                    )));
+                }
+            }
             .map_err(|err| DaemonClientError::Transport(err.into()))?;
-        tokio::time::timeout(PORT_TUNNEL_PREFACE_TIMEOUT, write_preface(&mut upgraded))
-            .await
-            .map_err(|_| {
-                DaemonClientError::Transport(anyhow::anyhow!("port tunnel preface timed out"))
-            })?
-            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        match tokio::time::timeout(PORT_TUNNEL_PREFACE_TIMEOUT, write_preface(&mut upgraded)).await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                let recovery = self
+                    .recover_connection_after_timeout(
+                        "port tunnel preface",
+                        Some(connection_generation),
+                    )
+                    .await;
+                return Err(DaemonClientError::Transport(anyhow::anyhow!(
+                    "port tunnel preface timed out; {recovery}"
+                )));
+            }
+        }
+        .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        self.record_connection_success(connection_generation);
         Ok(upgraded)
     }
 }

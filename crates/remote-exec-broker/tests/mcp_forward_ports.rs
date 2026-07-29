@@ -158,9 +158,11 @@ async fn forward_ports_forwards_local_udp_datagrams() {
 #[tokio::test]
 async fn forward_ports_keeps_forward_open_after_stream_connect_error() {
     let fixture = support::spawners::spawn_broker_local_only().await;
-    let destination_probe = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let destination_addr = destination_probe.local_addr().unwrap();
-    drop(destination_probe);
+    let destination_guard = tokio::net::TcpSocket::new_v4().unwrap();
+    destination_guard
+        .bind("127.0.0.1:0".parse().unwrap())
+        .unwrap();
+    let destination_addr = destination_guard.local_addr().unwrap();
 
     let open = open_tcp_forward(&fixture, "local", "local", destination_addr).await;
     let forward_id = forward_id_from(&open);
@@ -197,9 +199,7 @@ async fn forward_ports_keeps_forward_open_after_stream_connect_error() {
         None
     );
 
-    let echo_listener = tokio::net::TcpListener::bind(destination_addr)
-        .await
-        .unwrap();
+    let echo_listener = destination_guard.listen(1).unwrap();
     tokio::spawn(async move {
         let (mut stream, _) = echo_listener.accept().await.unwrap();
         let mut buf = [0u8; 64];

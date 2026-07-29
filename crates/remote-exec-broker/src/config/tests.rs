@@ -66,6 +66,19 @@ async fn load_accepts_non_reserved_target_names() {
 }
 
 #[tokio::test]
+async fn load_defaults_remote_request_timeout_for_long_operations() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = load_config(&dir, valid_target_config(DEFAULT_TEST_TARGET))
+        .await
+        .unwrap();
+    let timeouts = config.targets[DEFAULT_TEST_TARGET].timeouts;
+
+    assert_eq!(timeouts.request_ms, 310_000);
+    assert_eq!(timeouts.read_ms, 310_000);
+    assert_eq!(timeouts.startup_probe_ms, 10_000);
+}
+
+#[tokio::test]
 async fn load_accepts_remote_target_timeout_config() {
     let dir = tempfile::tempdir().unwrap();
     let config = load_config(

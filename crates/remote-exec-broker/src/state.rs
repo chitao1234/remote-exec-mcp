@@ -288,12 +288,18 @@ impl BrokerState {
         {
             Ok(result) => result,
             Err(_) => {
-                self.mark_remote_target_health_probe_timed_out(name, timeout)
-                    .await?;
-                anyhow::bail!(
-                    "target health probe timed out after {} ms",
+                let handle = self.configured_target(name)?;
+                let recovery = handle
+                    .recover_connection_after_timeout()
+                    .await
+                    .unwrap_or_else(|| "request was not replayed".to_string());
+                let error = format!(
+                    "target health probe timed out after {} ms; {recovery}",
                     timeout.as_millis()
                 );
+                self.mark_remote_target_health_probe_timed_out(name, error.clone())
+                    .await?;
+                anyhow::bail!(error);
             }
         }
     }
@@ -312,14 +318,14 @@ impl BrokerState {
     async fn mark_remote_target_health_probe_timed_out(
         &self,
         name: &str,
-        timeout: Duration,
+        error: String,
     ) -> anyhow::Result<()> {
         let handle = self.configured_target(name)?;
         anyhow::ensure!(
             handle.as_remote().is_some(),
             "target `{name}` is not a remote target"
         );
-        handle.mark_health_probe_timed_out(name, timeout).await;
+        handle.mark_health_probe_timed_out(name, error).await;
         Ok(())
     }
 

@@ -142,8 +142,9 @@ async fn build_remote_target_handle(
     target_config: &config::TargetConfig,
     reverse_transport: Option<&ReverseTransportManager>,
 ) -> anyhow::Result<TargetHandle> {
-    let reverse_base_url = reverse_transport.and_then(|transport| transport.base_url(name));
-    let client = DaemonClient::new(name.to_string(), target_config, reverse_base_url).await?;
+    let reverse_connection =
+        reverse_transport.and_then(|transport| transport.target_connection(name));
+    let client = DaemonClient::new(name.to_string(), target_config, reverse_connection).await?;
     match tokio::time::timeout(
         target_config.timeouts.startup_probe_timeout(),
         client.target_info(),
@@ -151,6 +152,9 @@ async fn build_remote_target_handle(
     .await
     {
         Err(_) => {
+            let _ = client
+                .recover_connection_after_timeout("startup identity probe", None)
+                .await;
             log_remote_target_startup_probe_timeout(name, target_config);
             Ok(TargetHandle::unavailable(
                 TargetBackend::remote(client),
@@ -370,23 +374,50 @@ mod tests {
         );
     }
 
-    async fn spawn_hung_http_server(delay: Duration) -> std::net::SocketAddr {
+    async fn spawn_hung_http_server(
+        delay: Duration,
+    ) -> (
+        std::net::SocketAddr,
+        tokio::sync::mpsc::UnboundedReceiver<()>,
+    ) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = tokio::sync::mpsc::unbounded_channel();
         tokio::spawn(async move {
             loop {
                 let (mut stream, _) = match listener.accept().await {
                     Ok(value) => value,
                     Err(_) => return,
                 };
+                let request_tx = request_tx.clone();
                 tokio::spawn(async move {
                     let mut buf = [0u8; 1024];
                     let _ = stream.read(&mut buf).await;
+                    let _ = request_tx.send(());
                     tokio::time::sleep(delay).await;
                 });
             }
         });
-        addr
+        (addr, request_rx)
+    }
+
+    async fn spawn_gated_http_server() -> (
+        std::net::SocketAddr,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf).await;
+            let _ = request_tx.send(());
+            let _ = release_rx.await;
+        });
+        (addr, request_rx, release_tx)
     }
 
     fn remote_http_target(addr: std::net::SocketAddr, startup_probe_ms: u64) -> TargetConfig {
@@ -411,13 +442,16 @@ mod tests {
     #[tokio::test]
     async fn remote_startup_probes_are_parallel_and_bounded() {
         let mut targets = BTreeMap::new();
+        let mut requests = Vec::new();
+        let mut releases = Vec::new();
         for index in 0..4 {
-            let addr = spawn_hung_http_server(Duration::from_secs(5)).await;
-            targets.insert(format!("slow-{index}"), remote_http_target(addr, 400));
+            let (addr, request, release) = spawn_gated_http_server().await;
+            targets.insert(format!("slow-{index}"), remote_http_target(addr, 10_000));
+            requests.push(request);
+            releases.push(release);
         }
 
-        let started = std::time::Instant::now();
-        let state = build_state(
+        let build = tokio::spawn(build_state(
             BrokerConfig {
                 mcp: Default::default(),
                 host_sandbox: None,
@@ -433,15 +467,26 @@ mod tests {
             }
             .into_validated()
             .unwrap(),
-        )
-        .await
-        .unwrap();
+        ));
 
-        assert!(
-            started.elapsed() < Duration::from_millis(1_200),
-            "startup probes did not run concurrently: {:?}",
-            started.elapsed()
-        );
+        tokio::time::timeout(Duration::from_secs(2), async {
+            for request in requests {
+                request
+                    .await
+                    .expect("startup probe server should receive request");
+            }
+        })
+        .await
+        .expect("all startup probes should be in flight concurrently");
+        for release in releases {
+            let _ = release.send(());
+        }
+
+        let state = tokio::time::timeout(Duration::from_secs(2), build)
+            .await
+            .expect("startup should finish after releasing probes")
+            .unwrap()
+            .unwrap();
         assert_eq!(state.configured_target_count(), 4);
         for snapshot in state.target_status_snapshots().await {
             assert_eq!(snapshot.daemon_info, None);
@@ -524,7 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn periodic_target_refresh_shutdown_cancels_in_flight_health_probe() {
-        let addr = spawn_hung_http_server(Duration::from_secs(30)).await;
+        let (addr, mut requests) = spawn_hung_http_server(Duration::from_secs(30)).await;
         let mut targets = BTreeMap::new();
         targets.insert("refresh-target".to_string(), remote_http_target(addr, 200));
 
@@ -550,24 +595,25 @@ mod tests {
         )
         .await
         .unwrap();
+        requests
+            .recv()
+            .await
+            .expect("startup health probe should reach server");
 
         let refresh = PeriodicTargetRefreshTask::spawn(&state);
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::timeout(Duration::from_secs(1), requests.recv())
+            .await
+            .expect("periodic health probe should reach server")
+            .expect("hung server should remain available");
 
-        let started = std::time::Instant::now();
         tokio::time::timeout(Duration::from_secs(1), refresh.shutdown())
             .await
             .expect("refresh shutdown should not wait for daemon request timeout")
             .unwrap();
-        assert!(
-            started.elapsed() < Duration::from_millis(500),
-            "refresh shutdown took too long: {:?}",
-            started.elapsed()
-        );
     }
 
     #[tokio::test]
-    async fn reverse_http_target_connects_after_broker_startup() {
+    async fn reverse_http_target_recovers_after_daemon_restart() {
         use crate::config::{HttpAuthConfig, ReverseListenerConfig, ReverseTransport};
         use remote_exec_daemon::config::{
             DaemonConfig, DaemonConnectionMode, DaemonTransport, ReverseConnectionConfig,
@@ -666,8 +712,9 @@ mod tests {
         .unwrap();
         let cancel = tokio_util::sync::CancellationToken::new();
         let daemon_cancel = cancel.clone();
+        let first_daemon = daemon.clone();
         let daemon_task = tokio::spawn(async move {
-            remote_exec_daemon::run_until(daemon, daemon_cancel.cancelled()).await
+            remote_exec_daemon::run_until(first_daemon, daemon_cancel.cancelled()).await
         });
 
         tokio::time::timeout(Duration::from_secs(5), async {
@@ -689,8 +736,50 @@ mod tests {
         })
         .await
         .expect("reverse target should become healthy");
+        let first_daemon_instance_id = state
+            .target_status_snapshots()
+            .await
+            .into_iter()
+            .find(|target| target.name == "reverse-target")
+            .and_then(|target| target.daemon_info)
+            .expect("reverse target info should be cached")
+            .daemon_instance_id;
+
         cancel.cancel();
         daemon_task.await.unwrap().unwrap();
+
+        let restart_cancel = tokio_util::sync::CancellationToken::new();
+        let restarted_daemon_cancel = restart_cancel.clone();
+        let restarted_daemon_task = tokio::spawn(async move {
+            remote_exec_daemon::run_until(daemon, restarted_daemon_cancel.cancelled()).await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let refreshed = state
+                    .refresh_remote_target_health_and_dependents("reverse-target")
+                    .await
+                    .is_ok();
+                let restarted = state
+                    .target_status_snapshots()
+                    .await
+                    .into_iter()
+                    .find(|target| target.name == "reverse-target")
+                    .is_some_and(|target| {
+                        target.healthy
+                            && target.daemon_info.is_some_and(|info| {
+                                info.daemon_instance_id != first_daemon_instance_id
+                            })
+                    });
+                if refreshed && restarted {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("reverse target should recover after daemon restart");
+        restart_cancel.cancel();
+        restarted_daemon_task.await.unwrap().unwrap();
     }
 
     #[cfg(feature = "broker-tls")]

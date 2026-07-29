@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::SessionStore;
 use crate::exec::session;
@@ -66,6 +66,44 @@ fn spawn_pipe_session(script: &str) -> session::LiveSession {
         &crate::config::ProcessEnvironment::capture_current(),
     )
     .expect("session should spawn")
+}
+
+async fn set_recency(store: &SessionStore, session_id: &str, last_touched_at: Instant) {
+    store
+        .inner
+        .write()
+        .await
+        .get_mut(session_id)
+        .expect("session should exist")
+        .last_touched_at = last_touched_at;
+}
+
+async fn wait_until_session_exits(store: &SessionStore, session_id: &str) {
+    let session = store
+        .inner
+        .read()
+        .await
+        .get(session_id)
+        .expect("session should exist")
+        .session
+        .clone();
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if session
+                .lock()
+                .await
+                .has_exited()
+                .await
+                .expect("session exit state should resolve")
+            {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("session should exit");
 }
 
 #[tokio::test]
@@ -159,17 +197,14 @@ async fn session_lock_timeout_returns_timed_out_for_busy_session() {
         .await;
     let lease = store.lock(session_id).await.expect("initial lease");
 
-    let started = std::time::Instant::now();
-    let result = store
-        .lock_with_timeout(session_id, Duration::from_millis(50))
-        .await;
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        store.lock_with_timeout(session_id, Duration::from_millis(50)),
+    )
+    .await
+    .expect("lock timeout should complete");
 
     assert_eq!(result.err(), Some(super::SessionLockError::TimedOut));
-    assert!(
-        started.elapsed() < Duration::from_secs(1),
-        "lock timeout took too long: {:?}",
-        started.elapsed()
-    );
 
     drop(lease);
     assert!(
@@ -190,7 +225,6 @@ async fn lock_refreshes_recency_so_older_live_session_is_pruned() {
             spawn_pipe_session(&sleep_script(2)),
         )
         .await;
-    tokio::time::sleep(Duration::from_millis(10)).await;
     store
         .insert(
             "session-2".to_string(),
@@ -198,12 +232,15 @@ async fn lock_refreshes_recency_so_older_live_session_is_pruned() {
         )
         .await;
 
+    let old_recency = Instant::now() - Duration::from_secs(2);
+    set_recency(&store, "session-1", old_recency).await;
+    set_recency(&store, "session-2", old_recency + Duration::from_secs(1)).await;
+
     let lease = store
         .lock("session-1")
         .await
         .expect("session-1 should exist");
     drop(lease);
-    tokio::time::sleep(Duration::from_millis(10)).await;
 
     store
         .insert(
@@ -226,7 +263,7 @@ async fn insert_prunes_exited_session_before_live_session() {
             spawn_pipe_session(completed_script()),
         )
         .await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    wait_until_session_exits(&store, "session-1").await;
     store
         .insert(
             "session-2".to_string(),
@@ -256,7 +293,12 @@ async fn insert_protects_eight_most_recent_sessions() {
                 spawn_pipe_session(&sleep_script(30)),
             )
             .await;
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        set_recency(
+            &store,
+            &format!("session-{index}"),
+            Instant::now() - Duration::from_secs((10 - index) as u64),
+        )
+        .await;
     }
 
     store.lock("session-9").await.expect("session-9");
@@ -303,7 +345,13 @@ async fn insert_prunes_oldest_exited_non_protected_session_before_live_one() {
             spawn_pipe_session(completed_script()),
         )
         .await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    wait_until_session_exits(&store, "session-0").await;
+    set_recency(
+        &store,
+        "session-0",
+        Instant::now() - Duration::from_secs(10),
+    )
+    .await;
 
     for index in 1..10 {
         store
@@ -312,7 +360,12 @@ async fn insert_prunes_oldest_exited_non_protected_session_before_live_one() {
                 spawn_pipe_session(&sleep_script(30)),
             )
             .await;
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        set_recency(
+            &store,
+            &format!("session-{index}"),
+            Instant::now() - Duration::from_secs((10 - index) as u64),
+        )
+        .await;
     }
 
     let outcome = store
