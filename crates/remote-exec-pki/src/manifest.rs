@@ -40,6 +40,8 @@ pub struct DevInitManifest {
     pub broker: KeyPairPaths,
     pub broker_common_name: String,
     pub daemons: BTreeMap<String, DaemonManifestEntry>,
+    pub reverse_broker: KeyPairPaths,
+    pub reverse_daemons: BTreeMap<String, KeyPairPaths>,
 }
 
 pub fn build_manifest(
@@ -48,6 +50,8 @@ pub fn build_manifest(
     ca: KeyPairPaths,
     broker: KeyPairPaths,
     daemons: BTreeMap<String, KeyPairPaths>,
+    reverse_broker: KeyPairPaths,
+    reverse_daemons: BTreeMap<String, KeyPairPaths>,
 ) -> anyhow::Result<DevInitManifest> {
     let daemon_entries = spec
         .daemon_specs
@@ -78,6 +82,8 @@ pub fn build_manifest(
         broker,
         broker_common_name: spec.broker_common_name.clone(),
         daemons: daemon_entries,
+        reverse_broker,
+        reverse_daemons,
     })
 }
 

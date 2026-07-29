@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <thread>
@@ -19,6 +20,7 @@ public:
     // listener and asks child owners to stop; join() consumes runtime threads
     // and waits for connection workers before final maintenance.
     void start_accept_loop();
+    void start_reverse_loop();
     void request_shutdown();
     void join();
     unsigned short bound_port() const;
@@ -32,6 +34,7 @@ public:
 
 private:
     void accept_loop();
+    void reverse_loop();
     void maintenance_loop();
 
     DaemonConfig config_;
@@ -46,4 +49,6 @@ private:
     bool shutting_down_;
     std::unique_ptr<std::thread> accept_thread_;
     std::unique_ptr<std::thread> maintenance_thread_;
+    std::atomic<unsigned long> reverse_live_;
+    std::atomic<unsigned long> reverse_busy_;
 };

@@ -49,6 +49,8 @@ mod tests {
             Arc::new(DaemonConfig {
                 target: DEFAULT_TEST_TARGET.to_string(),
                 listen: "127.0.0.1:9443".parse().unwrap(),
+                connection_mode: crate::config::DaemonConnectionMode::Listen,
+                reverse: None,
                 default_workdir: PathBuf::from("."),
                 windows_posix_root: None,
                 transport: DaemonTransport::Tls,

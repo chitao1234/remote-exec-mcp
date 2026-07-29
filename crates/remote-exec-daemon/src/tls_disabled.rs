@@ -3,14 +3,20 @@ use std::sync::Arc;
 
 use axum::Router;
 
-use crate::config::{DaemonConfig, DaemonTransport};
+use crate::config::{DaemonConfig, DaemonConnectionMode, DaemonTransport};
 
 pub(crate) fn install_crypto_provider() -> anyhow::Result<()> {
     Ok(())
 }
 
 pub(crate) fn validate_config(config: &DaemonConfig) -> anyhow::Result<()> {
-    if matches!(config.transport, DaemonTransport::Tls) {
+    if (matches!(config.connection_mode, DaemonConnectionMode::Listen)
+        && matches!(config.transport, DaemonTransport::Tls))
+        || config
+            .reverse
+            .as_ref()
+            .is_some_and(|reverse| matches!(reverse.transport, DaemonTransport::Tls))
+    {
         anyhow::bail!(super::FEATURE_REQUIRED_MESSAGE);
     }
 

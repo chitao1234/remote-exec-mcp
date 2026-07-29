@@ -12,6 +12,7 @@ use crate::{
     local,
     local::backend::LocalDaemonClient,
     port_forward,
+    reverse_transport::ReverseTransportManager,
     session_store::SessionStore,
     state::{BrokerStateInit, TargetHealthRefreshIntervals},
     target::{TargetBackend, TargetHandle, ensure_expected_daemon_name},
@@ -52,10 +53,11 @@ pub async fn run(config: config::ValidatedBrokerConfig) -> anyhow::Result<()> {
 pub async fn build_state(config: config::ValidatedBrokerConfig) -> anyhow::Result<BrokerState> {
     let config = config.into_inner();
     let host_sandbox = compile_host_sandbox(&config)?;
+    let reverse_transport = ReverseTransportManager::start(&config).await?;
     let mut targets = BTreeMap::new();
 
     insert_local_target(&config, &mut targets).await?;
-    insert_remote_targets(&config.targets, &mut targets).await?;
+    insert_remote_targets(&config.targets, reverse_transport.as_ref(), &mut targets).await?;
 
     Ok(BrokerState::new(BrokerStateInit {
         enable_transfer_compression: config.enable_transfer_compression,
@@ -74,6 +76,7 @@ pub async fn build_state(config: config::ValidatedBrokerConfig) -> anyhow::Resul
         sessions: SessionStore::default(),
         port_forwards: port_forward::PortForwardStore::default(),
         targets,
+        reverse_transport,
     }))
 }
 
@@ -115,6 +118,7 @@ async fn insert_local_target(
 
 async fn insert_remote_targets(
     target_configs: &BTreeMap<String, config::TargetConfig>,
+    reverse_transport: Option<&ReverseTransportManager>,
     targets: &mut BTreeMap<String, TargetHandle>,
 ) -> anyhow::Result<()> {
     let probes = target_configs
@@ -122,7 +126,7 @@ async fn insert_remote_targets(
         .map(|(name, target_config)| async move {
             (
                 name.clone(),
-                build_remote_target_handle(name, target_config).await,
+                build_remote_target_handle(name, target_config, reverse_transport).await,
             )
         });
 
@@ -136,8 +140,10 @@ async fn insert_remote_targets(
 async fn build_remote_target_handle(
     name: &str,
     target_config: &config::TargetConfig,
+    reverse_transport: Option<&ReverseTransportManager>,
 ) -> anyhow::Result<TargetHandle> {
-    let client = DaemonClient::new(name.to_string(), target_config).await?;
+    let reverse_base_url = reverse_transport.and_then(|transport| transport.base_url(name));
+    let client = DaemonClient::new(name.to_string(), target_config, reverse_base_url).await?;
     match tokio::time::timeout(
         target_config.timeouts.startup_probe_timeout(),
         client.target_info(),
@@ -335,6 +341,7 @@ mod tests {
                 tools: Default::default(),
                 port_forward_limits: Default::default(),
                 health_refresh: Default::default(),
+                reverse: None,
                 targets: BTreeMap::new(),
                 local: Some(LocalTargetConfig {
                     default_workdir: tempdir.path().to_path_buf(),
@@ -420,6 +427,7 @@ mod tests {
                 tools: Default::default(),
                 port_forward_limits: Default::default(),
                 health_refresh: Default::default(),
+                reverse: None,
                 targets,
                 local: None,
             }
@@ -456,6 +464,7 @@ mod tests {
                 tools: Default::default(),
                 port_forward_limits: Default::default(),
                 health_refresh: Default::default(),
+                reverse: None,
                 targets: BTreeMap::new(),
                 local: Some(LocalTargetConfig {
                     default_workdir: tempdir.path().to_path_buf(),
@@ -498,6 +507,7 @@ mod tests {
                 },
                 targets: BTreeMap::new(),
                 local: None,
+                reverse: None,
             }
             .into_validated()
             .unwrap(),
@@ -533,6 +543,7 @@ mod tests {
                 },
                 targets,
                 local: None,
+                reverse: None,
             }
             .into_validated()
             .unwrap(),
@@ -553,6 +564,383 @@ mod tests {
             "refresh shutdown took too long: {:?}",
             started.elapsed()
         );
+    }
+
+    #[tokio::test]
+    async fn reverse_http_target_connects_after_broker_startup() {
+        use crate::config::{HttpAuthConfig, ReverseListenerConfig, ReverseTransport};
+        use remote_exec_daemon::config::{
+            DaemonConfig, DaemonConnectionMode, DaemonTransport, ReverseConnectionConfig,
+        };
+
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let reverse_addr = probe.local_addr().unwrap();
+        drop(probe);
+        let token = "reverse-test-secret".to_string();
+        let auth = HttpAuthConfig {
+            bearer_token: token.clone(),
+        };
+        let mut targets = BTreeMap::new();
+        targets.insert(
+            "reverse-target".to_string(),
+            TargetConfig {
+                base_url: "reverse://".to_string(),
+                http_auth: Some(auth.clone()),
+                timeouts: TargetTimeoutConfig {
+                    startup_probe_ms: 50,
+                    ..Default::default()
+                },
+                ca_pem: None,
+                client_cert_pem: None,
+                client_key_pem: None,
+                allow_insecure_http: false,
+                skip_server_name_verification: false,
+                pinned_server_cert_pem: None,
+                expected_daemon_name: Some("reverse-target".to_string()),
+            },
+        );
+        let state = build_state(
+            BrokerConfig {
+                mcp: Default::default(),
+                targets,
+                local: None,
+                host_sandbox: None,
+                enable_transfer_compression: true,
+                transfer_limits: Default::default(),
+                disable_structured_content: false,
+                tools: Default::default(),
+                port_forward_limits: Default::default(),
+                health_refresh: Default::default(),
+                reverse: Some(ReverseListenerConfig {
+                    listen: reverse_addr,
+                    transport: ReverseTransport::Http,
+                    allow_insecure_http: true,
+                    tls: None,
+                    registration_timeout_ms: 1_000,
+                    lane_wait_timeout_ms: 1_000,
+                    max_connections: 16,
+                }),
+            }
+            .into_validated()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let workdir = tempfile::tempdir().unwrap();
+        let daemon = DaemonConfig {
+            target: "reverse-target".to_string(),
+            listen: "127.0.0.1:0".parse().unwrap(),
+            connection_mode: DaemonConnectionMode::Reverse,
+            reverse: Some(ReverseConnectionConfig {
+                broker_addr: reverse_addr.to_string(),
+                transport: DaemonTransport::Http,
+                allow_insecure_http: true,
+                bearer_token: Some(token),
+                min_idle_connections: 2,
+                max_connections: 8,
+                reconnect_min_ms: 10,
+                reconnect_max_ms: 100,
+                registration_timeout_ms: 1_000,
+                tls: None,
+            }),
+            default_workdir: workdir.path().to_path_buf(),
+            windows_posix_root: None,
+            transport: DaemonTransport::Http,
+            http_auth: Some(auth),
+            sandbox: None,
+            enable_transfer_compression: true,
+            transfer_limits: Default::default(),
+            max_open_sessions: remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS,
+            allow_login_shell: true,
+            pty: remote_exec_daemon::config::PtyMode::None,
+            default_shell: None,
+            yield_time: Default::default(),
+            port_forward_limits: Default::default(),
+            experimental_apply_patch_target_encoding_autodetect: false,
+            process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
+            tls: None,
+            request_timeout_ms: 30_000,
+        }
+        .into_validated()
+        .unwrap();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let daemon_cancel = cancel.clone();
+        let daemon_task = tokio::spawn(async move {
+            remote_exec_daemon::run_until(daemon, daemon_cancel.cancelled()).await
+        });
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if state
+                    .refresh_remote_target_health("reverse-target")
+                    .await
+                    .is_ok()
+                    && state
+                        .target_status_snapshots()
+                        .await
+                        .into_iter()
+                        .any(|target| target.name == "reverse-target" && target.healthy)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("reverse target should become healthy");
+        cancel.cancel();
+        daemon_task.await.unwrap().unwrap();
+    }
+
+    #[cfg(feature = "broker-tls")]
+    #[tokio::test]
+    async fn reverse_tls_target_uses_role_specific_certificates() {
+        use crate::config::{ReverseListenerConfig, ReverseListenerTlsConfig, ReverseTransport};
+        use remote_exec_daemon::config::{
+            DaemonConfig, DaemonConnectionMode, DaemonTransport, ReverseClientTlsConfig,
+            ReverseConnectionConfig,
+        };
+        use remote_exec_pki::{DaemonCertSpec, DevInitSpec};
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let bundle = remote_exec_pki::build_dev_init_bundle(&DevInitSpec {
+            ca_common_name: "reverse-test-ca".to_string(),
+            broker_common_name: "localhost".to_string(),
+            daemon_specs: vec![DaemonCertSpec::localhost("reverse-tls")],
+        })
+        .unwrap();
+        let manifest = remote_exec_pki::write_dev_init_bundle(
+            &DevInitSpec {
+                ca_common_name: "reverse-test-ca".to_string(),
+                broker_common_name: "localhost".to_string(),
+                daemon_specs: vec![DaemonCertSpec::localhost("reverse-tls")],
+            },
+            &bundle,
+            tempdir.path(),
+            true,
+        )
+        .unwrap();
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let reverse_addr = probe.local_addr().unwrap();
+        drop(probe);
+        let mut targets = BTreeMap::new();
+        targets.insert(
+            "reverse-tls".to_string(),
+            TargetConfig {
+                base_url: "reverse://".to_string(),
+                http_auth: None,
+                timeouts: TargetTimeoutConfig {
+                    startup_probe_ms: 50,
+                    ..Default::default()
+                },
+                ca_pem: None,
+                client_cert_pem: None,
+                client_key_pem: None,
+                allow_insecure_http: false,
+                skip_server_name_verification: false,
+                pinned_server_cert_pem: None,
+                expected_daemon_name: Some("reverse-tls".to_string()),
+            },
+        );
+        let state = build_state(
+            BrokerConfig {
+                mcp: Default::default(),
+                targets,
+                local: None,
+                host_sandbox: None,
+                enable_transfer_compression: true,
+                transfer_limits: Default::default(),
+                disable_structured_content: false,
+                tools: Default::default(),
+                port_forward_limits: Default::default(),
+                health_refresh: Default::default(),
+                reverse: Some(ReverseListenerConfig {
+                    listen: reverse_addr,
+                    transport: ReverseTransport::Tls,
+                    allow_insecure_http: false,
+                    tls: Some(ReverseListenerTlsConfig {
+                        cert_pem: manifest.reverse_broker.cert_pem.clone(),
+                        key_pem: manifest.reverse_broker.key_pem.clone(),
+                        ca_pem: manifest.ca.cert_pem.clone(),
+                    }),
+                    registration_timeout_ms: 2_000,
+                    lane_wait_timeout_ms: 2_000,
+                    max_connections: 16,
+                }),
+            }
+            .into_validated()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let reverse_daemon = &manifest.reverse_daemons["reverse-tls"];
+        let daemon = DaemonConfig {
+            target: "reverse-tls".to_string(),
+            listen: "127.0.0.1:0".parse().unwrap(),
+            connection_mode: DaemonConnectionMode::Reverse,
+            reverse: Some(ReverseConnectionConfig {
+                broker_addr: reverse_addr.to_string(),
+                transport: DaemonTransport::Tls,
+                allow_insecure_http: false,
+                bearer_token: None,
+                min_idle_connections: 2,
+                max_connections: 8,
+                reconnect_min_ms: 10,
+                reconnect_max_ms: 100,
+                registration_timeout_ms: 2_000,
+                tls: Some(ReverseClientTlsConfig {
+                    cert_pem: reverse_daemon.cert_pem.clone(),
+                    key_pem: reverse_daemon.key_pem.clone(),
+                    ca_pem: manifest.ca.cert_pem.clone(),
+                    server_name: "localhost".to_string(),
+                    pinned_server_cert_pem: None,
+                }),
+            }),
+            default_workdir: tempdir.path().to_path_buf(),
+            windows_posix_root: None,
+            transport: DaemonTransport::Http,
+            http_auth: None,
+            sandbox: None,
+            enable_transfer_compression: true,
+            transfer_limits: Default::default(),
+            max_open_sessions: remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS,
+            allow_login_shell: true,
+            pty: remote_exec_daemon::config::PtyMode::None,
+            default_shell: None,
+            yield_time: Default::default(),
+            port_forward_limits: Default::default(),
+            experimental_apply_patch_target_encoding_autodetect: false,
+            process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
+            tls: None,
+            request_timeout_ms: 30_000,
+        }
+        .into_validated()
+        .unwrap();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let daemon_cancel = cancel.clone();
+        let daemon_task = tokio::spawn(async move {
+            remote_exec_daemon::run_until(daemon, daemon_cancel.cancelled()).await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if state
+                    .refresh_remote_target_health("reverse-tls")
+                    .await
+                    .is_ok()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("reverse TLS target should become healthy");
+        cancel.cancel();
+        daemon_task.await.unwrap().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cpp_reverse_http_target_connects_after_broker_startup() {
+        use crate::config::{HttpAuthConfig, ReverseListenerConfig, ReverseTransport};
+
+        let binary = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../remote-exec-daemon-cpp/build/remote-exec-daemon-cpp");
+        if !binary.exists() {
+            return;
+        }
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let reverse_addr = probe.local_addr().unwrap();
+        drop(probe);
+        let token = "cpp-reverse-secret".to_string();
+        let auth = HttpAuthConfig {
+            bearer_token: token.clone(),
+        };
+        let mut targets = BTreeMap::new();
+        targets.insert(
+            "cpp-reverse".to_string(),
+            TargetConfig {
+                base_url: "reverse://".to_string(),
+                http_auth: Some(auth),
+                timeouts: TargetTimeoutConfig {
+                    startup_probe_ms: 50,
+                    ..Default::default()
+                },
+                ca_pem: None,
+                client_cert_pem: None,
+                client_key_pem: None,
+                allow_insecure_http: false,
+                skip_server_name_verification: false,
+                pinned_server_cert_pem: None,
+                expected_daemon_name: Some("cpp-reverse".to_string()),
+            },
+        );
+        let state = build_state(
+            BrokerConfig {
+                mcp: Default::default(),
+                targets,
+                local: None,
+                host_sandbox: None,
+                enable_transfer_compression: true,
+                transfer_limits: Default::default(),
+                disable_structured_content: false,
+                tools: Default::default(),
+                port_forward_limits: Default::default(),
+                health_refresh: Default::default(),
+                reverse: Some(ReverseListenerConfig {
+                    listen: reverse_addr,
+                    transport: ReverseTransport::Http,
+                    allow_insecure_http: true,
+                    tls: None,
+                    registration_timeout_ms: 1_000,
+                    lane_wait_timeout_ms: 1_000,
+                    max_connections: 16,
+                }),
+            }
+            .into_validated()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let config_path = tempdir.path().join("daemon.ini");
+        std::fs::write(
+            &config_path,
+            format!(
+                "target=cpp-reverse\nconnection_mode=reverse\nreverse_broker_host=127.0.0.1\nreverse_broker_port={}\nreverse_bearer_token={}\nreverse_min_idle_connections=2\nreverse_max_connections=8\nreverse_reconnect_ms=20\ndefault_workdir={}\nhttp_auth_bearer_token={}\n",
+                reverse_addr.port(),
+                token,
+                tempdir.path().display(),
+                token,
+            ),
+        )
+        .unwrap();
+        let mut child = tokio::process::Command::new(binary)
+            .arg(&config_path)
+            .env("REMOTE_EXEC_LOG", "off")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if state
+                    .refresh_remote_target_health("cpp-reverse")
+                    .await
+                    .is_ok()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("C++ reverse target should become healthy");
+        child.kill().await.unwrap();
+        let _ = child.wait().await;
     }
 
     #[cfg(not(feature = "broker-tls"))]
@@ -585,6 +973,7 @@ mod tests {
                 tools: Default::default(),
                 port_forward_limits: Default::default(),
                 health_refresh: Default::default(),
+                reverse: None,
                 targets,
                 local: None,
             }

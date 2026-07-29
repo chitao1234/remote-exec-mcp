@@ -7,6 +7,7 @@ pub mod image;
 pub mod logging;
 pub mod patch;
 pub mod port_forward;
+mod reverse;
 pub(crate) mod rpc_error;
 pub mod server;
 pub(crate) mod server_transport;
@@ -20,7 +21,7 @@ use std::future::pending;
 use std::sync::Arc;
 
 use anyhow::Result;
-use config::{DaemonConfig, ValidatedDaemonConfig};
+use config::{DaemonConfig, DaemonConnectionMode, ValidatedDaemonConfig};
 use remote_exec_proto::rpc::TargetInfoResponse;
 
 pub type AppState = remote_exec_host::HostRuntimeState;
@@ -46,8 +47,33 @@ where
     F: Future<Output = ()> + Send,
 {
     let daemon_config = Arc::new(config.into_inner());
-    let listener = server_transport::bind_listener(daemon_config.listen)?;
-    run_until_on_bound_listener(daemon_config, listener, shutdown).await
+    match daemon_config.connection_mode {
+        DaemonConnectionMode::Listen => {
+            let listener = server_transport::bind_listener(daemon_config.listen)?;
+            run_until_on_bound_listener(daemon_config, listener, shutdown).await
+        }
+        DaemonConnectionMode::Reverse => run_reverse_until(daemon_config, shutdown).await,
+    }
+}
+
+async fn run_reverse_until<F>(daemon_config: Arc<DaemonConfig>, shutdown: F) -> Result<()>
+where
+    F: Future<Output = ()> + Send,
+{
+    tls::install_crypto_provider()?;
+    let state = remote_exec_host::build_runtime_state(daemon_config.as_ref().into())?;
+    tracing::info!(
+        target = %daemon_config.target,
+        transport = ?daemon_config.reverse.as_ref().map(|reverse| reverse.transport),
+        daemon_instance_id = %state.daemon_instance_id(),
+        "starting daemon in reverse connection mode"
+    );
+    let shutdown_state = state.clone();
+    let shutdown = async move {
+        shutdown.await;
+        shutdown_state.cancel_shutdown();
+    };
+    reverse::serve(state, daemon_config, shutdown).await
 }
 
 pub async fn run_until_on_listener<F>(

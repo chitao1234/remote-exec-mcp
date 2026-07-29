@@ -13,7 +13,7 @@ use rustls::{
 };
 use tokio_rustls::TlsAcceptor;
 
-use crate::config::{DaemonConfig, DaemonTransport};
+use crate::config::{DaemonConfig, DaemonConnectionMode, DaemonTransport};
 use crate::http_serve::{AcceptStream, AcceptedStream, serve_http1_connections};
 
 pub(crate) const TLS_CONFIG_REQUIRED_MESSAGE: &str =
@@ -40,7 +40,9 @@ pub(crate) fn install_crypto_provider() -> anyhow::Result<()> {
 }
 
 pub(crate) fn validate_config(config: &DaemonConfig) -> anyhow::Result<()> {
-    if matches!(config.transport, DaemonTransport::Tls) {
+    if matches!(config.connection_mode, DaemonConnectionMode::Listen)
+        && matches!(config.transport, DaemonTransport::Tls)
+    {
         anyhow::ensure!(config.tls.is_some(), TLS_CONFIG_REQUIRED_MESSAGE);
     }
 

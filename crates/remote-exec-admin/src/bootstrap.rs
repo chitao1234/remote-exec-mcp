@@ -18,6 +18,11 @@ pub(crate) fn render_dev_init_output(manifest: &DevInitManifest) -> String {
         "- Broker key: {}\n",
         manifest.broker.key_pem.display()
     ));
+    output.push_str(&format!(
+        "- Reverse broker cert: {}\n- Reverse broker key: {}\n",
+        manifest.reverse_broker.cert_pem.display(),
+        manifest.reverse_broker.key_pem.display()
+    ));
 
     for (target, daemon) in &manifest.daemons {
         output.push_str(&format!(
@@ -54,6 +59,23 @@ expected_daemon_name = {expected_daemon_name}
             expected_daemon_name = toml_string(target),
         ));
     }
+
+    output.push_str("# Reverse broker config snippet:\n");
+    output.push_str(&format!(
+        r#"[reverse]
+listen = "0.0.0.0:9555"
+transport = "tls"
+
+[reverse.tls]
+cert_pem = {broker_cert}
+key_pem = {broker_key}
+ca_pem = {ca_pem}
+
+"#,
+        broker_cert = toml_string(&manifest.reverse_broker.cert_pem.display().to_string()),
+        broker_key = toml_string(&manifest.reverse_broker.key_pem.display().to_string()),
+        ca_pem = toml_string(&manifest.ca.cert_pem.display().to_string()),
+    ));
 
     output.push_str("Daemon config snippets:\n");
     for (target, daemon) in &manifest.daemons {
@@ -116,6 +138,19 @@ mod tests {
             },
         );
 
+        let reverse_daemons = daemons
+            .keys()
+            .map(|target| {
+                (
+                    target.clone(),
+                    KeyPairPaths {
+                        cert_pem: PathBuf::from(format!(r"C:\remote-exec\reverse\{target}.pem")),
+                        key_pem: PathBuf::from(format!(r"C:\remote-exec\reverse\{target}.key")),
+                    },
+                )
+            })
+            .collect();
+
         DevInitManifest {
             created_unix_seconds: 0,
             out_dir: PathBuf::from(r"C:\remote-exec\fixtures"),
@@ -129,6 +164,11 @@ mod tests {
             },
             broker_common_name: "remote-exec-broker".to_string(),
             daemons,
+            reverse_broker: KeyPairPaths {
+                cert_pem: PathBuf::from(r"C:\remote-exec\reverse\broker.pem"),
+                key_pem: PathBuf::from(r"C:\remote-exec\reverse\broker.key"),
+            },
+            reverse_daemons,
         }
     }
 

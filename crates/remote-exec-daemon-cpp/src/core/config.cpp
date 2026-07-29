@@ -383,7 +383,8 @@ static FilesystemSandbox read_sandbox(const ConfigValues& values) {
 
 static void validate_daemon_config(const DaemonConfig& config) {
     validate_existing_directory(config.default_workdir, "default_workdir");
-    if (config.listen_port == 0 && config.test_bound_addr_file.empty()) {
+    if (config.connection_mode == "listen" && config.listen_port == 0
+        && config.test_bound_addr_file.empty()) {
         throw std::runtime_error("listen_port = 0 requires test_bound_addr_file");
     }
     if (config.max_request_header_bytes == 0) {
@@ -420,9 +421,34 @@ unsigned long resolve_yield_time_ms(
 DaemonConfig load_config(const std::string& path) {
     const ConfigValues values = read_config_values(path);
     DaemonConfig config;
+    config.connection_mode = read_optional_string(values, "connection_mode", "listen");
     config.target = read_required_string(values, "target");
-    config.listen_host = read_required_string(values, "listen_host");
-    config.listen_port = read_listen_port(values);
+    if (config.connection_mode == "listen") {
+        config.listen_host = read_required_string(values, "listen_host");
+        config.listen_port = read_listen_port(values);
+    } else if (config.connection_mode == "reverse") {
+        config.reverse_broker_host = read_required_string(values, "reverse_broker_host");
+        config.reverse_broker_port = static_cast<int>(parse_unsigned_long(
+            read_required_string(values, "reverse_broker_port"),
+            "reverse_broker_port"
+        ));
+        config.reverse_bearer_token = read_required_string(values, "reverse_bearer_token");
+        config.reverse_min_idle_connections =
+            read_optional_unsigned_long(values, "reverse_min_idle_connections", 4UL);
+        config.reverse_max_connections =
+            read_optional_unsigned_long(values, "reverse_max_connections", 128UL);
+        config.reverse_reconnect_ms =
+            read_optional_unsigned_long(values, "reverse_reconnect_ms", 1000UL);
+        if (config.reverse_broker_port <= 0 || config.reverse_broker_port > 65535) {
+            throw std::runtime_error("reverse_broker_port must be between 1 and 65535");
+        }
+        if (config.reverse_min_idle_connections == 0UL
+            || config.reverse_min_idle_connections > config.reverse_max_connections) {
+            throw std::runtime_error("invalid reverse connection limits");
+        }
+    } else {
+        throw std::runtime_error("connection_mode must be listen or reverse");
+    }
     config.test_bound_addr_file = read_optional_string(values, "test_bound_addr_file", "");
     config.default_workdir = read_required_string(values, "default_workdir");
     config.default_shell = read_optional_string(values, "default_shell", "");

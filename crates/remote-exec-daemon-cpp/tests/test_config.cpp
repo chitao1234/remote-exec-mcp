@@ -152,6 +152,26 @@ int main() {
     TEST_ASSERT(config.target == "builder-cpp");
     TEST_ASSERT(config.listen_host == "0.0.0.0");
     TEST_ASSERT(config.listen_port == 8181);
+
+    const fs::path reverse_config_path = root / "daemon-cpp-reverse.ini";
+    write_text(
+        reverse_config_path,
+        "target = builder-cpp\n"
+        "connection_mode = reverse\n"
+        "reverse_broker_host = broker.example.com\n"
+        "reverse_broker_port = 9555\n"
+        "reverse_bearer_token = shared-secret\n"
+        "reverse_min_idle_connections = 3\n"
+        "reverse_max_connections = 12\n"
+        "default_workdir = "
+            + quote_config_value(default_workdir.string()) + "\n"
+    );
+    const DaemonConfig reverse_config = load_config(reverse_config_path.string());
+    TEST_ASSERT(reverse_config.connection_mode == "reverse");
+    TEST_ASSERT(reverse_config.reverse_broker_host == "broker.example.com");
+    TEST_ASSERT(reverse_config.reverse_broker_port == 9555);
+    TEST_ASSERT(reverse_config.reverse_min_idle_connections == 3UL);
+    TEST_ASSERT(reverse_config.reverse_max_connections == 12UL);
     TEST_ASSERT(config.default_workdir == spaced_workdir.string());
     TEST_ASSERT(config.default_shell == "/bin/sh");
     TEST_ASSERT(!config.allow_login_shell);

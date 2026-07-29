@@ -180,3 +180,16 @@ expected_daemon_name = "builder-xp"
 #default_ms = 250
 #max_ms = 30000
 #min_ms = 250
+
+# Reverse connection example (use `base_url = "reverse://"` for its targets):
+#[reverse]
+#listen = "0.0.0.0:9555"
+#transport = "tls"
+#registration_timeout_ms = 5000
+#lane_wait_timeout_ms = 30000
+#max_connections = 1024
+#
+#[reverse.tls]
+#cert_pem = "/etc/remote-exec/reverse/broker.pem"
+#key_pem = "/etc/remote-exec/reverse/broker.key"
+#ca_pem = "/etc/remote-exec/ca.pem"

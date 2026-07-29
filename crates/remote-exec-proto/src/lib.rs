@@ -4,6 +4,7 @@ pub mod port_forward;
 pub mod port_tunnel;
 pub mod public;
 pub mod request_id;
+pub mod reverse;
 pub mod rpc;
 pub mod sandbox;
 pub mod transfer;

@@ -9,6 +9,7 @@ mod mcp_server;
 mod port_forward;
 mod port_tunnel_io;
 mod request_context;
+mod reverse_transport;
 mod session_store;
 mod startup;
 mod state;

@@ -26,10 +26,23 @@ pub enum DaemonTransport {
     Http,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DaemonConnectionMode {
+    #[default]
+    Listen,
+    Reverse,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct DaemonConfig {
     pub target: String,
+    #[serde(default = "default_daemon_listen")]
     pub listen: SocketAddr,
+    #[serde(default)]
+    pub connection_mode: DaemonConnectionMode,
+    #[serde(default)]
+    pub reverse: Option<ReverseConnectionConfig>,
     pub default_workdir: PathBuf,
     #[serde(default)]
     pub windows_posix_root: Option<PathBuf>,
@@ -65,6 +78,39 @@ pub struct DaemonConfig {
     pub request_timeout_ms: u64,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReverseConnectionConfig {
+    pub broker_addr: String,
+    #[serde(default)]
+    pub transport: DaemonTransport,
+    #[serde(default)]
+    pub allow_insecure_http: bool,
+    #[serde(default)]
+    pub bearer_token: Option<String>,
+    #[serde(default = "default_reverse_min_idle_connections")]
+    pub min_idle_connections: usize,
+    #[serde(default = "default_reverse_max_connections")]
+    pub max_connections: usize,
+    #[serde(default = "default_reverse_reconnect_min_ms")]
+    pub reconnect_min_ms: u64,
+    #[serde(default = "default_reverse_reconnect_max_ms")]
+    pub reconnect_max_ms: u64,
+    #[serde(default = "default_reverse_registration_timeout_ms")]
+    pub registration_timeout_ms: u64,
+    #[serde(default)]
+    pub tls: Option<ReverseClientTlsConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReverseClientTlsConfig {
+    pub cert_pem: PathBuf,
+    pub key_pem: PathBuf,
+    pub ca_pem: PathBuf,
+    pub server_name: String,
+    #[serde(default)]
+    pub pinned_server_cert_pem: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ValidatedDaemonConfig(DaemonConfig);
 
@@ -98,6 +144,8 @@ impl From<HostRuntimeConfig> for DaemonConfig {
         Self {
             target,
             listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            connection_mode: DaemonConnectionMode::Listen,
+            reverse: None,
             default_workdir,
             windows_posix_root,
             transport: DaemonTransport::Http,
@@ -163,6 +211,60 @@ impl DaemonConfig {
             self.request_timeout_ms > 0,
             "request_timeout_ms must be greater than zero"
         );
+        match self.connection_mode {
+            DaemonConnectionMode::Listen => anyhow::ensure!(
+                self.reverse.is_none(),
+                "reverse config requires connection_mode = \"reverse\""
+            ),
+            DaemonConnectionMode::Reverse => {
+                let reverse = self
+                    .reverse
+                    .as_ref()
+                    .context("reverse config is required when connection_mode = \"reverse\"")?;
+                anyhow::ensure!(
+                    reverse.min_idle_connections > 0,
+                    "reverse.min_idle_connections must be greater than zero"
+                );
+                anyhow::ensure!(
+                    reverse.min_idle_connections <= reverse.max_connections,
+                    "reverse.min_idle_connections must not exceed reverse.max_connections"
+                );
+                anyhow::ensure!(
+                    reverse.reconnect_min_ms > 0
+                        && reverse.reconnect_min_ms <= reverse.reconnect_max_ms,
+                    "reverse reconnect bounds are invalid"
+                );
+                anyhow::ensure!(
+                    reverse.registration_timeout_ms > 0,
+                    "reverse.registration_timeout_ms must be greater than zero"
+                );
+                match reverse.transport {
+                    DaemonTransport::Tls => anyhow::ensure!(
+                        reverse.tls.is_some(),
+                        "reverse.tls is required for TLS reverse transport"
+                    ),
+                    DaemonTransport::Http => {
+                        anyhow::ensure!(
+                            reverse.allow_insecure_http,
+                            "reverse HTTP requires reverse.allow_insecure_http = true"
+                        );
+                        anyhow::ensure!(
+                            reverse.bearer_token.is_some(),
+                            "reverse HTTP requires reverse.bearer_token"
+                        );
+                    }
+                }
+                if reverse
+                    .tls
+                    .as_ref()
+                    .is_some_and(|tls| tls.pinned_server_cert_pem.is_some())
+                {
+                    anyhow::bail!(
+                        "reverse.tls.pinned_server_cert_pem is not supported; use CA and server_name verification"
+                    );
+                }
+            }
+        }
         crate::tls::validate_config(self)?;
         Ok(())
     }
@@ -184,6 +286,30 @@ impl DaemonConfig {
         let config: Self = toml::from_str(&text)?;
         config.into_validated()
     }
+}
+
+fn default_reverse_min_idle_connections() -> usize {
+    4
+}
+
+fn default_daemon_listen() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 0))
+}
+
+fn default_reverse_max_connections() -> usize {
+    128
+}
+
+fn default_reverse_reconnect_min_ms() -> u64 {
+    250
+}
+
+fn default_reverse_reconnect_max_ms() -> u64 {
+    10_000
+}
+
+fn default_reverse_registration_timeout_ms() -> u64 {
+    5_000
 }
 
 impl ValidatedDaemonConfig {

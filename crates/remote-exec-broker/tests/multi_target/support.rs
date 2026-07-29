@@ -457,6 +457,8 @@ expected_daemon_name = {expected_daemon_name}
         remote_exec_daemon::config::DaemonConfig {
             target: self.target.clone(),
             listen: self.backend_addr,
+            connection_mode: remote_exec_daemon::config::DaemonConnectionMode::Listen,
+            reverse: None,
             default_workdir: self.workdir.clone(),
             windows_posix_root: None,
             transport: remote_exec_daemon::config::DaemonTransport::Http,

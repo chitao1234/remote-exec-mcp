@@ -59,6 +59,8 @@ fn base_daemon_config(
     DaemonConfig {
         target: target.to_string(),
         listen,
+        connection_mode: remote_exec_daemon::config::DaemonConnectionMode::Listen,
+        reverse: None,
         default_workdir: default_workdir.to_path_buf(),
         windows_posix_root: None,
         transport: DaemonTransport::Http,

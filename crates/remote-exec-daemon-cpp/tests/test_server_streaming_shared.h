@@ -100,6 +100,7 @@ void close_tunnel(UniqueSocket* client_socket, std::thread* server_thread);
 void wait_until_bindable(const std::string& endpoint);
 
 void assert_http_streaming_routes(TestHttpConnectionHarness& harness, const fs::path& root);
+void assert_first_request_callback_waits_for_request(TestHttpConnectionHarness& harness);
 void assert_tunnel_rejects_invalid_requests(TestDaemonState& state);
 void assert_tunnel_open_ready_and_limits(TestDaemonState& state);
 void assert_tunnel_tcp_listener_and_connect_paths(TestDaemonState& state);

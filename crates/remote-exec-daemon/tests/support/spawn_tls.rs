@@ -46,6 +46,8 @@ async fn spawn_daemon_with_tls_pty_mode(
     let config = DaemonConfig {
         target: target.to_string(),
         listen: addr,
+        connection_mode: remote_exec_daemon::config::DaemonConnectionMode::Listen,
+        reverse: None,
         default_workdir: workdir.clone(),
         windows_posix_root: None,
         transport: DaemonTransport::Tls,
@@ -127,6 +129,8 @@ pub async fn spawn_daemon_with_pinned_client_cert(
     let config = DaemonConfig {
         target: target.to_string(),
         listen: addr,
+        connection_mode: remote_exec_daemon::config::DaemonConnectionMode::Listen,
+        reverse: None,
         default_workdir: workdir.clone(),
         windows_posix_root: None,
         transport: DaemonTransport::Tls,

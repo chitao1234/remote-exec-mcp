@@ -179,12 +179,17 @@ int handle_client_request(
 
 } // namespace
 
-void handle_client(const HttpConnectionContext& context, UniqueSocket client) {
+void handle_client(
+    const HttpConnectionContext& context,
+    UniqueSocket client,
+    const std::function<void()>& on_first_request
+) {
     HttpReadControl read_control;
     read_control.idle_timeout_ms = context.http_connection_idle_timeout_ms;
     read_control.poll_timeout_ms = HTTP_SHUTDOWN_READ_POLL_MS;
     read_control.stop_requested = [&context]() { return context.shutdown_requested.load(); };
 
+    bool first_request = true;
     for (;;) {
         try {
             set_socket_timeout_ms(client.get(), context.http_connection_idle_timeout_ms);
@@ -196,6 +201,12 @@ void handle_client(const HttpConnectionContext& context, UniqueSocket client) {
                     &request_head
                 )) {
                 return;
+            }
+            if (first_request) {
+                first_request = false;
+                if (on_first_request) {
+                    on_first_request();
+                }
             }
             set_socket_timeout_ms(client.get(), context.http_connection_idle_timeout_ms);
 

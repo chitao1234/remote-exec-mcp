@@ -46,6 +46,8 @@ pub struct GeneratedDevInitBundle {
     pub ca: GeneratedPemPair,
     pub broker: GeneratedPemPair,
     pub daemons: BTreeMap<String, GeneratedPemPair>,
+    pub reverse_broker: GeneratedPemPair,
+    pub reverse_daemons: BTreeMap<String, GeneratedPemPair>,
 }
 
 pub struct CertificateAuthority {
@@ -73,6 +75,14 @@ impl CertificateAuthority {
     pub fn issue_daemon_cert(&self, daemon: &DaemonCertSpec) -> anyhow::Result<GeneratedPemPair> {
         issue_daemon_cert(self, daemon)
     }
+
+    pub fn issue_reverse_broker_cert(&self, common_name: &str) -> anyhow::Result<GeneratedPemPair> {
+        issue_role_cert(self, common_name, ExtendedKeyUsagePurpose::ServerAuth, true)
+    }
+
+    pub fn issue_reverse_daemon_cert(&self, target: &str) -> anyhow::Result<GeneratedPemPair> {
+        issue_role_cert(self, target, ExtendedKeyUsagePurpose::ClientAuth, false)
+    }
 }
 
 impl fmt::Debug for CertificateAuthority {
@@ -95,16 +105,24 @@ pub fn build_dev_init_bundle_from_ca(
     spec.validate()?;
 
     let broker = ca.issue_broker_cert(&spec.broker_common_name)?;
+    let reverse_broker = ca.issue_reverse_broker_cert(&spec.broker_common_name)?;
     let mut daemons = BTreeMap::new();
+    let mut reverse_daemons = BTreeMap::new();
 
     for daemon in &spec.daemon_specs {
         daemons.insert(daemon.target.clone(), ca.issue_daemon_cert(daemon)?);
+        reverse_daemons.insert(
+            daemon.target.clone(),
+            ca.issue_reverse_daemon_cert(&daemon.target)?,
+        );
     }
 
     Ok(GeneratedDevInitBundle {
         ca: ca.pem_pair.clone(),
         broker,
         daemons,
+        reverse_broker,
+        reverse_daemons,
     })
 }
 
@@ -180,6 +198,29 @@ fn issue_daemon_cert(
     let params = daemon_params(daemon)?;
     let cert = params.signed_by(&key, &ca.issuer)?;
 
+    Ok(GeneratedPemPair {
+        cert_pem: cert.pem(),
+        key_pem: PrivateKeyPem::new(key.serialize_pem()),
+    })
+}
+
+fn issue_role_cert(
+    ca: &CertificateAuthority,
+    common_name: &str,
+    usage: ExtendedKeyUsagePurpose,
+    include_dns_san: bool,
+) -> anyhow::Result<GeneratedPemPair> {
+    let key = KeyPair::generate()?;
+    let mut params = CertificateParams::new(if include_dns_san {
+        vec![common_name.to_string()]
+    } else {
+        Vec::new()
+    })?;
+    params
+        .distinguished_name
+        .push(DnType::CommonName, common_name);
+    params.extended_key_usages = vec![usage];
+    let cert = params.signed_by(&key, &ca.issuer)?;
     Ok(GeneratedPemPair {
         cert_pem: cert.pem(),
         key_pem: PrivateKeyPem::new(key.serialize_pem()),

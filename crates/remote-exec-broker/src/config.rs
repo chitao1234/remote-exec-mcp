@@ -41,6 +41,40 @@ pub struct BrokerConfig {
     pub port_forward_limits: BrokerPortForwardLimits,
     #[serde(default)]
     pub health_refresh: BrokerHealthRefreshConfig,
+    #[serde(default)]
+    pub reverse: Option<ReverseListenerConfig>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ReverseTransport {
+    #[default]
+    Tls,
+    Http,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReverseListenerConfig {
+    pub listen: SocketAddr,
+    #[serde(default)]
+    pub transport: ReverseTransport,
+    #[serde(default)]
+    pub allow_insecure_http: bool,
+    #[serde(default)]
+    pub tls: Option<ReverseListenerTlsConfig>,
+    #[serde(default = "default_reverse_registration_timeout_ms")]
+    pub registration_timeout_ms: u64,
+    #[serde(default = "default_reverse_lane_wait_timeout_ms")]
+    pub lane_wait_timeout_ms: u64,
+    #[serde(default = "default_reverse_max_connections")]
+    pub max_connections: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReverseListenerTlsConfig {
+    pub cert_pem: PathBuf,
+    pub key_pem: PathBuf,
+    pub ca_pem: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -323,11 +357,27 @@ pub struct LocalTargetConfig {
 }
 
 impl TargetConfig {
+    pub(crate) fn is_reverse(&self) -> bool {
+        self.base_url == "reverse://"
+    }
+
     pub(crate) fn validate(&self, name: &str) -> anyhow::Result<()> {
         self.timeouts.validate(name)?;
 
         if let Some(http_auth) = &self.http_auth {
             http_auth.validate(&format!("target `{name}`"))?;
+        }
+
+        if self.is_reverse() {
+            anyhow::ensure!(
+                !self.skip_server_name_verification,
+                "target `{name}` cannot set skip_server_name_verification in reverse mode"
+            );
+            anyhow::ensure!(
+                self.pinned_server_cert_pem.is_none(),
+                "target `{name}` cannot set pinned_server_cert_pem in reverse mode; reverse TLS identity is bound by the client certificate common name"
+            );
+            return Ok(());
         }
 
         if self.base_url.starts_with("http://") {
@@ -466,6 +516,36 @@ impl BrokerConfig {
         self.port_forward_limits.validate()?;
         self.tools.validate()?;
         self.health_refresh.validate()?;
+        if let Some(reverse) = &self.reverse {
+            anyhow::ensure!(
+                reverse.registration_timeout_ms > 0,
+                "reverse.registration_timeout_ms must be greater than zero"
+            );
+            anyhow::ensure!(
+                reverse.lane_wait_timeout_ms > 0,
+                "reverse.lane_wait_timeout_ms must be greater than zero"
+            );
+            anyhow::ensure!(
+                reverse.max_connections > 0,
+                "reverse.max_connections must be greater than zero"
+            );
+            match reverse.transport {
+                ReverseTransport::Tls => anyhow::ensure!(
+                    reverse.tls.is_some(),
+                    "reverse.tls is required when reverse.transport = \"tls\""
+                ),
+                ReverseTransport::Http => {
+                    anyhow::ensure!(
+                        reverse.allow_insecure_http,
+                        "reverse plain HTTP requires reverse.allow_insecure_http = true"
+                    );
+                    anyhow::ensure!(
+                        reverse.tls.is_none(),
+                        "reverse.tls cannot be set when reverse.transport = \"http\""
+                    );
+                }
+            }
+        }
         anyhow::ensure!(
             !self.targets.contains_key(local::TARGET_NAME),
             "configured target name `{}` is reserved for broker-host filesystem access",
@@ -481,6 +561,22 @@ impl BrokerConfig {
         }
         for (name, target) in &self.targets {
             target.validate(name)?;
+            if target.is_reverse() {
+                anyhow::ensure!(
+                    self.reverse.is_some(),
+                    "target `{name}` uses reverse mode but broker reverse listener is not configured"
+                );
+                if self
+                    .reverse
+                    .as_ref()
+                    .is_some_and(|reverse| reverse.transport == ReverseTransport::Http)
+                {
+                    anyhow::ensure!(
+                        target.http_auth.is_some(),
+                        "reverse HTTP target `{name}` requires http_auth for lane registration"
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -526,6 +622,18 @@ fn default_allow_login_shell() -> bool {
 
 fn default_enable_transfer_compression() -> bool {
     true
+}
+
+fn default_reverse_registration_timeout_ms() -> u64 {
+    5_000
+}
+
+fn default_reverse_lane_wait_timeout_ms() -> u64 {
+    30_000
+}
+
+fn default_reverse_max_connections() -> usize {
+    1024
 }
 
 fn default_file_tool_read_limit_lines() -> u64 {

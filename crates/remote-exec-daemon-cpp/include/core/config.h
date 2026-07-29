@@ -88,6 +88,7 @@ struct PortForwardLimitConfig {
 };
 
 struct DaemonConfig {
+    std::string connection_mode = "listen";
     std::string target;
     std::string listen_host;
     int listen_port;
@@ -96,6 +97,12 @@ struct DaemonConfig {
     std::string default_shell;
     bool allow_login_shell;
     std::string http_auth_bearer_token;
+    std::string reverse_broker_host;
+    int reverse_broker_port = 0;
+    std::string reverse_bearer_token;
+    unsigned long reverse_min_idle_connections = 4UL;
+    unsigned long reverse_max_connections = 128UL;
+    unsigned long reverse_reconnect_ms = 1000UL;
     std::size_t max_request_header_bytes = DEFAULT_MAX_REQUEST_HEADER_BYTES;
     std::size_t max_request_body_bytes = DEFAULT_MAX_REQUEST_BODY_BYTES;
     unsigned long http_connection_idle_timeout_ms = DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS;

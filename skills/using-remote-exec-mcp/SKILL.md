@@ -23,6 +23,9 @@ does not require repository knowledge.
   bounded recheck for unavailable or unhealthy remote targets before returning.
 - A configured target can have `healthy: false` and `daemon_info: null`; stale
   daemon metadata is hidden while the target remains unhealthy.
+- Connectivity may be direct or daemon-initiated reverse mode. This is
+  transparent to MCP callers; reverse-lane loss surfaces as ordinary target
+  unavailability or transport failure.
 - Choosing a target grants broad access on that machine unless static sandbox
   config narrows the relevant path operation.
 - A single command runs on one endpoint. Use `transfer_files` to move bytes

@@ -8,6 +8,7 @@ int main() {
     initialize_state(state, root);
 
     assert_http_streaming_routes(connection, root);
+    assert_first_request_callback_waits_for_request(connection);
     assert_tunnel_rejects_invalid_requests(state);
     assert_tunnel_open_ready_and_limits(state);
     assert_tunnel_tcp_listener_and_connect_paths(state);

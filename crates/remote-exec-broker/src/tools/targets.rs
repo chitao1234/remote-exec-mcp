@@ -94,6 +94,7 @@ mod tests {
             sessions: SessionStore::default(),
             port_forwards: crate::port_forward::PortForwardStore::default(),
             targets: Default::default(),
+            reverse_transport: None,
         });
 
         let result = list_targets(&state, ListTargetsInput {}).await.unwrap();

@@ -76,6 +76,35 @@ static void send_request_and_close_writer(SOCKET socket, const std::string& requ
 #endif
 }
 
+void assert_first_request_callback_waits_for_request(TestHttpConnectionHarness& harness) {
+    ConnectedSocketPair sockets = make_connected_socket_pair();
+    UniqueSocket server_socket(std::move(sockets.first));
+    UniqueSocket client_socket(std::move(sockets.second));
+    std::atomic<bool> first_request(false);
+    std::thread server_thread(
+        [&harness, &first_request](SOCKET socket) {
+            handle_client(*harness.connection, UniqueSocket(socket), [&first_request]() {
+                first_request.store(true);
+            });
+        },
+        server_socket.release()
+    );
+
+    platform::sleep_ms(50UL);
+    TEST_ASSERT(!first_request.load());
+    send_all(
+        client_socket.get(),
+        "POST /v1/health HTTP/1.1\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n"
+    );
+    TEST_ASSERT(wait_until_true(first_request, 1000UL));
+    const std::string response = read_all_from_socket(client_socket.get());
+    TEST_ASSERT(response.find("HTTP/1.1 200 OK\r\n") == 0);
+    server_thread.join();
+}
+
 static std::string response_body(const std::string& response) {
     const std::size_t header_end = response.find("\r\n\r\n");
     TEST_ASSERT(header_end != std::string::npos);

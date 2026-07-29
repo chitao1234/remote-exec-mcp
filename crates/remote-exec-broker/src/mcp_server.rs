@@ -253,6 +253,7 @@ mod tool_router_contract_tests {
             sessions: Default::default(),
             port_forwards: Default::default(),
             targets: Default::default(),
+            reverse_transport: None,
         });
         let router = BrokerServer::new(state).tool_router;
         let names: std::collections::BTreeSet<_> = router

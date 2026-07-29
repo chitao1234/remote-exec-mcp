@@ -101,6 +101,9 @@ Important invariants:
   for one target is not valid for another target.
 - Broker-daemon RPC uses HTTP/1.1 JSON. Port forwarding uses daemon-private
   HTTP/1.1 Upgrade tunnels.
+- Targets may use direct connections or daemon-initiated reverse connections.
+  Reverse lanes feed the same HTTP/1.1 RPC and upgrade paths, preserving MCP
+  behavior and broker-owned ID namespaces.
 - `forward_ports` v4 uses `X-Remote-Exec-Port-Tunnel-Version: 4`. Header
   matching is case-insensitive; the protocol version is `4`.
 - v4 frame numbers 20 and 21 are reserved as `ForwardRecovering` and
@@ -119,6 +122,8 @@ Broker config covers:
 
 - MCP transport: stdio by default, or streamable HTTP with `listen` and `path`
 - one `[targets.<name>]` entry per daemon target
+- direct targets use an HTTP(S) URL; reverse targets use
+  `base_url = "reverse://"` plus the broker `[reverse]` listener
 - daemon base URL and expected daemon target name
 - mutual TLS client cert/key and CA paths for `https://` targets
 - explicit `allow_insecure_http = true` for plain-HTTP targets
@@ -131,10 +136,13 @@ Broker config covers:
 - optional structured-content toggle
 - optional default-hidden `read` / `write` / `edit` tools and limits
 - optional transfer and port-forward limits
+- optional dedicated reverse listener with TLS or explicit insecure HTTP and
+  bounded registration, lane-wait, and global connection limits
 
 Daemon config covers:
 
 - daemon `target` name and `listen` address
+- exclusive `connection_mode = "listen"` or `connection_mode = "reverse"`
 - default working directory
 - TLS transport by default, or explicit `transport = "http"`
 - TLS server cert/key and CA paths
@@ -143,6 +151,14 @@ Daemon config covers:
 - login-shell, PTY, default-shell, and Windows POSIX-root policy
 - optional static path sandbox
 - optional transfer, yield-time, and port-forward limits
+- reverse broker address, adaptive idle/maximum lane bounds, and reconnect
+  timing
+
+Reverse mode maintains a bounded adaptive lane pool because transfers and
+port-tunnel upgrades can occupy HTTP/1.1 connections for long periods. Rust
+reverse mode supports TLS and explicit insecure HTTP. The legacy-compatible C++
+daemon supports reverse mode over explicit plaintext HTTP only, matching its
+existing no-TLS transport boundary.
 
 `default_workdir` must already exist when a broker `[local]` target or daemon
 starts.
@@ -161,6 +177,13 @@ If the broker is built without `broker-tls`, it rejects `https://` daemon
 targets and `https://` broker URLs. If the Rust daemon is built without `tls`,
 it only supports `transport = "http"`. C++ daemon targets are plain HTTP and
 must be configured in the broker with `allow_insecure_http = true`.
+
+Reverse TLS uses separate role-specific certificates: the broker reverse
+listener has a server-auth certificate and each Rust daemon has a client-auth
+certificate whose common name equals its configured target. `dev-init`
+generates these under `reverse/` alongside the direct-mode files. Plain reverse
+mode requires the configured bearer token for lane registration and normal RPC
+authentication.
 
 Preferred development bootstrap:
 

@@ -17,6 +17,8 @@ fn startup_validation_config() -> DaemonConfig {
     DaemonConfig {
         target: DEFAULT_TEST_TARGET.to_string(),
         listen: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+        connection_mode: remote_exec_daemon::config::DaemonConnectionMode::Listen,
+        reverse: None,
         default_workdir: std::env::temp_dir(),
         windows_posix_root: None,
         transport: DaemonTransport::Http,

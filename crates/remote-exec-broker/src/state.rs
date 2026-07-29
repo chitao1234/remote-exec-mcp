@@ -33,6 +33,7 @@ pub(crate) struct BrokerStateInit {
     pub(crate) sessions: SessionStore,
     pub(crate) port_forwards: port_forward::PortForwardStore,
     pub(crate) targets: BTreeMap<String, TargetHandle>,
+    pub(crate) reverse_transport: Option<crate::reverse_transport::ReverseTransportManager>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -65,6 +66,7 @@ pub struct BrokerState {
     pub(crate) sessions: SessionStore,
     pub(crate) port_forwards: port_forward::PortForwardStore,
     targets: BTreeMap<String, TargetHandle>,
+    _reverse_transport: Option<crate::reverse_transport::ReverseTransportManager>,
 }
 
 pub(crate) struct TargetStatusSnapshot {
@@ -131,6 +133,7 @@ impl BrokerState {
             sessions: init.sessions,
             port_forwards: init.port_forwards,
             targets: init.targets,
+            _reverse_transport: init.reverse_transport,
         }
     }
 

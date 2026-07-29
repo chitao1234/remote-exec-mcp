@@ -365,6 +365,8 @@ pub(super) async fn spawn_named_daemon_on_listener(
     let daemon_config = remote_exec_daemon::config::DaemonConfig {
         target: state.target.clone(),
         listen: addr,
+        connection_mode: remote_exec_daemon::config::DaemonConnectionMode::Listen,
+        reverse: None,
         default_workdir: PathBuf::from("."),
         windows_posix_root: None,
         transport: remote_exec_daemon::config::DaemonTransport::Tls,

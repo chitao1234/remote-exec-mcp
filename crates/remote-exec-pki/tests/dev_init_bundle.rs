@@ -121,12 +121,34 @@ fn writes_dev_init_bundle_with_expected_paths() {
     assert_eq!(manifest.broker.cert_pem, out_dir.join("broker.pem"));
     assert_eq!(manifest.broker.key_pem, out_dir.join("broker.key"));
     assert_eq!(
+        manifest.reverse_broker.cert_pem,
+        out_dir.join("reverse").join("broker.pem")
+    );
+    assert_eq!(
+        manifest.reverse_broker.key_pem,
+        out_dir.join("reverse").join("broker.key")
+    );
+    assert_eq!(
         manifest.daemons["builder-a"].cert_pem(),
         out_dir.join("daemons").join("builder-a.pem").as_path()
     );
     assert_eq!(
         manifest.daemons["builder-a"].key_pem(),
         out_dir.join("daemons").join("builder-a.key").as_path()
+    );
+    assert_eq!(
+        manifest.reverse_daemons["builder-a"].cert_pem,
+        out_dir
+            .join("reverse")
+            .join("daemons")
+            .join("builder-a.pem")
+    );
+    assert_eq!(
+        manifest.reverse_daemons["builder-a"].key_pem,
+        out_dir
+            .join("reverse")
+            .join("daemons")
+            .join("builder-a.key")
     );
     assert!(out_dir.join("certs-manifest.json").exists());
 }

@@ -109,3 +109,20 @@ ca_pem = "/etc/remote-exec/ca.pem"
 # Optional exact broker leaf certificate pin. The PEM file may contain one or
 # more acceptable broker leaf certificates to ease rotation.
 #pinned_client_cert_pem = "/etc/remote-exec/pins/broker.pem"
+
+# Exclusive reverse connection example:
+#connection_mode = "reverse"
+#[reverse]
+#broker_addr = "broker.example.com:9555"
+#transport = "tls"
+#min_idle_connections = 4
+#max_connections = 128
+#reconnect_min_ms = 250
+#reconnect_max_ms = 10000
+#registration_timeout_ms = 5000
+#
+#[reverse.tls]
+#cert_pem = "/etc/remote-exec/reverse/daemons/builder-a.pem"
+#key_pem = "/etc/remote-exec/reverse/daemons/builder-a.key"
+#ca_pem = "/etc/remote-exec/ca.pem"
+#server_name = "remote-exec-broker"

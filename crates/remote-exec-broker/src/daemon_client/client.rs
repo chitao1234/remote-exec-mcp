@@ -52,14 +52,21 @@ impl DaemonClient {
     pub async fn new(
         target_name: impl Into<String>,
         config: &TargetConfig,
+        base_url_override: Option<&str>,
     ) -> anyhow::Result<Self> {
         let target_name = target_name.into();
         crate::install_crypto_provider()?;
         let timeouts = config.timeouts;
-        let client = match config.transport_kind() {
-            TargetTransportKind::Http => build_http_daemon_client(timeouts)?,
-            TargetTransportKind::Https => {
-                crate::broker_tls::build_daemon_https_client(config).await?
+        let client = if base_url_override.is_some() {
+            apply_daemon_client_timeouts(reqwest::Client::builder(), timeouts)
+                .pool_max_idle_per_host(0)
+                .build()?
+        } else {
+            match config.transport_kind() {
+                TargetTransportKind::Http => build_http_daemon_client(timeouts)?,
+                TargetTransportKind::Https => {
+                    crate::broker_tls::build_daemon_https_client(config).await?
+                }
             }
         };
         let authorization = config
@@ -71,7 +78,7 @@ impl DaemonClient {
         Ok(Self {
             client,
             target_name,
-            base_url: config.base_url.clone(),
+            base_url: base_url_override.unwrap_or(&config.base_url).to_string(),
             authorization,
             request_timeout: timeouts.request_timeout(),
             health_probe_timeout: timeouts.startup_probe_timeout(),
