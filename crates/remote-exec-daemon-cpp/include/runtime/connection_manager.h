@@ -8,6 +8,8 @@
 #include "platform/basic_mutex.h"
 #include "platform/socket.h"
 
+class ConnectionTransport;
+
 class ConnectionManager {
 public:
     explicit ConnectionManager(unsigned long max_active_connections);
@@ -18,6 +20,10 @@ public:
     // wait_for_all() are the only join paths. Worker code owns request handling,
     // while this manager supervises thread lifetime.
     bool try_start(UniqueSocket client, std::function<void(SOCKET)> worker_main);
+    bool try_start_transport(
+        const std::shared_ptr<ConnectionTransport>& client,
+        std::function<void(const std::shared_ptr<ConnectionTransport>&)> worker_main
+    );
     void begin_shutdown();
     void reap_finished();
     void wait_for_all();

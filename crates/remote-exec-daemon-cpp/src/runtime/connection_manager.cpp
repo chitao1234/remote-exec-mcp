@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "core/logging.h"
+#include "http/connection_transport.h"
 #include "runtime/daemon_thread.h"
 
 namespace {
@@ -38,14 +39,17 @@ struct ConnectionManager::WorkerRecord {
     WorkerRecord(
         unsigned long worker_id_value,
         SOCKET socket_value,
-        std::function<void(SOCKET)> worker_main_value
+        std::function<void()> worker_main_value,
+        const std::shared_ptr<ConnectionTransport>& transport_value
     )
         : worker_id(worker_id_value), socket(socket_value),
-          worker_main(std::move(worker_main_value)), finished(false), thread() {}
+          worker_main(std::move(worker_main_value)), transport(transport_value), finished(false),
+          thread() {}
 
     unsigned long worker_id;
     SOCKET socket;
-    std::function<void(SOCKET)> worker_main;
+    std::function<void()> worker_main;
+    std::shared_ptr<ConnectionTransport> transport;
     BasicMutex state_mutex;
     bool finished;
     std::unique_ptr<std::thread> thread;
@@ -61,7 +65,7 @@ ConnectionManager::~ConnectionManager() {
 }
 
 void ConnectionManager::run_worker(const std::shared_ptr<WorkerRecord>& record) {
-    record->worker_main(record->socket);
+    record->worker_main();
     {
         BasicLockGuard lock(record->state_mutex);
         record->socket = INVALID_SOCKET;
@@ -74,7 +78,12 @@ void ConnectionManager::run_worker(const std::shared_ptr<WorkerRecord>& record) 
 void ConnectionManager::close_worker_socket(const std::shared_ptr<WorkerRecord>& record) {
     BasicLockGuard state_lock(record->state_mutex);
     if (record->socket != INVALID_SOCKET) {
-        close_socket(record->socket);
+        if (record->transport) {
+            record->transport->shutdown();
+            record->transport.reset();
+        } else {
+            close_socket(record->socket);
+        }
         record->socket = INVALID_SOCKET;
     }
 }
@@ -84,11 +93,18 @@ void ConnectionManager::shutdown_worker_socket(const std::shared_ptr<WorkerRecor
     // Winsock forbids closesocket() while another thread is in a Winsock call
     // on the same socket, and shutdown() does not reliably wake recv() on XP.
     // Windows workers observe runtime shutdown through bounded read waits.
-    (void)record;
+    BasicLockGuard state_lock(record->state_mutex);
+    if (record->transport) {
+        record->transport->shutdown();
+    }
 #else
     BasicLockGuard state_lock(record->state_mutex);
     if (record->socket != INVALID_SOCKET) {
-        shutdown_socket(record->socket);
+        if (record->transport) {
+            record->transport->shutdown();
+        } else {
+            shutdown_socket(record->socket);
+        }
     }
 #endif
 }
@@ -111,9 +127,71 @@ bool ConnectionManager::try_start(UniqueSocket client, std::function<void(SOCKET
             return false;
         }
         const unsigned long worker_id = next_worker_id_++;
-        record.reset(new WorkerRecord(worker_id, client.get(), std::move(worker_main)));
+        const SOCKET socket = client.get();
+        record.reset(new WorkerRecord(
+            worker_id,
+            socket,
+            [socket, worker_main]() { worker_main(socket); },
+            std::shared_ptr<ConnectionTransport>()
+        ));
         workers_[worker_id] = record;
         client.release();
+        try {
+            record->thread.reset(new std::thread([this, record, start_gate]() {
+                start_gate->wait();
+                run_worker(record);
+            }));
+        } catch (const std::exception& ex) {
+            log_message(
+                LOG_WARN,
+                "connection_manager",
+                LogMessageBuilder("worker thread spawn failed")
+                    .field("worker_id", record->worker_id)
+                    .raw(std::string("error=") + ex.what())
+                    .str()
+            );
+            close_worker_socket(record);
+            erase_worker_record_locked(record);
+            return false;
+        } catch (...) {
+            log_message(
+                LOG_WARN,
+                "connection_manager",
+                LogMessageBuilder("worker thread spawn failed")
+                    .field("worker_id", record->worker_id)
+                    .raw("error=unknown exception")
+                    .str()
+            );
+            close_worker_socket(record);
+            erase_worker_record_locked(record);
+            return false;
+        }
+        state_changed_.broadcast();
+    }
+
+    start_gate->release();
+    return true;
+}
+
+bool ConnectionManager::try_start_transport(
+    const std::shared_ptr<ConnectionTransport>& client,
+    std::function<void(const std::shared_ptr<ConnectionTransport>&)> worker_main
+) {
+    std::shared_ptr<WorkerRecord> record;
+    std::shared_ptr<ConnectionStartGate> start_gate(new ConnectionStartGate());
+    {
+        BasicLockGuard lock(mutex_);
+        if (shutting_down_ || workers_.size() >= max_active_connections_) {
+            return false;
+        }
+        const unsigned long worker_id = next_worker_id_++;
+        record.reset(new WorkerRecord(
+            worker_id,
+            client->native_socket(),
+            [client, worker_main]() { worker_main(client); },
+            client
+        ));
+        workers_[worker_id] = record;
         try {
             record->thread.reset(new std::thread([this, record, start_gate]() {
                 start_gate->wait();

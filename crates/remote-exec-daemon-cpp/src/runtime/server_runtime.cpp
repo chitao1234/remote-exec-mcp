@@ -39,10 +39,10 @@ std::string json_escape(const std::string& value) {
     return result;
 }
 
-bool recv_exact(SOCKET socket, char* data, std::size_t size) {
+bool recv_exact(ConnectionTransport& client, char* data, std::size_t size) {
     std::size_t offset = 0;
     while (offset < size) {
-        const int received = recv_bounded(socket, data + offset, size - offset, 0);
+        const int received = client.read(data + offset, size - offset);
         if (received <= 0) {
             return false;
         }
@@ -51,7 +51,7 @@ bool recv_exact(SOCKET socket, char* data, std::size_t size) {
     return true;
 }
 
-UniqueSocket connect_reverse_socket(const DaemonConfig& config, const AppMetadata& metadata) {
+UniqueSocket connect_reverse_socket(const DaemonConfig& config) {
     SocketAddressQuery query;
     query.family = AF_UNSPEC;
     query.socktype = SOCK_STREAM;
@@ -83,6 +83,14 @@ UniqueSocket connect_reverse_socket(const DaemonConfig& config, const AppMetadat
         throw std::runtime_error(socket_error_message("connect reverse broker"));
     }
 
+    return socket;
+}
+
+void register_reverse_connection(
+    ConnectionTransport& client,
+    const DaemonConfig& config,
+    const AppMetadata& metadata
+) {
     const std::string payload =
         "{\"protocol_version\":1,\"target\":\"" + json_escape(config.target)
         + "\",\"daemon_instance_id\":\"" + json_escape(metadata.daemon_instance_id)
@@ -93,15 +101,15 @@ UniqueSocket connect_reverse_socket(const DaemonConfig& config, const AppMetadat
     length[1] = static_cast<char>((payload_size >> 16U) & 0xffU);
     length[2] = static_cast<char>((payload_size >> 8U) & 0xffU);
     length[3] = static_cast<char>(payload_size & 0xffU);
-    send_all_bytes(socket.get(), REVERSE_MAGIC, 8U);
-    send_all_bytes(socket.get(), length, sizeof(length));
-    send_all(socket.get(), payload);
+    send_all_bytes(client, REVERSE_MAGIC, 8U);
+    send_all_bytes(client, length, sizeof(length));
+    send_all(client, payload);
 
     char ack_magic[8];
     char ack_length[4];
-    if (!recv_exact(socket.get(), ack_magic, sizeof(ack_magic))
+    if (!recv_exact(client, ack_magic, sizeof(ack_magic))
         || std::memcmp(ack_magic, REVERSE_MAGIC, sizeof(ack_magic)) != 0
-        || !recv_exact(socket.get(), ack_length, sizeof(ack_length))) {
+        || !recv_exact(client, ack_length, sizeof(ack_length))) {
         throw std::runtime_error("invalid reverse registration acknowledgement");
     }
     const std::uint32_t ack_size = (static_cast<unsigned char>(ack_length[0]) << 24U)
@@ -112,11 +120,10 @@ UniqueSocket connect_reverse_socket(const DaemonConfig& config, const AppMetadat
         throw std::runtime_error("reverse registration acknowledgement is too large");
     }
     std::string ack(ack_size, '\0');
-    if (!recv_exact(socket.get(), &ack[0], ack.size())
+    if (!recv_exact(client, &ack[0], ack.size())
         || ack.find("\"accepted\":true") == std::string::npos) {
         throw std::runtime_error("broker rejected reverse registration");
     }
-    return socket;
 }
 
 std::string daemon_instance_id() {
@@ -363,32 +370,44 @@ void ServerRuntime::reverse_loop() {
             continue;
         }
         try {
-            UniqueSocket client = connect_reverse_socket(config_, metadata_);
+            UniqueSocket socket = connect_reverse_socket(config_);
+            std::shared_ptr<ConnectionTransport> client =
+                config_.reverse_transport == "tls"
+                    ? make_tls_client_connection_transport(
+                          std::move(socket),
+                          tls_client_context_,
+                          config_.reverse_tls_server_name,
+                          config_.tls_handshake_timeout_ms
+                      )
+                    : make_plain_connection_transport(std::move(socket));
+            register_reverse_connection(*client, config_, metadata_);
             reverse_live_.fetch_add(1UL);
-            if (!connections_.try_start(std::move(client), [this](SOCKET socket) {
-                    std::shared_ptr<std::atomic<bool>> became_busy(new std::atomic<bool>(false));
-                    std::shared_ptr<ConnectionTransport> client =
-                        make_plain_connection_transport(UniqueSocket(socket));
-                    handle_client(
-                        make_http_connection_context(
-                            this->config_,
-                            this->metadata_,
-                            this->sandbox_,
-                            this->services_,
-                            this->shutdown_
-                        ),
-                        client,
-                        [this, became_busy]() {
-                            if (!became_busy->exchange(true)) {
-                                this->reverse_busy_.fetch_add(1UL);
+            if (!connections_.try_start_transport(
+                    client,
+                    [this](const std::shared_ptr<ConnectionTransport>& client) {
+                        std::shared_ptr<std::atomic<bool>> became_busy(new std::atomic<bool>(false)
+                        );
+                        handle_client(
+                            make_http_connection_context(
+                                this->config_,
+                                this->metadata_,
+                                this->sandbox_,
+                                this->services_,
+                                this->shutdown_
+                            ),
+                            client,
+                            [this, became_busy]() {
+                                if (!became_busy->exchange(true)) {
+                                    this->reverse_busy_.fetch_add(1UL);
+                                }
                             }
+                        );
+                        if (became_busy->load()) {
+                            this->reverse_busy_.fetch_sub(1UL);
                         }
-                    );
-                    if (became_busy->load()) {
-                        this->reverse_busy_.fetch_sub(1UL);
+                        this->reverse_live_.fetch_sub(1UL);
                     }
-                    this->reverse_live_.fetch_sub(1UL);
-                })) {
+                )) {
                 reverse_live_.fetch_sub(1UL);
                 return;
             }

@@ -172,6 +172,47 @@ int main() {
     TEST_ASSERT(reverse_config.reverse_broker_port == 9555);
     TEST_ASSERT(reverse_config.reverse_min_idle_connections == 3UL);
     TEST_ASSERT(reverse_config.reverse_max_connections == 12UL);
+
+    const fs::path tls_config_path = root / "daemon-cpp-tls.ini";
+    write_text(
+        tls_config_path,
+        "target = builder-cpp\n"
+        "listen_host = 0.0.0.0\n"
+        "listen_port = 8181\n"
+        "transport = tls\n"
+        "tls_cert_pem = daemon.pem\n"
+        "tls_key_pem = daemon.key\n"
+        "tls_ca_pem = ca.pem\n"
+        "tls_pinned_client_cert_pem = broker.pem\n"
+        "tls_handshake_timeout_ms = 4321\n"
+        "default_workdir = "
+            + quote_config_value(default_workdir.string()) + "\n"
+    );
+    const DaemonConfig tls_config = load_config(tls_config_path.string());
+    TEST_ASSERT(tls_config.transport == "tls");
+    TEST_ASSERT(tls_config.tls_cert_pem == "daemon.pem");
+    TEST_ASSERT(tls_config.tls_pinned_client_cert_pem == "broker.pem");
+    TEST_ASSERT(tls_config.tls_handshake_timeout_ms == 4321UL);
+
+    const fs::path reverse_tls_config_path = root / "daemon-cpp-reverse-tls.ini";
+    write_text(
+        reverse_tls_config_path,
+        "target = builder-cpp\n"
+        "connection_mode = reverse\n"
+        "reverse_broker_host = broker.example.com\n"
+        "reverse_broker_port = 9555\n"
+        "reverse_transport = tls\n"
+        "reverse_tls_cert_pem = daemon.pem\n"
+        "reverse_tls_key_pem = daemon.key\n"
+        "reverse_tls_ca_pem = ca.pem\n"
+        "reverse_tls_server_name = broker.example.com\n"
+        "default_workdir = "
+            + quote_config_value(default_workdir.string()) + "\n"
+    );
+    const DaemonConfig reverse_tls_config = load_config(reverse_tls_config_path.string());
+    TEST_ASSERT(reverse_tls_config.reverse_transport == "tls");
+    TEST_ASSERT(reverse_tls_config.reverse_bearer_token.empty());
+    TEST_ASSERT(reverse_tls_config.reverse_tls_server_name == "broker.example.com");
     TEST_ASSERT(config.default_workdir == spaced_workdir.string());
     TEST_ASSERT(config.default_shell == "/bin/sh");
     TEST_ASSERT(!config.allow_login_shell);
@@ -414,6 +455,32 @@ int main() {
             + quote_config_value(default_workdir.string()) + "\n"
     );
     TEST_ASSERT(config_rejected(invalid_port_path));
+
+    const fs::path invalid_transport_path = root / "invalid-transport.ini";
+    write_text(invalid_transport_path, minimal_config_text(default_workdir) + "transport = quic\n");
+    TEST_ASSERT(config_rejected(invalid_transport_path));
+
+    const fs::path missing_tls_path = root / "missing-tls-key.ini";
+    write_text(
+        missing_tls_path,
+        minimal_config_text(default_workdir)
+            + "transport = tls\n"
+              "tls_cert_pem = daemon.pem\n"
+              "tls_ca_pem = ca.pem\n"
+    );
+    TEST_ASSERT(config_rejected(missing_tls_path));
+
+    const fs::path zero_tls_timeout_path = root / "zero-tls-timeout.ini";
+    write_text(
+        zero_tls_timeout_path,
+        minimal_config_text(default_workdir)
+            + "transport = tls\n"
+              "tls_cert_pem = daemon.pem\n"
+              "tls_key_pem = daemon.key\n"
+              "tls_ca_pem = ca.pem\n"
+              "tls_handshake_timeout_ms = 0\n"
+    );
+    TEST_ASSERT(config_rejected(zero_tls_timeout_path));
 
     return 0;
 }
