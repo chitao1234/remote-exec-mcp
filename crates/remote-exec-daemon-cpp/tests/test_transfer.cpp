@@ -781,7 +781,8 @@ static void assert_transfer_requires_tar_terminator() {
             true
         );
     } catch (const TransferFailure& failure) {
-        rejected_trailing_garbage = failure.message.find("trailing data") != std::string::npos;
+        rejected_trailing_garbage =
+            std::string(failure.what()).find("trailing data") != std::string::npos;
     }
     TEST_ASSERT(rejected_trailing_garbage);
     TEST_ASSERT(read_text(root / "trailing-garbage" / "payload.txt") == "payload");
@@ -850,7 +851,7 @@ static void assert_invalid_replace_keeps_existing_destination() {
             true
         );
     } catch (const TransferFailure& failure) {
-        rejected_directory = failure.message.find("trailing data") != std::string::npos;
+        rejected_directory = std::string(failure.what()).find("trailing data") != std::string::npos;
     }
     TEST_ASSERT(rejected_directory);
     TEST_ASSERT(!fs::exists(root / "dest-dir" / "old.txt"));
@@ -878,7 +879,7 @@ static void assert_transfer_rejects_entry_size_over_limit() {
             limits
         );
     } catch (const TransferFailure& failure) {
-        rejected = failure.message.find("transfer entry limit") != std::string::npos;
+        rejected = std::string(failure.what()).find("transfer entry limit") != std::string::npos;
     }
     TEST_ASSERT(rejected);
     TEST_ASSERT(!fs::exists(root / "dest.txt"));
@@ -899,8 +900,8 @@ static void assert_transfer_rejects_unrepresentable_tar_size() {
             true
         );
     } catch (const TransferFailure& failure) {
-        rejected = failure.message.find("too large") != std::string::npos
-                   || failure.message.find("limit") != std::string::npos;
+        rejected = std::string(failure.what()).find("too large") != std::string::npos
+                   || std::string(failure.what()).find("limit") != std::string::npos;
     }
     TEST_ASSERT(rejected);
     TEST_ASSERT(!fs::exists(root / "dest.txt"));
@@ -931,7 +932,7 @@ static void assert_transfer_rejects_summary_size_over_limit() {
             limits
         );
     } catch (const TransferFailure& failure) {
-        rejected = failure.message.find("transfer entry limit") != std::string::npos;
+        rejected = std::string(failure.what()).find("transfer entry limit") != std::string::npos;
     }
     TEST_ASSERT(rejected);
     TEST_ASSERT(!fs::exists(root / "dest" / TRANSFER_SUMMARY_ENTRY));
@@ -1511,7 +1512,7 @@ static void assert_symlink_import_rejects_absolute_target() {
             true
         );
     } catch (const TransferFailure& failure) {
-        rejected = failure.message.find("symlink target") != std::string::npos;
+        rejected = std::string(failure.what()).find("symlink target") != std::string::npos;
     }
     TEST_ASSERT(rejected);
     TEST_ASSERT(!fs::exists(root / "dest" / "bad-link"));
@@ -1536,7 +1537,7 @@ static void assert_symlink_import_rejects_parent_target() {
             true
         );
     } catch (const TransferFailure& failure) {
-        rejected = failure.message.find("symlink target") != std::string::npos;
+        rejected = std::string(failure.what()).find("symlink target") != std::string::npos;
     }
     TEST_ASSERT(rejected);
     TEST_ASSERT(!fs::exists(root / "dest" / "bad-link"));
@@ -1613,8 +1614,8 @@ static bool directory_import_rejects_path(const std::string& path) {
             true
         );
     } catch (const TransferFailure& failure) {
-        rejected = failure.message.find("archive path") != std::string::npos
-                   || failure.message.find("escapes destination") != std::string::npos;
+        rejected = std::string(failure.what()).find("archive path") != std::string::npos
+                   || std::string(failure.what()).find("escapes destination") != std::string::npos;
     }
 
     TEST_ASSERT(!fs::exists(root / "escape.txt"));
@@ -1648,8 +1649,8 @@ static void assert_directory_traversal_is_rejected() {
             true
         );
     } catch (const TransferFailure& failure) {
-        rejected = failure.message.find("archive path") != std::string::npos
-                   || failure.message.find("escapes destination") != std::string::npos;
+        rejected = std::string(failure.what()).find("archive path") != std::string::npos
+                   || std::string(failure.what()).find("escapes destination") != std::string::npos;
     }
 
     TEST_ASSERT(rejected);
@@ -1897,9 +1898,9 @@ static void assert_shared_transfer_contract_cases() {
                     symlink_mode_from_wire(it->at("symlink_mode").get<std::string>())
                 );
             } catch (const TransferFailure& failure) {
-                rejected =
-                    failure.message.find(expected.at("error_message_fragment").get<std::string>())
-                    != std::string::npos;
+                rejected = std::string(failure.what())
+                               .find(expected.at("error_message_fragment").get<std::string>())
+                           != std::string::npos;
             }
             TEST_ASSERT(rejected);
             continue;

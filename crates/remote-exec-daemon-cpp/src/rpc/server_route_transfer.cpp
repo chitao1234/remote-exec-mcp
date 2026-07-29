@@ -238,7 +238,7 @@ void run_streaming_transfer_export(
         log_message(
             LOG_WARN,
             "server",
-            "transfer/export failed after stream start: " + failure.message
+            std::string("transfer/export failed after stream start: ") + failure.what()
         );
         sink.send_error_payload(transfer_stream::error_payload(failure));
     } catch (const SocketSendError&) {

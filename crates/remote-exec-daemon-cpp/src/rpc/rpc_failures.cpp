@@ -1,11 +1,11 @@
 #include "rpc/rpc_failures.h"
 
 TransferFailure::TransferFailure(TransferRpcCode code, const std::string& message)
-    : std::runtime_error(message), code(code), message(message) {
+    : std::runtime_error(message), code(code) {
 }
 
 ImageFailure::ImageFailure(ImageRpcCode code, const std::string& message)
-    : std::runtime_error(message), code(code), message(message) {
+    : std::runtime_error(message), code(code) {
 }
 
 const char* transfer_error_code_name(TransferRpcCode code) {
@@ -54,20 +54,14 @@ const char* image_error_code_name(ImageRpcCode code) {
     return "image_decode_failed";
 }
 
+static int rpc_error_status(bool is_internal) {
+    return is_internal ? 500 : 400;
+}
+
 int transfer_error_status(TransferRpcCode code) {
-    switch (code) {
-    case TransferRpcCode::Internal:
-        return 500;
-    default:
-        return 400;
-    }
+    return rpc_error_status(code == TransferRpcCode::Internal);
 }
 
 int image_error_status(ImageRpcCode code) {
-    switch (code) {
-    case ImageRpcCode::Internal:
-        return 500;
-    default:
-        return 400;
-    }
+    return rpc_error_status(code == ImageRpcCode::Internal);
 }

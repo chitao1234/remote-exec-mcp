@@ -31,7 +31,6 @@ public:
     TransferFailure(TransferRpcCode code, const std::string& message);
 
     TransferRpcCode code;
-    std::string message;
 };
 
 class ImageFailure : public std::runtime_error {
@@ -39,7 +38,6 @@ public:
     ImageFailure(ImageRpcCode code, const std::string& message);
 
     ImageRpcCode code;
-    std::string message;
 };
 
 const char* transfer_error_code_name(TransferRpcCode code);

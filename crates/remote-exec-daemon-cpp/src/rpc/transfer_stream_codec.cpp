@@ -94,7 +94,7 @@ std::string error_payload(TransferRpcCode code, const std::string& message) {
 }
 
 std::string error_payload(const TransferFailure& failure) {
-    return error_payload(failure.code, failure.message);
+    return error_payload(failure.code, failure.what());
 }
 
 std::string error_payload(const std::exception& ex) {

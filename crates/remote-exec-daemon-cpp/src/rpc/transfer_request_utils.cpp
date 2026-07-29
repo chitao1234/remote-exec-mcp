@@ -108,7 +108,7 @@ void write_transfer_error_response(HttpResponse& response, const TransferFailure
         response,
         transfer_error_status(failure.code),
         transfer_error_code_name(failure.code),
-        failure.message
+        failure.what()
     );
 }
 

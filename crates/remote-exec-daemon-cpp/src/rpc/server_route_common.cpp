@@ -33,7 +33,7 @@ HttpResponse handle_transfer_rpc_route(const std::string& route_name, const RpcR
         write_transfer_error_response(response, ex);
         return response;
     } catch (const TransferFailure& failure) {
-        log_message(LOG_WARN, "server", route_name + " failed: " + failure.message);
+        log_message(LOG_WARN, "server", route_name + " failed: " + failure.what());
         HttpResponse response;
         response.status = transfer_error_status(failure.code);
         write_transfer_error_response(response, failure);
@@ -63,27 +63,19 @@ HttpResponse handle_image_rpc_route(const std::string& route_name, const RpcRout
         );
         return response;
     } catch (const ImageFailure& failure) {
-        log_message(LOG_WARN, "server", route_name + " failed: " + failure.message);
+        log_message(LOG_WARN, "server", route_name + " failed: " + failure.what());
         HttpResponse response;
-        response.status = image_error_status(failure.code);
-        write_rpc_error(
-            response,
-            image_error_status(failure.code),
-            image_error_code_name(failure.code),
-            failure.message
-        );
+        const int status = image_error_status(failure.code);
+        response.status = status;
+        write_rpc_error(response, status, image_error_code_name(failure.code), failure.what());
         return response;
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", route_name + " failed: " + message);
         HttpResponse response;
-        response.status = image_error_status(ImageRpcCode::Internal);
-        write_rpc_error(
-            response,
-            image_error_status(ImageRpcCode::Internal),
-            image_error_code_name(ImageRpcCode::Internal),
-            message
-        );
+        const int status = image_error_status(ImageRpcCode::Internal);
+        response.status = status;
+        write_rpc_error(response, status, image_error_code_name(ImageRpcCode::Internal), message);
         return response;
     }
 }
