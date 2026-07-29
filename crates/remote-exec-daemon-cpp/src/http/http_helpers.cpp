@@ -1,6 +1,5 @@
 #include <atomic>
 #include <sstream>
-#include <stdexcept>
 
 #include "http/http_helpers.h"
 
@@ -42,6 +41,8 @@ std::string generate_request_id() {
 }
 
 } // namespace
+
+static const char* const kContentTypeJson = "application/json";
 
 std::string HttpRequest::header(const std::string& name) const {
     std::map<std::string, std::string>::const_iterator it = headers.find(name);
@@ -90,7 +91,7 @@ void write_request_id_header(HttpResponse& res, const HttpRequest& req) {
 
 void write_json(HttpResponse& res, const Json& body) {
     res.status = 200;
-    res.headers["Content-Type"] = "application/json";
+    res.headers["Content-Type"] = kContentTypeJson;
     res.body = body.dump();
 }
 
@@ -106,7 +107,7 @@ void write_rpc_error(
     const std::string& message
 ) {
     res.status = status;
-    res.headers["Content-Type"] = "application/json";
+    res.headers["Content-Type"] = kContentTypeJson;
     res.body =
         Json{
             {"code", code},
@@ -153,12 +154,19 @@ std::string render_http_response_head(const HttpResponse& res) {
 }
 
 std::string render_http_response(const HttpResponse& res) {
-    HttpResponse response = res;
-    response.headers["Content-Length"] = std::to_string(response.body.size());
+    std::ostringstream out;
+    out << "HTTP/1.1 " << res.status << ' ' << reason_phrase(res.status) << "\r\n";
+    out << "Content-Length: " << res.body.size() << "\r\n";
 
-    std::string rendered = render_http_response_head(response);
-    rendered += response.body;
-    return rendered;
+    for (std::map<std::string, std::string>::const_iterator it = res.headers.begin();
+         it != res.headers.end();
+         ++it) {
+        out << it->first << ": " << it->second << "\r\n";
+    }
+
+    out << "\r\n";
+    out << res.body;
+    return out.str();
 }
 
 std::string render_http_upgrade_response(

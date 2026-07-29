@@ -1,11 +1,17 @@
 #pragma once
 
 #include <map>
+#include <stdexcept>
 #include <string>
 
 #include "json.hpp"
 
 using Json = nlohmann::json;
+
+class HttpRequestError : public std::runtime_error {
+public:
+    explicit HttpRequestError(const std::string& message) : std::runtime_error(message) {}
+};
 
 struct HttpRequest {
     std::string method;

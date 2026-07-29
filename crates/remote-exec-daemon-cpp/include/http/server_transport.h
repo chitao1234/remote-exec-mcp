@@ -13,9 +13,9 @@
 #include "http/http_helpers.h"
 #include "platform/socket.h"
 
-class BadHttpRequest : public std::runtime_error {
+class BadHttpRequest : public HttpRequestError {
 public:
-    explicit BadHttpRequest(const std::string& message) : std::runtime_error(message) {}
+    explicit BadHttpRequest(const std::string& message) : HttpRequestError(message) {}
 };
 
 class SocketSendError : public std::runtime_error {

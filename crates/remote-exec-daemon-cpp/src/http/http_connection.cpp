@@ -223,14 +223,7 @@ void handle_client(
             }
         } catch (const HttpConnectionShutdown&) {
             return;
-        } catch (const BadHttpRequest& ex) {
-            log_message(LOG_WARN, "server", ex.what());
-            HttpResponse response;
-            response.status = 400;
-            write_rpc_error(response, 400, "bad_request", ex.what());
-            try_send_response(*client, response);
-            return;
-        } catch (const HttpParseError& ex) {
+        } catch (const HttpRequestError& ex) {
             log_message(LOG_WARN, "server", ex.what());
             HttpResponse response;
             response.status = 400;
