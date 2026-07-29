@@ -316,7 +316,10 @@ mod tests {
     use std::collections::BTreeMap;
     use std::time::Duration;
 
-    use tokio::io::AsyncReadExt;
+    use remote_exec_proto::rpc::{
+        DaemonIdentity, TargetCapabilities, TargetInfoResponse, TransferStreamProtocolVersion,
+    };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::config::{
         BrokerConfig, BrokerHealthRefreshConfig, LocalTargetConfig, TargetConfig,
@@ -416,6 +419,37 @@ mod tests {
             let _ = stream.read(&mut buf).await;
             let _ = request_tx.send(());
             let _ = release_rx.await;
+            let body = serde_json::to_string(&TargetInfoResponse {
+                target: "startup-test".to_string(),
+                daemon_instance_id: "startup-daemon".to_string(),
+                identity: DaemonIdentity {
+                    daemon_version: "test".to_string(),
+                    hostname: "host".to_string(),
+                    platform: "windows".to_string(),
+                    arch: "x86_64".to_string(),
+                },
+                capabilities: TargetCapabilities {
+                    supports_pty: false,
+                    supports_port_forward: false,
+                    port_forward_protocol_version: None,
+                    transfer_stream_protocol_version: Some(TransferStreamProtocolVersion::v2()),
+                    file_tool_protocol_version: None,
+                },
+                supports_image_read: false,
+                supports_transfer_compression: false,
+            })
+            .unwrap();
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
         });
         (addr, request_rx, release_tx)
     }
@@ -489,7 +523,7 @@ mod tests {
             .unwrap();
         assert_eq!(state.configured_target_count(), 4);
         for snapshot in state.target_status_snapshots().await {
-            assert_eq!(snapshot.daemon_info, None);
+            assert!(snapshot.daemon_info.is_some());
         }
     }
 
