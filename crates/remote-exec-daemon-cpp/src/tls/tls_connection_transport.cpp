@@ -283,19 +283,18 @@ private:
     }
 
     bool pump_write() {
-        std::string chunk;
-        {
-            BasicLockGuard lock(mutex_);
-            if (outgoing_offset_ == outgoing_.size()) {
-                return false;
-            }
-            const std::size_t size =
-                std::min(TLS_IO_BUFFER_SIZE, outgoing_.size() - outgoing_offset_);
-            chunk.assign(outgoing_.data() + outgoing_offset_, size);
+        // The socket is non-blocking (set in run_handshake), so SSL_write
+        // returns immediately with WANT_WRITE when the send buffer is full.
+        // Hold the mutex across the call and write directly from outgoing_,
+        // avoiding the per-chunk heap allocation and copy.
+        BasicLockGuard lock(mutex_);
+        if (outgoing_offset_ == outgoing_.size()) {
+            return false;
         }
-        const int result = SSL_write(ssl_, chunk.data(), static_cast<int>(chunk.size()));
+        const std::size_t size = std::min(TLS_IO_BUFFER_SIZE, outgoing_.size() - outgoing_offset_);
+        const int result =
+            SSL_write(ssl_, outgoing_.data() + outgoing_offset_, static_cast<int>(size));
         if (result > 0) {
-            BasicLockGuard lock(mutex_);
             outgoing_offset_ += static_cast<std::size_t>(result);
             written_bytes_ += static_cast<std::uint64_t>(result);
             compact_outgoing_locked();
@@ -306,7 +305,10 @@ private:
         if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
             return false;
         }
-        fail(openssl_compat::error_string("TLS write"));
+        // Inline fail() since it re-acquires mutex_.
+        failed_ = true;
+        error_ = openssl_compat::error_string("TLS write");
+        condition_.broadcast();
         return false;
     }
 
@@ -326,6 +328,14 @@ private:
                 eof_ = true;
                 condition_.broadcast();
                 return;
+            }
+            // Only poll for write readiness when there is pending data; on an
+            // idle connection this avoids a syscall per TLS_PUMP_WAIT_MS tick.
+            {
+                BasicLockGuard lock(mutex_);
+                if (outgoing_offset_ == outgoing_.size()) {
+                    continue;
+                }
             }
             (void)wait_socket_writable(socket_.get(), 1UL);
         }
