@@ -75,7 +75,7 @@ async fn load_defaults_remote_request_timeout_for_long_operations() {
 
     assert_eq!(timeouts.request_ms, 310_000);
     assert_eq!(timeouts.read_ms, 310_000);
-    assert_eq!(timeouts.startup_probe_ms, 5_000);
+    assert_eq!(timeouts.startup_probe_ms, 10_000);
 }
 
 #[tokio::test]
