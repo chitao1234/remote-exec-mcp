@@ -383,7 +383,9 @@ async fn accept_reverse_lane(
         ReverseAcceptor::Plain => (Box::new(stream), None),
         #[cfg(feature = "broker-tls")]
         ReverseAcceptor::Tls(acceptor) => {
-            let tls = acceptor.accept(stream).await?;
+            let tls = tokio::time::timeout(timeout, acceptor.accept(stream))
+                .await
+                .context("timed out waiting for reverse TLS handshake")??;
             let target = reverse_tls_client_common_name(&tls)?;
             (Box::new(tls), Some(target))
         }
