@@ -488,12 +488,21 @@ DaemonConfig load_config(const std::string& path) {
         if (config.reverse_transport == "http" && config.reverse_bearer_token.empty()) {
             throw std::runtime_error("missing required config key: reverse_bearer_token");
         }
-        config.reverse_min_idle_connections =
-            read_optional_unsigned_long(values, "reverse_min_idle_connections", 4UL);
-        config.reverse_max_connections =
-            read_optional_unsigned_long(values, "reverse_max_connections", 128UL);
-        config.reverse_reconnect_ms =
-            read_optional_unsigned_long(values, "reverse_reconnect_ms", 1000UL);
+        config.reverse_min_idle_connections = read_optional_unsigned_long(
+            values,
+            "reverse_min_idle_connections",
+            DEFAULT_REVERSE_MIN_IDLE_CONNECTIONS
+        );
+        config.reverse_max_connections = read_optional_unsigned_long(
+            values,
+            "reverse_max_connections",
+            DEFAULT_REVERSE_MAX_CONNECTIONS
+        );
+        config.reverse_reconnect_ms = read_optional_unsigned_long(
+            values,
+            "reverse_reconnect_ms",
+            DEFAULT_REVERSE_RECONNECT_MS
+        );
         if (config.reverse_broker_port <= 0 || config.reverse_broker_port > 65535) {
             throw std::runtime_error("reverse_broker_port must be between 1 and 65535");
         }
