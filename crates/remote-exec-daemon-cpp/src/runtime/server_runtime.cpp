@@ -39,9 +39,17 @@ std::string json_escape(const std::string& value) {
     return result;
 }
 
-bool recv_exact(ConnectionTransport& client, char* data, std::size_t size) {
+bool recv_exact(
+    ConnectionTransport& client,
+    char* data,
+    std::size_t size,
+    unsigned long timeout_ms
+) {
     std::size_t offset = 0;
     while (offset < size) {
+        if (client.wait_readable(timeout_ms) == 0) {
+            return false;
+        }
         const int received = client.read(data + offset, size - offset);
         if (received <= 0) {
             return false;
@@ -89,7 +97,8 @@ UniqueSocket connect_reverse_socket(const DaemonConfig& config) {
 void register_reverse_connection(
     ConnectionTransport& client,
     const DaemonConfig& config,
-    const AppMetadata& metadata
+    const AppMetadata& metadata,
+    unsigned long ack_timeout_ms
 ) {
     const std::string payload =
         "{\"protocol_version\":1,\"target\":\"" + json_escape(config.target)
@@ -107,9 +116,9 @@ void register_reverse_connection(
 
     char ack_magic[8];
     char ack_length[4];
-    if (!recv_exact(client, ack_magic, sizeof(ack_magic))
+    if (!recv_exact(client, ack_magic, sizeof(ack_magic), ack_timeout_ms)
         || std::memcmp(ack_magic, REVERSE_MAGIC, sizeof(ack_magic)) != 0
-        || !recv_exact(client, ack_length, sizeof(ack_length))) {
+        || !recv_exact(client, ack_length, sizeof(ack_length), ack_timeout_ms)) {
         throw std::runtime_error("invalid reverse registration acknowledgement");
     }
     const std::uint32_t ack_size = (static_cast<unsigned char>(ack_length[0]) << 24U)
@@ -120,7 +129,7 @@ void register_reverse_connection(
         throw std::runtime_error("reverse registration acknowledgement is too large");
     }
     std::string ack(ack_size, '\0');
-    if (!recv_exact(client, &ack[0], ack.size())
+    if (!recv_exact(client, &ack[0], ack.size(), ack_timeout_ms)
         || ack.find("\"accepted\":true") == std::string::npos) {
         throw std::runtime_error("broker rejected reverse registration");
     }
@@ -381,7 +390,12 @@ void ServerRuntime::reverse_loop() {
                           config_.tls_handshake_timeout_ms
                       )
                     : make_plain_connection_transport(std::move(socket));
-            register_reverse_connection(*client, config_, metadata_);
+            register_reverse_connection(
+                *client,
+                config_,
+                metadata_,
+                config_.tls_handshake_timeout_ms
+            );
             reverse_live_.fetch_add(1UL);
             if (!connections_.try_start_transport(
                     client,
