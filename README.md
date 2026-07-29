@@ -483,6 +483,9 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 - Hung health probes are bounded by the target `timeouts.startup_probe_ms`;
   timing out a health probe marks the target unhealthy in the broker cache.
 - Broker-daemon calls are bounded by per-target connect/read/request timeouts.
+  The default request deadline is 310 seconds so slower patch, file, and image
+  operations are not treated as failed after only 30 seconds; startup and
+  health probes retain their separate 5-second default.
 - Timed-out broker-daemon requests are never replayed. One isolated timeout is
   treated as a transient fluctuation; after two consecutive timeouts without a
   successful HTTP response, the broker replaces the direct target's HTTP
