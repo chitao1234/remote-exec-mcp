@@ -206,6 +206,7 @@ int main() {
         "reverse_tls_key_pem = daemon.key\n"
         "reverse_tls_ca_pem = ca.pem\n"
         "reverse_tls_server_name = broker.example.com\n"
+        "tls_handshake_timeout_ms = 5678\n"
         "default_workdir = "
             + quote_config_value(default_workdir.string()) + "\n"
     );
@@ -213,6 +214,7 @@ int main() {
     TEST_ASSERT(reverse_tls_config.reverse_transport == Transport::Tls);
     TEST_ASSERT(reverse_tls_config.reverse_bearer_token.empty());
     TEST_ASSERT(reverse_tls_config.reverse_tls_server_name == "broker.example.com");
+    TEST_ASSERT(reverse_tls_config.tls_handshake_timeout_ms == 5678UL);
     TEST_ASSERT(config.default_workdir == spaced_workdir.string());
     TEST_ASSERT(config.default_shell == "/bin/sh");
     TEST_ASSERT(!config.allow_login_shell);

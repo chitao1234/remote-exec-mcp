@@ -317,6 +317,14 @@ static void read_reverse_tls_config(const ConfigValues& values, DaemonConfig* co
         require_nonempty_tls_path(config->reverse_tls_key_pem, "reverse_tls_key_pem");
         require_nonempty_tls_path(config->reverse_tls_ca_pem, "reverse_tls_ca_pem");
         require_nonempty_tls_path(config->reverse_tls_server_name, "reverse_tls_server_name");
+        config->tls_handshake_timeout_ms = read_optional_unsigned_long(
+            values,
+            "tls_handshake_timeout_ms",
+            DEFAULT_TLS_HANDSHAKE_TIMEOUT_MS
+        );
+        if (config->tls_handshake_timeout_ms == 0UL) {
+            throw std::runtime_error("tls_handshake_timeout_ms must be greater than zero");
+        }
     }
 }
 
