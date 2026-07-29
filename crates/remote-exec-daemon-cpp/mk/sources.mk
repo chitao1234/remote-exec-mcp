@@ -65,6 +65,8 @@ HTTP_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/http/http_request.cpp
 
+TLS_SRCS = $(SOURCE_PREFIX)src/tls/openssl_compat.cpp
+
 ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/rpc/capabilities_http_codec.cpp \
 	$(SOURCE_PREFIX)src/rpc/exec_http_codec.cpp \
@@ -151,6 +153,7 @@ SERVER_TRANSPORT_WINDOWS_SRCS = \
 
 BASE_COMMON_SRCS_NO_MAIN = \
 	$(CONFIG_SRCS) \
+	$(TLS_SRCS) \
 	$(HTTP_SRCS) \
 	$(LOGGING_SRCS) \
 	$(TEXT_UTILS_SRCS) \

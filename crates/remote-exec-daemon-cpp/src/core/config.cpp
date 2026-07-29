@@ -264,6 +264,56 @@ static std::string read_http_auth_bearer_token(const ConfigValues& values) {
     return it->second;
 }
 
+static void validate_transport(const std::string& transport, const std::string& key) {
+    if (transport != "http" && transport != "tls") {
+        throw std::runtime_error(key + " must be http or tls");
+    }
+}
+
+static void require_nonempty_tls_path(const std::string& value, const std::string& key) {
+    if (value.empty()) {
+        throw std::runtime_error("missing required config key: " + key);
+    }
+}
+
+static void read_listen_tls_config(const ConfigValues& values, DaemonConfig* config) {
+    config->transport = read_optional_string(values, "transport", "http");
+    validate_transport(config->transport, "transport");
+    config->tls_cert_pem = read_optional_string(values, "tls_cert_pem", "");
+    config->tls_key_pem = read_optional_string(values, "tls_key_pem", "");
+    config->tls_ca_pem = read_optional_string(values, "tls_ca_pem", "");
+    config->tls_pinned_client_cert_pem =
+        read_optional_string(values, "tls_pinned_client_cert_pem", "");
+    config->tls_handshake_timeout_ms = read_optional_unsigned_long(
+        values,
+        "tls_handshake_timeout_ms",
+        DEFAULT_TLS_HANDSHAKE_TIMEOUT_MS
+    );
+    if (config->transport == "tls") {
+        require_nonempty_tls_path(config->tls_cert_pem, "tls_cert_pem");
+        require_nonempty_tls_path(config->tls_key_pem, "tls_key_pem");
+        require_nonempty_tls_path(config->tls_ca_pem, "tls_ca_pem");
+        if (config->tls_handshake_timeout_ms == 0UL) {
+            throw std::runtime_error("tls_handshake_timeout_ms must be greater than zero");
+        }
+    }
+}
+
+static void read_reverse_tls_config(const ConfigValues& values, DaemonConfig* config) {
+    config->reverse_transport = read_optional_string(values, "reverse_transport", "http");
+    validate_transport(config->reverse_transport, "reverse_transport");
+    config->reverse_tls_cert_pem = read_optional_string(values, "reverse_tls_cert_pem", "");
+    config->reverse_tls_key_pem = read_optional_string(values, "reverse_tls_key_pem", "");
+    config->reverse_tls_ca_pem = read_optional_string(values, "reverse_tls_ca_pem", "");
+    config->reverse_tls_server_name = read_optional_string(values, "reverse_tls_server_name", "");
+    if (config->reverse_transport == "tls") {
+        require_nonempty_tls_path(config->reverse_tls_cert_pem, "reverse_tls_cert_pem");
+        require_nonempty_tls_path(config->reverse_tls_key_pem, "reverse_tls_key_pem");
+        require_nonempty_tls_path(config->reverse_tls_ca_pem, "reverse_tls_ca_pem");
+        require_nonempty_tls_path(config->reverse_tls_server_name, "reverse_tls_server_name");
+    }
+}
+
 static PortForwardLimitConfig read_port_forward_limits(const ConfigValues& values) {
     PortForwardLimitConfig limits;
     limits.max_worker_threads = read_optional_unsigned_long(
@@ -426,13 +476,18 @@ DaemonConfig load_config(const std::string& path) {
     if (config.connection_mode == "listen") {
         config.listen_host = read_required_string(values, "listen_host");
         config.listen_port = read_listen_port(values);
+        read_listen_tls_config(values, &config);
     } else if (config.connection_mode == "reverse") {
         config.reverse_broker_host = read_required_string(values, "reverse_broker_host");
         config.reverse_broker_port = static_cast<int>(parse_unsigned_long(
             read_required_string(values, "reverse_broker_port"),
             "reverse_broker_port"
         ));
-        config.reverse_bearer_token = read_required_string(values, "reverse_bearer_token");
+        read_reverse_tls_config(values, &config);
+        config.reverse_bearer_token = read_optional_string(values, "reverse_bearer_token", "");
+        if (config.reverse_transport == "http" && config.reverse_bearer_token.empty()) {
+            throw std::runtime_error("missing required config key: reverse_bearer_token");
+        }
         config.reverse_min_idle_connections =
             read_optional_unsigned_long(values, "reverse_min_idle_connections", 4UL);
         config.reverse_max_connections =

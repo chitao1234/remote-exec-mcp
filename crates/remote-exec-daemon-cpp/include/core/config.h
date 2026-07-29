@@ -24,6 +24,7 @@ constexpr unsigned long DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES = 8UL * 102
 constexpr unsigned long DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS = 30000UL;
 constexpr unsigned long DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS = 10000UL;
 constexpr unsigned long DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS = 30000UL;
+constexpr unsigned long DEFAULT_TLS_HANDSHAKE_TIMEOUT_MS = 10000UL;
 constexpr std::size_t DEFAULT_MAX_REQUEST_HEADER_BYTES = 64UL * 1024UL;
 constexpr std::size_t DEFAULT_MAX_REQUEST_BODY_BYTES = 512UL * 1024UL * 1024UL;
 constexpr unsigned long DEFAULT_MAX_OPEN_SESSIONS = 64UL;
@@ -89,6 +90,7 @@ struct PortForwardLimitConfig {
 
 struct DaemonConfig {
     std::string connection_mode = "listen";
+    std::string transport = "http";
     std::string target;
     std::string listen_host;
     int listen_port;
@@ -97,9 +99,19 @@ struct DaemonConfig {
     std::string default_shell;
     bool allow_login_shell;
     std::string http_auth_bearer_token;
+    std::string tls_cert_pem;
+    std::string tls_key_pem;
+    std::string tls_ca_pem;
+    std::string tls_pinned_client_cert_pem;
+    unsigned long tls_handshake_timeout_ms = DEFAULT_TLS_HANDSHAKE_TIMEOUT_MS;
     std::string reverse_broker_host;
     int reverse_broker_port = 0;
+    std::string reverse_transport = "http";
     std::string reverse_bearer_token;
+    std::string reverse_tls_cert_pem;
+    std::string reverse_tls_key_pem;
+    std::string reverse_tls_ca_pem;
+    std::string reverse_tls_server_name;
     unsigned long reverse_min_idle_connections = 4UL;
     unsigned long reverse_max_connections = 128UL;
     unsigned long reverse_reconnect_ms = 1000UL;

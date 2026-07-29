@@ -2,6 +2,21 @@ BUILD_DIR ?= $(MAKEFILE_DIR)build
 OBJ_DIR := $(BUILD_DIR)/obj
 
 COMMON_CPPFLAGS := -I$(MAKEFILE_DIR)include -I$(MAKEFILE_DIR)third_party
+TLS ?= off
+OPENSSL_ROOT ?=
+OPENSSL_CPPFLAGS ?=
+OPENSSL_LDLIBS ?=
+ifeq ($(filter $(TLS),off openssl),)
+$(error unsupported TLS '$(TLS)'; use off or openssl)
+endif
+ifeq ($(TLS),openssl)
+OPENSSL_FEATURE_CPPFLAGS := -DREMOTE_EXEC_CPP_HAS_OPENSSL $(if $(OPENSSL_ROOT),-I$(OPENSSL_ROOT)/include) $(OPENSSL_CPPFLAGS)
+OPENSSL_FEATURE_LDLIBS := $(if $(OPENSSL_LDLIBS),$(OPENSSL_LDLIBS),$(if $(OPENSSL_ROOT),-L$(OPENSSL_ROOT)/lib) -lssl -lcrypto)
+else
+OPENSSL_FEATURE_CPPFLAGS :=
+OPENSSL_FEATURE_LDLIBS :=
+endif
+COMMON_CPPFLAGS += $(OPENSSL_FEATURE_CPPFLAGS)
 DEBUG ?= 0
 ifeq ($(filter 1 yes true on,$(DEBUG)),)
 MODE_CXXFLAGS := -O2
