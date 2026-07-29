@@ -77,6 +77,30 @@ async fn exec_start_preserves_cmd_command_quotes_in_pipe_mode_on_windows() {
 }
 
 #[tokio::test]
+async fn exec_start_runs_quoted_cmd_script_path_with_spaces_on_windows() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let script_dir = tempdir.path().join("quoted command path");
+    std::fs::create_dir(&script_dir).unwrap();
+    let script = script_dir.join("emit marker.cmd");
+    std::fs::write(&script, "@echo quoted-path-ok\r\n").unwrap();
+    let command = format!(r#""{}""#, script.display());
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_cmd_start_request(&command, false, Some(COMPLETED_COMMAND_YIELD_MS), None),
+        )
+        .await;
+
+    assert_eq!(response.output().exit_code, Some(0), "{response:#?}");
+    assert_eq!(
+        response.output().output.replace('\r', ""),
+        "quoted-path-ok\n"
+    );
+}
+
+#[tokio::test]
 async fn exec_start_preserves_default_powershell_nested_cmd_quotes_on_windows() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 

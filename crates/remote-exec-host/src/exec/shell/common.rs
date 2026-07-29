@@ -86,12 +86,11 @@ pub(super) fn shell_command_for_platform(
                 args.push("/D".to_string());
                 raw_arg_tail.push_str("/D ");
             }
+            args.push("/S".to_string());
             args.push("/C".to_string());
-            raw_arg_tail.push_str("/C");
-            if !cmd.is_empty() {
-                raw_arg_tail.push(' ');
-                raw_arg_tail.push_str(cmd);
-            }
+            raw_arg_tail.push_str("/S /C \"");
+            raw_arg_tail.push_str(cmd);
+            raw_arg_tail.push('"');
             args.push(cmd.to_string());
             return SpawnCommand {
                 program: shell.to_string(),
@@ -256,8 +255,13 @@ mod tests {
             SpawnCommand {
                 program: "cmd.exe".to_string(),
                 argv0: None,
-                args: vec!["/D".to_string(), "/C".to_string(), "echo ok".to_string()],
-                windows_raw_arg_tail: Some("/D /C echo ok".to_string()),
+                args: vec![
+                    "/D".to_string(),
+                    "/S".to_string(),
+                    "/C".to_string(),
+                    "echo ok".to_string(),
+                ],
+                windows_raw_arg_tail: Some("/D /S /C \"echo ok\"".to_string()),
             }
         );
         assert_eq!(
@@ -265,8 +269,8 @@ mod tests {
             SpawnCommand {
                 program: "cmd.exe".to_string(),
                 argv0: None,
-                args: vec!["/C".to_string(), "echo ok".to_string()],
-                windows_raw_arg_tail: Some("/C echo ok".to_string()),
+                args: vec!["/S".to_string(), "/C".to_string(), "echo ok".to_string()],
+                windows_raw_arg_tail: Some("/S /C \"echo ok\"".to_string()),
             }
         );
         assert_eq!(
@@ -277,7 +281,17 @@ mod tests {
                 r#"echo "A & B""#
             )
             .windows_command_line(),
-            r#""C:\Program Files\cmd.exe" /D /C echo "A & B""#
+            r#""C:\Program Files\cmd.exe" /D /S /C "echo "A & B"""#
+        );
+        assert_eq!(
+            shell_command_for_platform(
+                true,
+                "cmd.exe",
+                false,
+                r#""C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -Command "Write-Output ok""#,
+            )
+            .windows_command_line(),
+            r#"cmd.exe /D /S /C ""C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -Command "Write-Output ok"""#
         );
         assert_eq!(
             shell_command_for_platform(true, "bash.exe", false, "printf ok"),

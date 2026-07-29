@@ -610,7 +610,7 @@ static std::string append_session_output_until_done(
 static void assert_windows_cmd_command_line_preserves_command_quotes(const std::string& shell) {
     TEST_ASSERT(
         windows_process_command_line_for_test("echo \"A & B\"", shell, false)
-        == shell + " /D /C echo \"A & B\""
+        == shell + " /D /S /C \"echo \"A & B\"\""
     );
     TEST_ASSERT(
         windows_process_command_line_for_test(
@@ -618,14 +618,26 @@ static void assert_windows_cmd_command_line_preserves_command_quotes(const std::
             shell,
             false
         )
-        == shell + " /D /C for /f \"tokens=1,2\" %A in (\"alpha beta\") do @echo %A:%B"
+        == shell + " /D /S /C \"for /f \"tokens=1,2\" %A in (\"alpha beta\") do @echo %A:%B\""
     );
     TEST_ASSERT(
-        windows_process_command_line_for_test("echo ok", shell, true) == shell + " /C echo ok"
+        windows_process_command_line_for_test("echo ok", shell, true)
+        == shell + " /S /C \"echo ok\""
     );
     TEST_ASSERT(
         windows_process_command_line_for_test("echo ok", "C:\\Program Files\\cmd.exe", false)
-        == "\"C:\\Program Files\\cmd.exe\" /D /C echo ok"
+        == "\"C:\\Program Files\\cmd.exe\" /D /S /C \"echo ok\""
+    );
+    TEST_ASSERT(
+        windows_process_command_line_for_test(
+            "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoProfile -Command \"Write-Output "
+            "ok\"",
+            shell,
+            false
+        )
+        == shell
+               + " /D /S /C \"\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoProfile -Command "
+                 "\"Write-Output ok\"\""
     );
 }
 
@@ -728,6 +740,36 @@ static void assert_windows_cmd_quotes_survive_non_tty_and_tty(
     }
     TEST_ASSERT(tty_output.find("for:alpha:beta\n") != std::string::npos);
     TEST_ASSERT(tty_output.find("\\\"") == std::string::npos);
+}
+
+static void assert_windows_cmd_runs_quoted_script_path_with_spaces(
+    SessionStore& store,
+    const fs::path& root,
+    const std::string& shell,
+    const YieldTimeConfig& yield_time
+) {
+    if (shell != "cmd.exe" && shell != "cmd") {
+        return;
+    }
+
+    const fs::path script_dir = root / "quoted command path";
+    fs::create_directories(script_dir);
+    const fs::path script = script_dir / "emit marker.cmd";
+    write_text_file(script, "@echo quoted-path-ok\r\n");
+    const Json response = start_test_command(
+        store,
+        test_exec_pty::windows_quote_arg(script.string()),
+        root.string(),
+        shell,
+        false,
+        5000UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time,
+        64UL
+    );
+
+    TEST_ASSERT(response.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(normalize_output(response.at("output").get<std::string>()) == "quoted-path-ok\n");
 }
 #endif
 
@@ -2300,6 +2342,7 @@ int main(int argc, char** argv) {
     assert_token_limiting(store, root, shell, yield_time);
 #ifdef _WIN32
     assert_windows_cmd_quotes_survive_non_tty_and_tty(store, root, shell, yield_time);
+    assert_windows_cmd_runs_quoted_script_path_with_spaces(store, root, shell, yield_time);
 #endif
     assert_posix_locale_and_late_output(store, root, shell, yield_time);
     assert_posix_exit_drain_boundaries(store, root, shell, yield_time);

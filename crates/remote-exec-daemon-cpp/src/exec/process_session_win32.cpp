@@ -111,9 +111,13 @@ std::string windows_process_command_line(
     if (!login && is_windows_cmd_family(lower)) {
         out << " /D";
     }
-    out << " /C";
-    if (!command.empty()) {
-        out << ' ' << command;
+    if (is_windows_cmd_family(lower)) {
+        out << " /S /C \"" << command << '"';
+    } else {
+        out << " /C";
+        if (!command.empty()) {
+            out << ' ' << command;
+        }
     }
     return out.str();
 }
