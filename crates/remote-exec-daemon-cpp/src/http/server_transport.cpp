@@ -78,7 +78,7 @@ unsigned long controlled_read_wait_ms(
 }
 
 bool wait_for_controlled_read(
-    SOCKET client,
+    ConnectionTransport& client,
     const HttpReadControl& read_control,
     std::uint64_t deadline_ms
 ) {
@@ -90,8 +90,7 @@ bool wait_for_controlled_read(
             return true;
         }
 
-        const int ready =
-            wait_socket_readable(client, controlled_read_wait_ms(read_control, deadline_ms));
+        const int ready = client.wait_readable(controlled_read_wait_ms(read_control, deadline_ms));
         if (ready > 0) {
             return true;
         }
@@ -108,7 +107,7 @@ bool wait_for_controlled_read(
 } // namespace
 
 bool try_read_http_request_head(
-    SOCKET client,
+    ConnectionTransport& client,
     std::size_t max_header_bytes,
     HttpRequestHead* head
 ) {
@@ -117,7 +116,7 @@ bool try_read_http_request_head(
     std::size_t search_offset = 0;
 
     for (;;) {
-        const int received = recv_bounded(client, buffer, sizeof(buffer), 0);
+        const int received = client.read(buffer, sizeof(buffer));
         if (received == 0) {
             if (data.empty()) {
                 return false;
@@ -158,7 +157,7 @@ bool try_read_http_request_head(
 }
 
 bool try_read_http_request_head_controlled(
-    SOCKET client,
+    ConnectionTransport& client,
     std::size_t max_header_bytes,
     const HttpReadControl& read_control,
     HttpRequestHead* head
@@ -179,7 +178,7 @@ bool try_read_http_request_head_controlled(
             throw BadHttpRequest("incomplete http request");
         }
 
-        const int received = recv_bounded(client, buffer, sizeof(buffer), 0);
+        const int received = client.read(buffer, sizeof(buffer));
         if (received == 0) {
             if (data.empty()) {
                 return false;
@@ -220,7 +219,7 @@ bool try_read_http_request_head_controlled(
     throw BadHttpRequest("incomplete http request");
 }
 
-HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes) {
+HttpRequestHead read_http_request_head(ConnectionTransport& client, std::size_t max_header_bytes) {
     HttpRequestHead head;
     if (try_read_http_request_head(client, max_header_bytes, &head)) {
         return head;
@@ -229,8 +228,32 @@ HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_byt
     throw BadHttpRequest("incomplete http request");
 }
 
-HttpRequestBodyStream::HttpRequestBodyStream(
+bool try_read_http_request_head(
     SOCKET client,
+    std::size_t max_header_bytes,
+    HttpRequestHead* head
+) {
+    std::shared_ptr<ConnectionTransport> transport = make_borrowed_connection_transport(client);
+    return try_read_http_request_head(*transport, max_header_bytes, head);
+}
+
+bool try_read_http_request_head_controlled(
+    SOCKET client,
+    std::size_t max_header_bytes,
+    const HttpReadControl& read_control,
+    HttpRequestHead* head
+) {
+    std::shared_ptr<ConnectionTransport> transport = make_borrowed_connection_transport(client);
+    return try_read_http_request_head_controlled(*transport, max_header_bytes, read_control, head);
+}
+
+HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes) {
+    std::shared_ptr<ConnectionTransport> transport = make_borrowed_connection_transport(client);
+    return read_http_request_head(*transport, max_header_bytes);
+}
+
+HttpRequestBodyStream::HttpRequestBodyStream(
+    const std::shared_ptr<ConnectionTransport>& client,
     const std::string& initial_body,
     const HttpRequestBodyFraming& framing,
     std::size_t max_body_bytes
@@ -239,7 +262,7 @@ HttpRequestBodyStream::HttpRequestBodyStream(
 }
 
 HttpRequestBodyStream::HttpRequestBodyStream(
-    SOCKET client,
+    const std::shared_ptr<ConnectionTransport>& client,
     const std::string& initial_body,
     const HttpRequestBodyFraming& framing,
     std::size_t max_body_bytes,
@@ -253,6 +276,37 @@ HttpRequestBodyStream::HttpRequestBodyStream(
     if (!framing_.chunked && remaining_content_length_ > max_body_bytes_) {
         throw BadHttpRequest("http request body too large");
     }
+}
+
+HttpRequestBodyStream::HttpRequestBodyStream(
+    SOCKET client,
+    const std::string& initial_body,
+    const HttpRequestBodyFraming& framing,
+    std::size_t max_body_bytes
+)
+    : HttpRequestBodyStream(
+          make_borrowed_connection_transport(client),
+          initial_body,
+          framing,
+          max_body_bytes,
+          nullptr
+      ) {
+}
+
+HttpRequestBodyStream::HttpRequestBodyStream(
+    SOCKET client,
+    const std::string& initial_body,
+    const HttpRequestBodyFraming& framing,
+    std::size_t max_body_bytes,
+    const HttpReadControl* read_control
+)
+    : HttpRequestBodyStream(
+          make_borrowed_connection_transport(client),
+          initial_body,
+          framing,
+          max_body_bytes,
+          read_control
+      ) {
 }
 
 std::size_t HttpRequestBodyStream::read(char* data, std::size_t max_size) {
@@ -369,7 +423,7 @@ void HttpRequestBodyStream::ensure_raw_line() {
 
 void HttpRequestBodyStream::append_from_socket() {
     if (read_control_ != nullptr) {
-        if (!wait_for_controlled_read(client_, *read_control_, read_deadline_ms_)) {
+        if (!wait_for_controlled_read(*client_, *read_control_, read_deadline_ms_)) {
             throw HttpConnectionShutdown("server shutting down");
         }
         if (read_deadline_expired(*read_control_, read_deadline_ms_)) {
@@ -378,7 +432,7 @@ void HttpRequestBodyStream::append_from_socket() {
     }
 
     char buffer[HTTP_READ_BUFFER_SIZE];
-    const int received = recv_bounded(client_, buffer, sizeof(buffer), 0);
+    const int received = client_->read(buffer, sizeof(buffer));
     if (received == 0) {
         if (read_control_ != nullptr && read_control_->should_stop()) {
             throw HttpConnectionShutdown("server shutting down");
@@ -525,13 +579,13 @@ bool HttpRequestBodyStream::try_append_from_socket_until(std::uint64_t deadline_
     const unsigned long wait_ms = deadline_ms == 0U
                                       ? DEFAULT_CONTROLLED_READ_POLL_TIMEOUT_MS
                                       : platform::monotonic_deadline_remaining_ms(deadline_ms);
-    const int ready = wait_socket_readable(client_, wait_ms == 0UL ? 1UL : wait_ms);
+    const int ready = client_->wait_readable(wait_ms == 0UL ? 1UL : wait_ms);
     if (ready <= 0) {
         return false;
     }
 
     char buffer[HTTP_READ_BUFFER_SIZE];
-    const int received = recv_bounded(client_, buffer, sizeof(buffer), 0);
+    const int received = client_->read(buffer, sizeof(buffer));
     if (received <= 0) {
         return false;
     }
@@ -578,17 +632,24 @@ bool HttpRequestBodyStream::try_consume_chunk_trailers_until(std::uint64_t deadl
     }
 }
 
-HttpChunkedResponseWriter::HttpChunkedResponseWriter(SOCKET client) : client_(client) {
+HttpChunkedResponseWriter::HttpChunkedResponseWriter(
+    const std::shared_ptr<ConnectionTransport>& client
+)
+    : client_(client) {
+}
+
+HttpChunkedResponseWriter::HttpChunkedResponseWriter(SOCKET client)
+    : client_(make_borrowed_connection_transport(client)) {
 }
 
 void HttpChunkedResponseWriter::write_chunk(const char* data, std::size_t size) {
     std::ostringstream header;
     header << std::hex << size << "\r\n";
-    send_all(client_, header.str());
+    send_all(*client_, header.str());
     if (size != 0U) {
-        send_all_bytes(client_, data, size);
+        send_all_bytes(*client_, data, size);
     }
-    send_all(client_, "\r\n");
+    send_all(*client_, "\r\n");
 }
 
 void HttpChunkedResponseWriter::write_chunk(const std::string& data) {
@@ -596,7 +657,7 @@ void HttpChunkedResponseWriter::write_chunk(const std::string& data) {
 }
 
 void HttpChunkedResponseWriter::finish() {
-    send_all(client_, "0\r\n\r\n");
+    send_all(*client_, "0\r\n\r\n");
 }
 
 std::string read_request_body_to_string(HttpRequestBodyStream* body) {
@@ -611,14 +672,14 @@ std::string read_request_body_to_string(HttpRequestBodyStream* body) {
     }
 }
 
-void send_all(SOCKET client, const std::string& data) {
+void send_all(ConnectionTransport& client, const std::string& data) {
     send_all_bytes(client, data.data(), data.size());
 }
 
-void send_all_bytes(SOCKET client, const char* data, std::size_t size) {
+void send_all_bytes(ConnectionTransport& client, const char* data, std::size_t size) {
     std::size_t offset = 0;
     while (offset < size) {
-        const int sent = send_bounded(client, data + offset, size - offset, 0);
+        const int sent = client.write(data + offset, size - offset);
         if (sent <= 0) {
             const int error = last_socket_error();
             throw SocketSendError(
@@ -630,12 +691,40 @@ void send_all_bytes(SOCKET client, const char* data, std::size_t size) {
     }
 }
 
-void send_http_response(SOCKET client, const HttpResponse& response) {
+void send_http_response(ConnectionTransport& client, const HttpResponse& response) {
     send_all(client, render_http_response(response));
 }
 
-void send_http_response_head(SOCKET client, const HttpResponse& response) {
+void send_http_response_head(ConnectionTransport& client, const HttpResponse& response) {
     send_all(client, render_http_response_head(response));
+}
+
+void send_http_upgrade_response(
+    ConnectionTransport& client,
+    const std::string& upgrade_token,
+    const std::map<std::string, std::string>& headers
+) {
+    send_all(client, render_http_upgrade_response(upgrade_token, headers));
+}
+
+void send_all(SOCKET client, const std::string& data) {
+    std::shared_ptr<ConnectionTransport> transport = make_borrowed_connection_transport(client);
+    send_all(*transport, data);
+}
+
+void send_all_bytes(SOCKET client, const char* data, std::size_t size) {
+    std::shared_ptr<ConnectionTransport> transport = make_borrowed_connection_transport(client);
+    send_all_bytes(*transport, data, size);
+}
+
+void send_http_response(SOCKET client, const HttpResponse& response) {
+    std::shared_ptr<ConnectionTransport> transport = make_borrowed_connection_transport(client);
+    send_http_response(*transport, response);
+}
+
+void send_http_response_head(SOCKET client, const HttpResponse& response) {
+    std::shared_ptr<ConnectionTransport> transport = make_borrowed_connection_transport(client);
+    send_http_response_head(*transport, response);
 }
 
 void send_http_upgrade_response(
@@ -643,7 +732,8 @@ void send_http_upgrade_response(
     const std::string& upgrade_token,
     const std::map<std::string, std::string>& headers
 ) {
-    send_all(client, render_http_upgrade_response(upgrade_token, headers));
+    std::shared_ptr<ConnectionTransport> transport = make_borrowed_connection_transport(client);
+    send_http_upgrade_response(*transport, upgrade_token, headers);
 }
 
 SOCKET create_listener(const DaemonConfig& config) {

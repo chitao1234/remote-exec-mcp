@@ -139,7 +139,7 @@ RpcRouteExecution upgrade_execution(const PortTunnelUpgradeRoute& upgrade) {
     execution.close_after_response = true;
     execution.upgrade_token = upgrade.upgrade_token;
     execution.upgrade_headers = upgrade.response_headers;
-    execution.run_upgrade = [upgrade](SOCKET client) {
+    execution.run_upgrade = [upgrade](const std::shared_ptr<ConnectionTransport>& client) {
         run_port_tunnel_route_upgrade(upgrade, client);
     };
     return execution;

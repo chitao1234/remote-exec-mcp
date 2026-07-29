@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 
+#include "http/connection_transport.h"
 #include "port_tunnel_session_state.h"
 
 class PortTunnelService;
@@ -12,6 +13,10 @@ class PortTunnelSender;
 
 class PortTunnelConnection : public std::enable_shared_from_this<PortTunnelConnection> {
 public:
+    PortTunnelConnection(
+        const std::shared_ptr<ConnectionTransport>& client,
+        const std::shared_ptr<PortTunnelService>& service
+    );
     PortTunnelConnection(SOCKET client, const std::shared_ptr<PortTunnelService>& service);
 
     void run();
@@ -100,7 +105,7 @@ private:
     void require_mode(PortTunnelMode mode, PortTunnelProtocol protocol, const std::string& message);
     bool session_mode_active();
 
-    SOCKET client_;
+    std::shared_ptr<ConnectionTransport> client_;
     std::shared_ptr<PortTunnelService> service_;
     std::shared_ptr<PortTunnelSender> sender_;
     ConnectionLocalStreams connection_local_streams_;

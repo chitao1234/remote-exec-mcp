@@ -2,8 +2,8 @@ HOST_CXX ?= c++
 STRESS_RUNS ?= 10
 STRESS_JOBS ?= 8
 
-HOST_PROD_OBJ_DIR := $(OBJ_DIR)/host-prod
-HOST_TEST_OBJ_DIR := $(OBJ_DIR)/host-test
+HOST_PROD_OBJ_DIR := $(OBJ_DIR)/host-prod-$(TLS)
+HOST_TEST_OBJ_DIR := $(OBJ_DIR)/host-test-$(TLS)
 POSIX_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp
 POSIX_CONFIG_HEADER := $(BUILD_DIR)/generated/remote_exec_cpp_config.h
 POSIX_CONFIG_SCRIPT := $(MAKEFILE_DIR)scripts/write_posix_config_header.sh

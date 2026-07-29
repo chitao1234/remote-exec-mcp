@@ -64,6 +64,9 @@ HttpResponse prepare_port_tunnel_route_upgrade(
     return response;
 }
 
-void run_port_tunnel_route_upgrade(const PortTunnelUpgradeRoute& upgrade, SOCKET client) {
+void run_port_tunnel_route_upgrade(
+    const PortTunnelUpgradeRoute& upgrade,
+    const std::shared_ptr<ConnectionTransport>& client
+) {
     run_port_tunnel_connection(client, upgrade.context.service, upgrade.context.limits);
 }

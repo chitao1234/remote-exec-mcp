@@ -307,7 +307,8 @@ void ServerRuntime::accept_loop() {
             }
 
             if (!connections_.try_start(std::move(client), [this](SOCKET socket) {
-                    UniqueSocket client(socket);
+                    std::shared_ptr<ConnectionTransport> client =
+                        make_plain_connection_transport(UniqueSocket(socket));
                     handle_client(
                         make_http_connection_context(
                             this->config_,
@@ -316,7 +317,7 @@ void ServerRuntime::accept_loop() {
                             this->services_,
                             this->shutdown_
                         ),
-                        std::move(client)
+                        client
                     );
                 })) {
                 log_message(LOG_WARN, "server", "dropping client connection during shutdown");
@@ -345,7 +346,8 @@ void ServerRuntime::reverse_loop() {
             reverse_live_.fetch_add(1UL);
             if (!connections_.try_start(std::move(client), [this](SOCKET socket) {
                     std::shared_ptr<std::atomic<bool>> became_busy(new std::atomic<bool>(false));
-                    UniqueSocket client(socket);
+                    std::shared_ptr<ConnectionTransport> client =
+                        make_plain_connection_transport(UniqueSocket(socket));
                     handle_client(
                         make_http_connection_context(
                             this->config_,
@@ -354,7 +356,7 @@ void ServerRuntime::reverse_loop() {
                             this->services_,
                             this->shutdown_
                         ),
-                        std::move(client),
+                        client,
                         [this, became_busy]() {
                             if (!became_busy->exchange(true)) {
                                 this->reverse_busy_.fetch_add(1UL);

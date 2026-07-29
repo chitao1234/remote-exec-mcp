@@ -84,24 +84,31 @@ PortTunnelFrame make_tunnel_ready_frame(
 }
 
 void run_port_tunnel_connection(
-    SOCKET client,
+    const std::shared_ptr<ConnectionTransport>& client,
     std::shared_ptr<PortTunnelService>& service,
     const PortForwardLimitConfig& limits
 ) {
     if (!service) {
         service = create_port_tunnel_service(limits);
     }
-    set_socket_timeout_ms(client, limits.tunnel_io_timeout_ms);
+    client->set_timeout_ms(limits.tunnel_io_timeout_ms);
     std::shared_ptr<PortTunnelConnection> tunnel(new PortTunnelConnection(client, service));
     tunnel->run();
+}
+
+PortTunnelConnection::PortTunnelConnection(
+    const std::shared_ptr<ConnectionTransport>& client,
+    const std::shared_ptr<PortTunnelService>& service
+)
+    : client_(client), service_(service), sender_(new PortTunnelSender(client, service)),
+      generation_(0ULL), mode_(PortTunnelMode::Unopened), protocol_(PortTunnelProtocol::None) {
 }
 
 PortTunnelConnection::PortTunnelConnection(
     SOCKET client,
     const std::shared_ptr<PortTunnelService>& service
 )
-    : client_(client), service_(service), sender_(new PortTunnelSender(client, service)),
-      generation_(0ULL), mode_(PortTunnelMode::Unopened), protocol_(PortTunnelProtocol::None) {
+    : PortTunnelConnection(make_borrowed_connection_transport(client), service) {
 }
 
 bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
@@ -137,7 +144,7 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
         }
         const unsigned long wait_ms =
             deadline.remaining_ms_bounded(RETAINED_SOCKET_POLL_TIMEOUT_MS);
-        const int ready = wait_socket_readable(client_, wait_ms);
+        const int ready = client_->wait_readable(wait_ms);
         if (ready < 0) {
             log_message(
                 LOG_DEBUG,
@@ -154,8 +161,7 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
         if (ready == 0) {
             continue;
         }
-        const int received =
-            recv_bounded(client_, reinterpret_cast<char*>(data + offset), size - offset, 0);
+        const int received = client_->read(reinterpret_cast<char*>(data + offset), size - offset);
         if (received == 0) {
             log_message(
                 LOG_DEBUG,

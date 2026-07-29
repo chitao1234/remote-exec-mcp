@@ -59,7 +59,10 @@ RUNTIME_SRCS = \
 
 PLATFORM_SRCS = $(SOURCE_PREFIX)src/platform/platform.cpp
 
+CONNECTION_TRANSPORT_SRCS = $(SOURCE_PREFIX)src/http/connection_transport.cpp
+
 HTTP_SRCS = \
+	$(CONNECTION_TRANSPORT_SRCS) \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_connection.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
@@ -142,11 +145,13 @@ SOCKET_WINDOWS_SRCS = \
 	$(SOURCE_PREFIX)src/platform/socket_win32.cpp
 
 SERVER_TRANSPORT_POSIX_SRCS = \
+	$(CONNECTION_TRANSPORT_SRCS) \
 	$(SOCKET_POSIX_SRCS) \
 	$(SOURCE_PREFIX)src/http/server_transport.cpp \
 	$(SOURCE_PREFIX)src/http/server_transport_posix.cpp
 
 SERVER_TRANSPORT_WINDOWS_SRCS = \
+	$(CONNECTION_TRANSPORT_SRCS) \
 	$(SOCKET_WINDOWS_SRCS) \
 	$(SOURCE_PREFIX)src/http/server_transport.cpp \
 	$(SOURCE_PREFIX)src/http/server_transport_win32.cpp

@@ -8,6 +8,7 @@
 #include <string>
 
 #include "core/config.h"
+#include "http/connection_transport.h"
 #include "http/http_codec.h"
 #include "http/http_helpers.h"
 #include "platform/socket.h"
@@ -51,6 +52,19 @@ struct HttpRequestHead {
 class HttpRequestBodyStream {
 public:
     HttpRequestBodyStream(
+        const std::shared_ptr<ConnectionTransport>& client,
+        const std::string& initial_body,
+        const HttpRequestBodyFraming& framing,
+        std::size_t max_body_bytes
+    );
+    HttpRequestBodyStream(
+        const std::shared_ptr<ConnectionTransport>& client,
+        const std::string& initial_body,
+        const HttpRequestBodyFraming& framing,
+        std::size_t max_body_bytes,
+        const HttpReadControl* read_control
+    );
+    HttpRequestBodyStream(
         SOCKET client,
         const std::string& initial_body,
         const HttpRequestBodyFraming& framing,
@@ -84,7 +98,7 @@ private:
     bool try_ensure_raw_line_until(std::uint64_t deadline_ms);
     bool try_consume_chunk_trailers_until(std::uint64_t deadline_ms);
 
-    SOCKET client_;
+    std::shared_ptr<ConnectionTransport> client_;
     const HttpReadControl* read_control_;
     std::uint64_t read_deadline_ms_;
     std::string raw_;
@@ -99,6 +113,7 @@ private:
 
 class HttpChunkedResponseWriter {
 public:
+    explicit HttpChunkedResponseWriter(const std::shared_ptr<ConnectionTransport>& client);
     explicit HttpChunkedResponseWriter(SOCKET client);
 
     void write_chunk(const char* data, std::size_t size);
@@ -106,10 +121,21 @@ public:
     void finish();
 
 private:
-    SOCKET client_;
+    std::shared_ptr<ConnectionTransport> client_;
 };
 
+bool try_read_http_request_head(
+    ConnectionTransport& client,
+    std::size_t max_header_bytes,
+    HttpRequestHead* head
+);
 bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, HttpRequestHead* head);
+bool try_read_http_request_head_controlled(
+    ConnectionTransport& client,
+    std::size_t max_header_bytes,
+    const HttpReadControl& read_control,
+    HttpRequestHead* head
+);
 bool try_read_http_request_head_controlled(
     SOCKET client,
     std::size_t max_header_bytes,
@@ -117,7 +143,17 @@ bool try_read_http_request_head_controlled(
     HttpRequestHead* head
 );
 HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes);
+HttpRequestHead read_http_request_head(ConnectionTransport& client, std::size_t max_header_bytes);
 std::string read_request_body_to_string(HttpRequestBodyStream* body);
+void send_all(ConnectionTransport& client, const std::string& data);
+void send_all_bytes(ConnectionTransport& client, const char* data, std::size_t size);
+void send_http_response(ConnectionTransport& client, const HttpResponse& response);
+void send_http_response_head(ConnectionTransport& client, const HttpResponse& response);
+void send_http_upgrade_response(
+    ConnectionTransport& client,
+    const std::string& upgrade_token,
+    const std::map<std::string, std::string>& headers
+);
 void send_all(SOCKET client, const std::string& data);
 void send_all_bytes(SOCKET client, const char* data, std::size_t size);
 void send_http_response(SOCKET client, const HttpResponse& response);

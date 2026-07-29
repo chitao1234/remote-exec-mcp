@@ -2,6 +2,7 @@
 
 #include <limits>
 
+#include "http/server_transport.h"
 #include "port_forward/port_forward_socket_ops.h"
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
@@ -15,7 +16,10 @@ const unsigned long MIN_CONTROL_QUEUE_BYTES = 4UL * 1024UL;
 
 } // namespace
 
-PortTunnelSender::PortTunnelSender(SOCKET client, const std::shared_ptr<PortTunnelService>& service)
+PortTunnelSender::PortTunnelSender(
+    const std::shared_ptr<ConnectionTransport>& client,
+    const std::shared_ptr<PortTunnelService>& service
+)
     : client_(client), service_(service), writer_started_(false), writer_shutdown_(false),
       writer_finished_(false), writer_thread_(), closed_(false), queued_data_bytes_(0UL),
       queued_control_bytes_(0UL) {
@@ -112,8 +116,8 @@ void PortTunnelSender::writer_loop() {
         }
 
         try {
-            send_all_socket(
-                client_,
+            send_all(
+                *client_,
                 std::string(reinterpret_cast<const char*>(queued.bytes.data()), queued.bytes.size())
             );
         } catch (const std::exception& ex) {

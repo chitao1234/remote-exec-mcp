@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "http/connection_transport.h"
 #include "platform/basic_mutex.h"
 #include "port_tunnel_common.h"
 
@@ -15,7 +16,10 @@ class PortTunnelService;
 
 class PortTunnelSender {
 public:
-    PortTunnelSender(SOCKET client, const std::shared_ptr<PortTunnelService>& service);
+    PortTunnelSender(
+        const std::shared_ptr<ConnectionTransport>& client,
+        const std::shared_ptr<PortTunnelService>& service
+    );
     ~PortTunnelSender();
 
     bool closed() const;
@@ -83,7 +87,7 @@ private:
     );
     void drain_queued_frame_reservations_locked();
 
-    SOCKET client_;
+    std::shared_ptr<ConnectionTransport> client_;
     std::shared_ptr<PortTunnelService> service_;
     BasicMutex writer_mutex_;
     BasicCondVar writer_cond_;

@@ -52,7 +52,7 @@ bool log_send_failure(const SocketSendError& ex) {
     return false;
 }
 
-bool try_send_response(SOCKET client, const HttpResponse& response) {
+bool try_send_response(ConnectionTransport& client, const HttpResponse& response) {
     try {
         send_http_response(client, response);
         return true;
@@ -62,7 +62,7 @@ bool try_send_response(SOCKET client, const HttpResponse& response) {
     }
 }
 
-bool try_send_response_head(SOCKET client, const HttpResponse& response) {
+bool try_send_response_head(ConnectionTransport& client, const HttpResponse& response) {
     try {
         send_http_response_head(client, response);
         return true;
@@ -90,7 +90,7 @@ void log_request_result(const HttpRequest& request, int status, std::uint64_t st
 }
 
 bool try_send_upgrade_response(
-    SOCKET client,
+    ConnectionTransport& client,
     const std::string& upgrade_token,
     const std::map<std::string, std::string>& headers
 ) {
@@ -105,7 +105,7 @@ bool try_send_upgrade_response(
 
 int handle_client_request(
     const HttpConnectionContext& context,
-    SOCKET client,
+    const std::shared_ptr<ConnectionTransport>& client,
     const HttpRequestHead& request_head,
     const HttpReadControl& read_control,
     bool* close_after_response
@@ -121,7 +121,7 @@ int handle_client_request(
     if (body_policy.min_idle_timeout_ms > body_read_control.idle_timeout_ms) {
         body_read_control.idle_timeout_ms =
             std::max(body_read_control.idle_timeout_ms, body_policy.min_idle_timeout_ms);
-        set_socket_timeout_ms(client, body_read_control.idle_timeout_ms);
+        client->set_timeout_ms(body_read_control.idle_timeout_ms);
     }
     HttpRequestBodyStream body(
         client,
@@ -144,7 +144,7 @@ int handle_client_request(
 
     if (execution.kind == RPC_ROUTE_EXECUTION_STREAMING_RESPONSE) {
         log_request_result(request, execution.response.status, started_at_ms);
-        if (!try_send_response_head(client, execution.response)) {
+        if (!try_send_response_head(*client, execution.response)) {
             *close_after_response = true;
             return execution.response.status;
         }
@@ -157,7 +157,7 @@ int handle_client_request(
         log_request_result(request, execution.response.status, started_at_ms);
         *close_after_response = true;
         if (!try_send_upgrade_response(
-                client,
+                *client,
                 execution.upgrade_token,
                 execution.upgrade_headers
             )) {
@@ -171,7 +171,7 @@ int handle_client_request(
         *close_after_response = true;
     }
     log_request_result(request, execution.response.status, started_at_ms);
-    if (!try_send_response(client, execution.response)) {
+    if (!try_send_response(*client, execution.response)) {
         *close_after_response = true;
     }
     return execution.response.status;
@@ -181,7 +181,7 @@ int handle_client_request(
 
 void handle_client(
     const HttpConnectionContext& context,
-    UniqueSocket client,
+    const std::shared_ptr<ConnectionTransport>& client,
     const std::function<void()>& on_first_request
 ) {
     HttpReadControl read_control;
@@ -192,10 +192,10 @@ void handle_client(
     bool first_request = true;
     for (;;) {
         try {
-            set_socket_timeout_ms(client.get(), context.http_connection_idle_timeout_ms);
+            client->set_timeout_ms(context.http_connection_idle_timeout_ms);
             HttpRequestHead request_head;
             if (!try_read_http_request_head_controlled(
-                    client.get(),
+                    *client,
                     context.max_request_header_bytes,
                     read_control,
                     &request_head
@@ -208,12 +208,12 @@ void handle_client(
                     on_first_request();
                 }
             }
-            set_socket_timeout_ms(client.get(), context.http_connection_idle_timeout_ms);
+            client->set_timeout_ms(context.http_connection_idle_timeout_ms);
 
             bool close_after_response = false;
             handle_client_request(
                 context,
-                client.get(),
+                client,
                 request_head,
                 read_control,
                 &close_after_response
@@ -228,14 +228,14 @@ void handle_client(
             HttpResponse response;
             response.status = 400;
             write_rpc_error(response, 400, "bad_request", ex.what());
-            try_send_response(client.get(), response);
+            try_send_response(*client, response);
             return;
         } catch (const HttpParseError& ex) {
             log_message(LOG_WARN, "server", ex.what());
             HttpResponse response;
             response.status = 400;
             write_rpc_error(response, 400, "bad_request", ex.what());
-            try_send_response(client.get(), response);
+            try_send_response(*client, response);
             return;
         } catch (const SocketSendError& ex) {
             log_send_failure(ex);
@@ -245,8 +245,16 @@ void handle_client(
             HttpResponse response;
             response.status = 500;
             write_rpc_error(response, 500, "internal_error", ex.what());
-            try_send_response(client.get(), response);
+            try_send_response(*client, response);
             return;
         }
     }
+}
+
+void handle_client(
+    const HttpConnectionContext& context,
+    UniqueSocket client,
+    const std::function<void()>& on_first_request
+) {
+    handle_client(context, make_plain_connection_transport(std::move(client)), on_first_request);
 }

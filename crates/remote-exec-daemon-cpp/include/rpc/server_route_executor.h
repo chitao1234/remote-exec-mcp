@@ -3,11 +3,11 @@
 #include <cstddef>
 #include <functional>
 #include <map>
+#include <memory>
 #include <string>
 
 #include "http/http_helpers.h"
 #include "http/server_transport.h"
-#include "platform/socket.h"
 #include "runtime/route_context.h"
 
 enum RpcRouteBodyHandling {
@@ -32,7 +32,7 @@ enum RpcRouteExecutionKind {
 };
 
 typedef std::function<void(HttpChunkedResponseWriter*)> RpcStreamingResponseWriter;
-typedef std::function<void(SOCKET)> RpcUpgradeHandler;
+typedef std::function<void(const std::shared_ptr<ConnectionTransport>&)> RpcUpgradeHandler;
 
 struct RpcRouteExecution {
     RpcRouteExecution()

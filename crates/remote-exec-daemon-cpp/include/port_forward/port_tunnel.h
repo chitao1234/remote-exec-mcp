@@ -3,12 +3,12 @@
 #include <memory>
 
 #include "core/config.h"
-#include "platform/socket.h"
+#include "http/connection_transport.h"
 
 class PortTunnelService;
 
 void run_port_tunnel_connection(
-    SOCKET client,
+    const std::shared_ptr<ConnectionTransport>& client,
     std::shared_ptr<PortTunnelService>& service,
     const PortForwardLimitConfig& limits
 );
