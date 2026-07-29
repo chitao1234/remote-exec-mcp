@@ -146,10 +146,11 @@ ServerRuntime::ServerRuntime(const DaemonConfig& config)
         sandbox_.compiled = compile_filesystem_sandbox(config.sandbox);
     }
     services_.port_tunnel = create_port_tunnel_service(config.port_forward_limits);
-    if (config_.connection_mode == "listen" && config_.transport == "tls") {
+    if (config_.connection_mode == ConnectionMode::Listen && config_.transport == Transport::Tls) {
         tls_server_context_ = make_tls_server_context(config_);
     }
-    if (config_.connection_mode == "reverse" && config_.reverse_transport == "tls") {
+    if (config_.connection_mode == ConnectionMode::Reverse
+        && config_.reverse_transport == Transport::Tls) {
         tls_client_context_ = make_tls_client_context(config_);
     }
 }
@@ -323,7 +324,7 @@ void ServerRuntime::accept_loop() {
             if (!connections_.try_start(std::move(client), [this](SOCKET socket) {
                     try {
                         std::shared_ptr<ConnectionTransport> client =
-                            this->config_.transport == "tls"
+                            this->config_.transport == Transport::Tls
                                 ? make_tls_server_connection_transport(
                                       UniqueSocket(socket),
                                       this->tls_server_context_,
@@ -372,7 +373,7 @@ void ServerRuntime::reverse_loop() {
         try {
             UniqueSocket socket = connect_reverse_socket(config_);
             std::shared_ptr<ConnectionTransport> client =
-                config_.reverse_transport == "tls"
+                config_.reverse_transport == Transport::Tls
                     ? make_tls_client_connection_transport(
                           std::move(socket),
                           tls_client_context_,

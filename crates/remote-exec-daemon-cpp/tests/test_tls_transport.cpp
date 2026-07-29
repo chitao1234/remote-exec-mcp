@@ -20,7 +20,7 @@ const char TLS_FIXTURE_DIR[] = "tests/fixtures/tls/";
 
 DaemonConfig make_server_config(const std::string& pinned_client) {
     DaemonConfig config;
-    config.transport = "tls";
+    config.transport = Transport::Tls;
     config.tls_cert_pem = std::string(TLS_FIXTURE_DIR) + "server.pem";
     config.tls_key_pem = std::string(TLS_FIXTURE_DIR) + "server.key";
     config.tls_ca_pem = std::string(TLS_FIXTURE_DIR) + "ca.pem";
@@ -30,7 +30,7 @@ DaemonConfig make_server_config(const std::string& pinned_client) {
 
 DaemonConfig make_client_config() {
     DaemonConfig config;
-    config.reverse_transport = "tls";
+    config.reverse_transport = Transport::Tls;
     config.reverse_tls_cert_pem = std::string(TLS_FIXTURE_DIR) + "client.pem";
     config.reverse_tls_key_pem = std::string(TLS_FIXTURE_DIR) + "client.key";
     config.reverse_tls_ca_pem = std::string(TLS_FIXTURE_DIR) + "ca.pem";

@@ -167,7 +167,7 @@ int main() {
             + quote_config_value(default_workdir.string()) + "\n"
     );
     const DaemonConfig reverse_config = load_config(reverse_config_path.string());
-    TEST_ASSERT(reverse_config.connection_mode == "reverse");
+    TEST_ASSERT(reverse_config.connection_mode == ConnectionMode::Reverse);
     TEST_ASSERT(reverse_config.reverse_broker_host == "broker.example.com");
     TEST_ASSERT(reverse_config.reverse_broker_port == 9555);
     TEST_ASSERT(reverse_config.reverse_min_idle_connections == 3UL);
@@ -189,7 +189,7 @@ int main() {
             + quote_config_value(default_workdir.string()) + "\n"
     );
     const DaemonConfig tls_config = load_config(tls_config_path.string());
-    TEST_ASSERT(tls_config.transport == "tls");
+    TEST_ASSERT(tls_config.transport == Transport::Tls);
     TEST_ASSERT(tls_config.tls_cert_pem == "daemon.pem");
     TEST_ASSERT(tls_config.tls_pinned_client_cert_pem == "broker.pem");
     TEST_ASSERT(tls_config.tls_handshake_timeout_ms == 4321UL);
@@ -210,7 +210,7 @@ int main() {
             + quote_config_value(default_workdir.string()) + "\n"
     );
     const DaemonConfig reverse_tls_config = load_config(reverse_tls_config_path.string());
-    TEST_ASSERT(reverse_tls_config.reverse_transport == "tls");
+    TEST_ASSERT(reverse_tls_config.reverse_transport == Transport::Tls);
     TEST_ASSERT(reverse_tls_config.reverse_bearer_token.empty());
     TEST_ASSERT(reverse_tls_config.reverse_tls_server_name == "broker.example.com");
     TEST_ASSERT(config.default_workdir == spaced_workdir.string());

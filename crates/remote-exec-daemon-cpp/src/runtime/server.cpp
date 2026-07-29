@@ -123,7 +123,7 @@ int run_server(const DaemonConfig& config) {
         g_runtime_for_shutdown = &runtime;
         SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
 #endif
-        if (config.connection_mode == "reverse") {
+        if (config.connection_mode == ConnectionMode::Reverse) {
             runtime.start_reverse_loop();
         } else {
             runtime.start_accept_loop();
@@ -131,13 +131,15 @@ int run_server(const DaemonConfig& config) {
             write_test_bound_addr_file(runtime.config(), bound_port);
         }
 
-        LogMessageBuilder message(config.connection_mode == "reverse" ? "connecting" : "listening");
+        LogMessageBuilder message(
+            config.connection_mode == ConnectionMode::Reverse ? "connecting" : "listening"
+        );
         message.raw("on")
             .raw(runtime.config().listen_host)
             .field(
                 "port",
-                config.connection_mode == "reverse" ? config.reverse_broker_port
-                                                    : runtime.bound_port()
+                config.connection_mode == ConnectionMode::Reverse ? config.reverse_broker_port
+                                                                  : runtime.bound_port()
             )
             .quoted_field("target", runtime.config().target)
             .bool_field("http_auth_enabled", !runtime.config().http_auth_bearer_token.empty())

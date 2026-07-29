@@ -162,7 +162,7 @@ static std::string read_all_from_transport(ConnectionTransport& client) {
 
 static void assert_tls_health_request(const DaemonConfig& base_config) {
     DaemonConfig config = base_config;
-    config.transport = "tls";
+    config.transport = Transport::Tls;
     config.tls_cert_pem = "tests/fixtures/tls/server.pem";
     config.tls_key_pem = "tests/fixtures/tls/server.key";
     config.tls_ca_pem = "tests/fixtures/tls/ca.pem";

@@ -32,6 +32,9 @@ constexpr std::size_t DEFAULT_MAX_REQUEST_HEADER_BYTES = 64UL * 1024UL;
 constexpr std::size_t DEFAULT_MAX_REQUEST_BODY_BYTES = 512UL * 1024UL * 1024UL;
 constexpr unsigned long DEFAULT_MAX_OPEN_SESSIONS = 64UL;
 
+enum class ConnectionMode { Listen, Reverse };
+enum class Transport { Http, Tls };
+
 struct YieldTimeOperationConfig {
     YieldTimeOperationConfig() : default_ms(0UL), max_ms(0UL), min_ms(0UL) {}
 
@@ -92,8 +95,8 @@ struct PortForwardLimitConfig {
 };
 
 struct DaemonConfig {
-    std::string connection_mode = "listen";
-    std::string transport = "http";
+    ConnectionMode connection_mode = ConnectionMode::Listen;
+    Transport transport = Transport::Http;
     std::string target;
     std::string listen_host;
     int listen_port;
@@ -109,7 +112,7 @@ struct DaemonConfig {
     unsigned long tls_handshake_timeout_ms = DEFAULT_TLS_HANDSHAKE_TIMEOUT_MS;
     std::string reverse_broker_host;
     int reverse_broker_port = 0;
-    std::string reverse_transport = "http";
+    Transport reverse_transport = Transport::Http;
     std::string reverse_bearer_token;
     std::string reverse_tls_cert_pem;
     std::string reverse_tls_key_pem;

@@ -264,10 +264,14 @@ static std::string read_http_auth_bearer_token(const ConfigValues& values) {
     return it->second;
 }
 
-static void validate_transport(const std::string& transport, const std::string& key) {
-    if (transport != "http" && transport != "tls") {
-        throw std::runtime_error(key + " must be http or tls");
+static Transport parse_transport(const std::string& value, const std::string& key) {
+    if (value == "http") {
+        return Transport::Http;
     }
+    if (value == "tls") {
+        return Transport::Tls;
+    }
+    throw std::runtime_error(key + " must be http or tls");
 }
 
 static void require_nonempty_tls_path(const std::string& value, const std::string& key) {
@@ -277,8 +281,8 @@ static void require_nonempty_tls_path(const std::string& value, const std::strin
 }
 
 static void read_listen_tls_config(const ConfigValues& values, DaemonConfig* config) {
-    config->transport = read_optional_string(values, "transport", "http");
-    validate_transport(config->transport, "transport");
+    config->transport =
+        parse_transport(read_optional_string(values, "transport", "http"), "transport");
     config->tls_cert_pem = read_optional_string(values, "tls_cert_pem", "");
     config->tls_key_pem = read_optional_string(values, "tls_key_pem", "");
     config->tls_ca_pem = read_optional_string(values, "tls_ca_pem", "");
@@ -289,7 +293,7 @@ static void read_listen_tls_config(const ConfigValues& values, DaemonConfig* con
         "tls_handshake_timeout_ms",
         DEFAULT_TLS_HANDSHAKE_TIMEOUT_MS
     );
-    if (config->transport == "tls") {
+    if (config->transport == Transport::Tls) {
         require_nonempty_tls_path(config->tls_cert_pem, "tls_cert_pem");
         require_nonempty_tls_path(config->tls_key_pem, "tls_key_pem");
         require_nonempty_tls_path(config->tls_ca_pem, "tls_ca_pem");
@@ -300,13 +304,15 @@ static void read_listen_tls_config(const ConfigValues& values, DaemonConfig* con
 }
 
 static void read_reverse_tls_config(const ConfigValues& values, DaemonConfig* config) {
-    config->reverse_transport = read_optional_string(values, "reverse_transport", "http");
-    validate_transport(config->reverse_transport, "reverse_transport");
+    config->reverse_transport = parse_transport(
+        read_optional_string(values, "reverse_transport", "http"),
+        "reverse_transport"
+    );
     config->reverse_tls_cert_pem = read_optional_string(values, "reverse_tls_cert_pem", "");
     config->reverse_tls_key_pem = read_optional_string(values, "reverse_tls_key_pem", "");
     config->reverse_tls_ca_pem = read_optional_string(values, "reverse_tls_ca_pem", "");
     config->reverse_tls_server_name = read_optional_string(values, "reverse_tls_server_name", "");
-    if (config->reverse_transport == "tls") {
+    if (config->reverse_transport == Transport::Tls) {
         require_nonempty_tls_path(config->reverse_tls_cert_pem, "reverse_tls_cert_pem");
         require_nonempty_tls_path(config->reverse_tls_key_pem, "reverse_tls_key_pem");
         require_nonempty_tls_path(config->reverse_tls_ca_pem, "reverse_tls_ca_pem");
@@ -433,7 +439,7 @@ static FilesystemSandbox read_sandbox(const ConfigValues& values) {
 
 static void validate_daemon_config(const DaemonConfig& config) {
     validate_existing_directory(config.default_workdir, "default_workdir");
-    if (config.connection_mode == "listen" && config.listen_port == 0
+    if (config.connection_mode == ConnectionMode::Listen && config.listen_port == 0
         && config.test_bound_addr_file.empty()) {
         throw std::runtime_error("listen_port = 0 requires test_bound_addr_file");
     }
@@ -471,13 +477,19 @@ unsigned long resolve_yield_time_ms(
 DaemonConfig load_config(const std::string& path) {
     const ConfigValues values = read_config_values(path);
     DaemonConfig config;
-    config.connection_mode = read_optional_string(values, "connection_mode", "listen");
+    const std::string connection_mode_str =
+        read_optional_string(values, "connection_mode", "listen");
+    if (connection_mode_str != "listen" && connection_mode_str != "reverse") {
+        throw std::runtime_error("connection_mode must be listen or reverse");
+    }
+    config.connection_mode =
+        connection_mode_str == "reverse" ? ConnectionMode::Reverse : ConnectionMode::Listen;
     config.target = read_required_string(values, "target");
-    if (config.connection_mode == "listen") {
+    if (config.connection_mode == ConnectionMode::Listen) {
         config.listen_host = read_required_string(values, "listen_host");
         config.listen_port = read_listen_port(values);
         read_listen_tls_config(values, &config);
-    } else if (config.connection_mode == "reverse") {
+    } else {
         config.reverse_broker_host = read_required_string(values, "reverse_broker_host");
         config.reverse_broker_port = static_cast<int>(parse_unsigned_long(
             read_required_string(values, "reverse_broker_port"),
@@ -485,7 +497,7 @@ DaemonConfig load_config(const std::string& path) {
         ));
         read_reverse_tls_config(values, &config);
         config.reverse_bearer_token = read_optional_string(values, "reverse_bearer_token", "");
-        if (config.reverse_transport == "http" && config.reverse_bearer_token.empty()) {
+        if (config.reverse_transport == Transport::Http && config.reverse_bearer_token.empty()) {
             throw std::runtime_error("missing required config key: reverse_bearer_token");
         }
         config.reverse_min_idle_connections = read_optional_unsigned_long(
@@ -510,8 +522,6 @@ DaemonConfig load_config(const std::string& path) {
             || config.reverse_min_idle_connections > config.reverse_max_connections) {
             throw std::runtime_error("invalid reverse connection limits");
         }
-    } else {
-        throw std::runtime_error("connection_mode must be listen or reverse");
     }
     config.test_bound_addr_file = read_optional_string(values, "test_bound_addr_file", "");
     config.default_workdir = read_required_string(values, "default_workdir");
