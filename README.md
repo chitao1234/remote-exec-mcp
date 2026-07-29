@@ -483,6 +483,12 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 - Hung health probes are bounded by the target `timeouts.startup_probe_ms`;
   timing out a health probe marks the target unhealthy in the broker cache.
 - Broker-daemon calls are bounded by per-target connect/read/request timeouts.
+- Timed-out broker-daemon requests are never replayed. One isolated timeout is
+  treated as a transient fluctuation; after two consecutive timeouts without a
+  successful HTTP response, the broker replaces the direct target's HTTP
+  client pool. Reverse targets additionally close their queued and active lanes
+  so the daemon reconnects them. Any successful response clears the timeout
+  streak.
 - `exec_command` and `write_stdin` use at least `yield_time_ms` plus a small
   slow-host margin for their daemon RPC timeout, so long polls can exceed the
   normal `timeouts.request_ms` deadline.

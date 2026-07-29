@@ -288,6 +288,10 @@ impl TargetHandle {
         self.backend.health_probe_timeout()
     }
 
+    pub(crate) async fn recover_connection_after_timeout(&self) -> Option<String> {
+        self.backend.recover_connection_after_timeout().await
+    }
+
     pub(crate) async fn cached_daemon_info_after_verification(
         &self,
         name: &str,
@@ -469,9 +473,7 @@ impl TargetHandle {
         }
     }
 
-    pub(crate) async fn mark_health_probe_timed_out(&self, name: &str, timeout: Duration) {
-        let timeout_ms = timeout.as_millis();
-        let error = format!("target health probe timed out after {timeout_ms} ms");
+    pub(crate) async fn mark_health_probe_timed_out(&self, name: &str, error: String) {
         let (previous_snapshot, current_snapshot) = {
             let mut runtime = self.runtime.lock().await;
             let previous_snapshot = runtime.snapshot();
@@ -488,7 +490,7 @@ impl TargetHandle {
         ) {
             tracing::debug!(
                 target = %name,
-                timeout_ms = timeout_ms as u64,
+                error = %error,
                 "target health probe timed out"
             );
         }

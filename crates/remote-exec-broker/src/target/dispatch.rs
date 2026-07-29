@@ -68,6 +68,10 @@ trait TargetBackendClient: Send + Sync {
     fn health_probe_timeout(&self) -> Option<std::time::Duration> {
         None
     }
+
+    fn recover_connection_after_timeout(&self) -> BoxFuture<'_, Option<String>> {
+        Box::pin(async { None })
+    }
 }
 
 impl TargetBackend {
@@ -148,6 +152,10 @@ impl TargetBackend {
 
     pub(crate) fn health_probe_timeout(&self) -> Option<std::time::Duration> {
         self.client.health_probe_timeout()
+    }
+
+    pub(crate) async fn recover_connection_after_timeout(&self) -> Option<String> {
+        self.client.recover_connection_after_timeout().await
     }
 
     pub(crate) async fn port_tunnel(
@@ -234,6 +242,12 @@ impl TargetBackendClient for DaemonClient {
 
     fn health_probe_timeout(&self) -> Option<std::time::Duration> {
         Some(DaemonClient::health_probe_timeout(self))
+    }
+
+    fn recover_connection_after_timeout(&self) -> BoxFuture<'_, Option<String>> {
+        Box::pin(async move {
+            Some(DaemonClient::recover_connection_after_timeout(self, "health probe", None).await)
+        })
     }
 }
 

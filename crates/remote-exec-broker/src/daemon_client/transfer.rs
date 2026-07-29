@@ -74,7 +74,9 @@ impl DaemonClient {
         req: &TransferExportRequest,
     ) -> Result<TransferExportStream, DaemonClientError> {
         let started = std::time::Instant::now();
-        let response = self.send_transfer_export_request(req, started).await?;
+        let (response, connection_generation) =
+            self.send_transfer_export_request(req, started).await?;
+        self.record_connection_success(connection_generation);
         let metadata = self.transfer_export_metadata(req, response.headers())?;
         Ok(TransferExportStream {
             source_type: metadata.source_type,
@@ -90,11 +92,11 @@ impl DaemonClient {
         let started = std::time::Instant::now();
         let stream = open_transfer_import_stream(archive_path).await?;
         let body = transfer_stream::encode_request_body(stream);
-        let response = self
+        let (response, connection_generation) = self
             .send_transfer_import_request(req, body, started)
             .await?;
         let summary = self
-            .decode_transfer_import_response(req, started, response)
+            .decode_transfer_import_response(req, started, response, connection_generation)
             .await?;
         tracing::debug!(
             target = %self.target_name,
@@ -117,10 +119,10 @@ impl DaemonClient {
     {
         let started = std::time::Instant::now();
         let body = transfer_stream::encode_request_body(stream);
-        let response = self
+        let (response, connection_generation) = self
             .send_transfer_import_request(req, body, started)
             .await?;
-        self.decode_transfer_import_response(req, started, response)
+        self.decode_transfer_import_response(req, started, response, connection_generation)
             .await
     }
 
@@ -128,7 +130,7 @@ impl DaemonClient {
         &self,
         req: &TransferExportRequest,
         started: std::time::Instant,
-    ) -> Result<reqwest::Response, DaemonClientError> {
+    ) -> Result<(reqwest::Response, u64), DaemonClientError> {
         let context = RpcCallContext::path(
             &self.target_name,
             &self.base_url,
@@ -136,19 +138,24 @@ impl DaemonClient {
             RpcCallKind::TransferExport,
             req.path.as_str(),
         );
-        self.send_request_with_policy(
-            self.request("/v1/transfer/export")
-                .header(
-                    TRANSFER_STREAM_VERSION_HEADER,
-                    TRANSFER_STREAM_PROTOCOL_VERSION.to_string(),
-                )
-                .json(req)
-                .send(),
-            RpcErrorDecodePolicy::Lenient,
-            |err| context.log_transport_error(err),
-            |status| context.log_status_error(status),
-        )
-        .await
+        let (request, connection_generation) = self.request_with_generation("/v1/transfer/export");
+        let response = self
+            .send_request_with_policy(
+                request
+                    .header(
+                        TRANSFER_STREAM_VERSION_HEADER,
+                        TRANSFER_STREAM_PROTOCOL_VERSION.to_string(),
+                    )
+                    .json(req)
+                    .send(),
+                connection_generation,
+                "daemon transfer export request",
+                RpcErrorDecodePolicy::Lenient,
+                |err| context.log_transport_error(err),
+                |status| context.log_status_error(status),
+            )
+            .await?;
+        Ok((response, connection_generation))
     }
 
     fn transfer_export_metadata(
@@ -193,7 +200,7 @@ impl DaemonClient {
         req: &TransferImportRequest,
         body: reqwest::Body,
         started: std::time::Instant,
-    ) -> Result<reqwest::Response, DaemonClientError> {
+    ) -> Result<(reqwest::Response, u64), DaemonClientError> {
         let context = RpcCallContext::destination_path(
             &self.target_name,
             &self.base_url,
@@ -201,14 +208,19 @@ impl DaemonClient {
             RpcCallKind::TransferImport,
             req.destination_path.as_str(),
         );
-        let request = codec::apply_import_headers(self.request("/v1/transfer/import"), req);
-        self.send_request_with_policy(
-            request.body(body).send(),
-            RpcErrorDecodePolicy::Lenient,
-            |err| context.log_transport_error(err),
-            |status| context.log_status_error(status),
-        )
-        .await
+        let (request, connection_generation) = self.request_with_generation("/v1/transfer/import");
+        let request = codec::apply_import_headers(request, req);
+        let response = self
+            .send_request_with_policy(
+                request.body(body).send(),
+                connection_generation,
+                "daemon transfer import request",
+                RpcErrorDecodePolicy::Lenient,
+                |err| context.log_transport_error(err),
+                |status| context.log_status_error(status),
+            )
+            .await?;
+        Ok((response, connection_generation))
     }
 
     async fn decode_transfer_import_response(
@@ -216,6 +228,7 @@ impl DaemonClient {
         req: &TransferImportRequest,
         started: std::time::Instant,
         response: reqwest::Response,
+        connection_generation: u64,
     ) -> Result<TransferImportResponse, DaemonClientError> {
         let context = RpcCallContext::destination_path(
             &self.target_name,
@@ -226,6 +239,8 @@ impl DaemonClient {
         );
         self.decode_json_response(
             response,
+            connection_generation,
+            "daemon transfer import response",
             |err| context.log_read_error(err),
             |err| context.log_decode_error(err),
         )

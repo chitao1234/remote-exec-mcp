@@ -142,8 +142,9 @@ async fn build_remote_target_handle(
     target_config: &config::TargetConfig,
     reverse_transport: Option<&ReverseTransportManager>,
 ) -> anyhow::Result<TargetHandle> {
-    let reverse_base_url = reverse_transport.and_then(|transport| transport.base_url(name));
-    let client = DaemonClient::new(name.to_string(), target_config, reverse_base_url).await?;
+    let reverse_connection =
+        reverse_transport.and_then(|transport| transport.target_connection(name));
+    let client = DaemonClient::new(name.to_string(), target_config, reverse_connection).await?;
     match tokio::time::timeout(
         target_config.timeouts.startup_probe_timeout(),
         client.target_info(),
@@ -151,6 +152,9 @@ async fn build_remote_target_handle(
     .await
     {
         Err(_) => {
+            let _ = client
+                .recover_connection_after_timeout("startup identity probe", None)
+                .await;
             log_remote_target_startup_probe_timeout(name, target_config);
             Ok(TargetHandle::unavailable(
                 TargetBackend::remote(client),
@@ -567,7 +571,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reverse_http_target_connects_after_broker_startup() {
+    async fn reverse_http_target_recovers_after_daemon_restart() {
         use crate::config::{HttpAuthConfig, ReverseListenerConfig, ReverseTransport};
         use remote_exec_daemon::config::{
             DaemonConfig, DaemonConnectionMode, DaemonTransport, ReverseConnectionConfig,
@@ -666,8 +670,9 @@ mod tests {
         .unwrap();
         let cancel = tokio_util::sync::CancellationToken::new();
         let daemon_cancel = cancel.clone();
+        let first_daemon = daemon.clone();
         let daemon_task = tokio::spawn(async move {
-            remote_exec_daemon::run_until(daemon, daemon_cancel.cancelled()).await
+            remote_exec_daemon::run_until(first_daemon, daemon_cancel.cancelled()).await
         });
 
         tokio::time::timeout(Duration::from_secs(5), async {
@@ -689,8 +694,50 @@ mod tests {
         })
         .await
         .expect("reverse target should become healthy");
+        let first_daemon_instance_id = state
+            .target_status_snapshots()
+            .await
+            .into_iter()
+            .find(|target| target.name == "reverse-target")
+            .and_then(|target| target.daemon_info)
+            .expect("reverse target info should be cached")
+            .daemon_instance_id;
+
         cancel.cancel();
         daemon_task.await.unwrap().unwrap();
+
+        let restart_cancel = tokio_util::sync::CancellationToken::new();
+        let restarted_daemon_cancel = restart_cancel.clone();
+        let restarted_daemon_task = tokio::spawn(async move {
+            remote_exec_daemon::run_until(daemon, restarted_daemon_cancel.cancelled()).await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let refreshed = state
+                    .refresh_remote_target_health_and_dependents("reverse-target")
+                    .await
+                    .is_ok();
+                let restarted = state
+                    .target_status_snapshots()
+                    .await
+                    .into_iter()
+                    .find(|target| target.name == "reverse-target")
+                    .is_some_and(|target| {
+                        target.healthy
+                            && target.daemon_info.is_some_and(|info| {
+                                info.daemon_instance_id != first_daemon_instance_id
+                            })
+                    });
+                if refreshed && restarted {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("reverse target should recover after daemon restart");
+        restart_cancel.cancel();
+        restarted_daemon_task.await.unwrap().unwrap();
     }
 
     #[cfg(feature = "broker-tls")]

@@ -22,10 +22,28 @@ type BoxIo = Box<dyn ReverseIo>;
 struct ReverseLane {
     io: BoxIo,
     daemon_instance_id: String,
+    connection_reset: CancellationToken,
+}
+
+const MAX_RETIRED_DAEMON_INSTANCES: usize = 64;
+
+struct LanePoolState {
+    lanes: VecDeque<ReverseLane>,
+    active_daemon_instance_id: Option<String>,
+    retired_daemon_instance_ids: VecDeque<String>,
+    connection_reset: CancellationToken,
+}
+
+enum LaneInsertOutcome {
+    Added,
+    Replaced {
+        previous_daemon_instance_id: String,
+        dropped_lanes: usize,
+    },
 }
 
 struct LanePool {
-    lanes: Mutex<VecDeque<ReverseLane>>,
+    state: Mutex<LanePoolState>,
     notify: Notify,
     closed: AtomicBool,
 }
@@ -33,26 +51,74 @@ struct LanePool {
 impl LanePool {
     fn new() -> Self {
         Self {
-            lanes: Mutex::new(VecDeque::new()),
+            state: Mutex::new(LanePoolState {
+                lanes: VecDeque::new(),
+                active_daemon_instance_id: None,
+                retired_daemon_instance_ids: VecDeque::new(),
+                connection_reset: CancellationToken::new(),
+            }),
             notify: Notify::new(),
             closed: AtomicBool::new(false),
         }
     }
 
-    async fn insert(&self, lane: ReverseLane) -> anyhow::Result<()> {
+    async fn insert(&self, mut lane: ReverseLane) -> anyhow::Result<LaneInsertOutcome> {
         anyhow::ensure!(
             !self.closed.load(Ordering::Acquire),
             "reverse lane pool is closed"
         );
-        self.lanes.lock().await.push_back(lane);
+        let mut state = self.state.lock().await;
+        anyhow::ensure!(
+            !state
+                .retired_daemon_instance_ids
+                .contains(&lane.daemon_instance_id),
+            "reverse lane belongs to a retired daemon instance"
+        );
+        let outcome = match state.active_daemon_instance_id.as_deref() {
+            Some(active_daemon_instance_id)
+                if active_daemon_instance_id != lane.daemon_instance_id =>
+            {
+                let previous_daemon_instance_id = active_daemon_instance_id.to_string();
+                let dropped_lanes = state.lanes.len();
+                state.lanes.clear();
+                state
+                    .retired_daemon_instance_ids
+                    .push_back(previous_daemon_instance_id.clone());
+                if state.retired_daemon_instance_ids.len() > MAX_RETIRED_DAEMON_INSTANCES {
+                    state.retired_daemon_instance_ids.pop_front();
+                }
+                state.active_daemon_instance_id = Some(lane.daemon_instance_id.clone());
+                LaneInsertOutcome::Replaced {
+                    previous_daemon_instance_id,
+                    dropped_lanes,
+                }
+            }
+            Some(_) => LaneInsertOutcome::Added,
+            None => {
+                state.active_daemon_instance_id = Some(lane.daemon_instance_id.clone());
+                LaneInsertOutcome::Added
+            }
+        };
+        lane.connection_reset = state.connection_reset.clone();
+        state.lanes.push_back(lane);
+        drop(state);
         self.notify.notify_one();
-        Ok(())
+        Ok(outcome)
+    }
+
+    async fn reset_connections(&self) -> usize {
+        let mut state = self.state.lock().await;
+        let dropped_lanes = state.lanes.len();
+        state.lanes.clear();
+        state.connection_reset.cancel();
+        state.connection_reset = CancellationToken::new();
+        dropped_lanes
     }
 
     async fn take(&self, timeout: Duration) -> anyhow::Result<ReverseLane> {
         tokio::time::timeout(timeout, async {
             loop {
-                if let Some(lane) = self.lanes.lock().await.pop_front() {
+                if let Some(lane) = self.state.lock().await.lanes.pop_front() {
                     return Ok(lane);
                 }
                 anyhow::ensure!(
@@ -86,6 +152,22 @@ struct ReverseTransportInner {
 #[derive(Clone)]
 pub(crate) struct ReverseTransportManager {
     inner: Arc<ReverseTransportInner>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ReverseTargetConnection {
+    base_url: String,
+    pool: Arc<LanePool>,
+}
+
+impl ReverseTargetConnection {
+    pub(crate) fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    pub(crate) async fn reset_connections(&self) -> usize {
+        self.pool.reset_connections().await
+    }
 }
 
 impl Drop for ReverseTransportInner {
@@ -146,11 +228,14 @@ impl ReverseTransportManager {
         Ok(Some(manager))
     }
 
-    pub(crate) fn base_url(&self, target: &str) -> Option<&str> {
+    pub(crate) fn target_connection(&self, target: &str) -> Option<ReverseTargetConnection> {
         self.inner
             .targets
             .get(target)
-            .map(|target| target.base_url.as_str())
+            .map(|target| ReverseTargetConnection {
+                base_url: target.base_url.clone(),
+                pool: target.pool.clone(),
+            })
     }
 
     async fn spawn_acceptor(&self, config: ReverseListenerConfig) -> anyhow::Result<()> {
@@ -223,9 +308,15 @@ async fn serve_bridge(
             match pool.take(lane_timeout).await {
                 Ok(mut lane) => {
                     tracing::debug!(target = %target, daemon_instance_id = %lane.daemon_instance_id, "paired reverse lane");
-                    if let Err(err) = tokio::io::copy_bidirectional(&mut local, &mut lane.io).await
-                    {
-                        tracing::debug!(target = %target, error = %err, "reverse bridge connection ended with error");
+                    tokio::select! {
+                        result = tokio::io::copy_bidirectional(&mut local, &mut lane.io) => {
+                            if let Err(err) = result {
+                                tracing::debug!(target = %target, error = %err, "reverse bridge connection ended with error");
+                            }
+                        }
+                        _ = lane.connection_reset.cancelled() => {
+                            tracing::debug!(target = %target, daemon_instance_id = %lane.daemon_instance_id, "reset reverse bridge connection");
+                        }
                     }
                 }
                 Err(err) => {
@@ -330,13 +421,28 @@ async fn accept_reverse_lane(
         },
     )
     .await?;
-    target
+    let outcome = target
         .pool
         .insert(ReverseLane {
             io,
-            daemon_instance_id: registration.daemon_instance_id,
+            daemon_instance_id: registration.daemon_instance_id.clone(),
+            connection_reset: CancellationToken::new(),
         })
-        .await
+        .await?;
+    if let LaneInsertOutcome::Replaced {
+        previous_daemon_instance_id,
+        dropped_lanes,
+    } = outcome
+    {
+        tracing::info!(
+            target = %registration.target,
+            previous_daemon_instance_id,
+            daemon_instance_id = %registration.daemon_instance_id,
+            dropped_lanes,
+            "replaced reverse daemon instance"
+        );
+    }
+    Ok(())
 }
 
 #[cfg(feature = "broker-tls")]
@@ -387,4 +493,109 @@ async fn write_ack(io: &mut BoxIo, ack: &ReverseRegistrationAck) -> anyhow::Resu
     io.write_all(&payload).await?;
     io.flush().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{TargetConfig, TargetTimeoutConfig};
+
+    fn lane(daemon_instance_id: &str) -> ReverseLane {
+        let (io, _) = tokio::io::duplex(64);
+        ReverseLane {
+            io: Box::new(io),
+            daemon_instance_id: daemon_instance_id.to_string(),
+            connection_reset: CancellationToken::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn new_daemon_instance_replaces_queued_lanes() {
+        let pool = LanePool::new();
+        pool.insert(lane("old-instance")).await.unwrap();
+        pool.insert(lane("old-instance")).await.unwrap();
+        pool.insert(lane("new-instance")).await.unwrap();
+
+        let lane = pool.take(Duration::from_millis(10)).await.unwrap();
+        assert_eq!(lane.daemon_instance_id, "new-instance");
+    }
+
+    #[tokio::test]
+    async fn retired_daemon_instance_cannot_reclaim_pool() {
+        let pool = LanePool::new();
+        pool.insert(lane("old-instance")).await.unwrap();
+        pool.insert(lane("new-instance")).await.unwrap();
+
+        let err = match pool.insert(lane("old-instance")).await {
+            Ok(_) => panic!("retired daemon instance should be rejected"),
+            Err(err) => err,
+        };
+        assert!(
+            err.to_string().contains("retired daemon instance"),
+            "unexpected error: {err:#}"
+        );
+        let lane = pool.take(Duration::from_millis(10)).await.unwrap();
+        assert_eq!(lane.daemon_instance_id, "new-instance");
+    }
+
+    #[tokio::test]
+    async fn connection_reset_drops_queued_and_cancels_checked_out_lanes() {
+        let pool = LanePool::new();
+        pool.insert(lane("instance")).await.unwrap();
+        pool.insert(lane("instance")).await.unwrap();
+        let checked_out = pool.take(Duration::from_millis(10)).await.unwrap();
+
+        assert_eq!(pool.reset_connections().await, 1);
+        checked_out.connection_reset.cancelled().await;
+        assert!(
+            pool.take(Duration::from_millis(10)).await.is_err(),
+            "queued lanes should be discarded after reset"
+        );
+    }
+
+    #[tokio::test]
+    async fn reverse_connection_reset_requires_consecutive_timeouts() {
+        let pool = Arc::new(LanePool::new());
+        pool.insert(lane("instance")).await.unwrap();
+        pool.insert(lane("instance")).await.unwrap();
+        let checked_out = pool.take(Duration::from_millis(10)).await.unwrap();
+        let reverse_connection = ReverseTargetConnection {
+            base_url: "http://127.0.0.1:9".to_string(),
+            pool: pool.clone(),
+        };
+        let client = crate::daemon_client::DaemonClient::new(
+            "reverse-target",
+            &TargetConfig {
+                base_url: "reverse://".to_string(),
+                http_auth: None,
+                timeouts: TargetTimeoutConfig::default(),
+                ca_pem: None,
+                client_cert_pem: None,
+                client_key_pem: None,
+                allow_insecure_http: false,
+                skip_server_name_verification: false,
+                pinned_server_cert_pem: None,
+                expected_daemon_name: Some("reverse-target".to_string()),
+            },
+            Some(reverse_connection),
+        )
+        .await
+        .unwrap();
+
+        let first = client
+            .recover_connection_after_timeout("test request", None)
+            .await;
+        assert!(first.contains("connection was retained"));
+        assert!(!checked_out.connection_reset.is_cancelled());
+
+        let second = client
+            .recover_connection_after_timeout("test request", None)
+            .await;
+        assert!(second.contains("connection was reset"));
+        assert!(checked_out.connection_reset.is_cancelled());
+        assert!(
+            pool.take(Duration::from_millis(10)).await.is_err(),
+            "queued reverse lanes should be discarded after escalation"
+        );
+    }
 }
