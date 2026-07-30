@@ -121,10 +121,12 @@ impl ToolResponse {
 #[derive(Debug, Clone, Default)]
 struct RemoteExecClientHandler;
 
+const CLIENT_NAME: &str = "remote-exec";
+
 impl ClientHandler for RemoteExecClientHandler {
     fn get_info(&self) -> ClientInfo {
         let mut info = ClientInfo::default();
-        info.client_info.name = "remote-exec".to_string();
+        info.client_info.name = CLIENT_NAME.to_string();
         info.client_info.version = env!("CARGO_PKG_VERSION").to_string();
         info
     }

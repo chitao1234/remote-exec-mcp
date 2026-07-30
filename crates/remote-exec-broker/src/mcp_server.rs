@@ -77,21 +77,17 @@ fn format_correlated_error(
     message: &str,
     context: &crate::request_context::RequestContextSnapshot,
 ) -> String {
-    match context.target() {
-        Some(target) => format!(
-            "request_id={} tool={} target={}: {}",
-            context.request_id(),
-            context.tool(),
-            target,
-            message
-        ),
-        None => format!(
-            "request_id={} tool={}: {}",
-            context.request_id(),
-            context.tool(),
-            message
-        ),
-    }
+    let tgt = context
+        .target()
+        .map(|t| format!(" target={t}"))
+        .unwrap_or_default();
+    format!(
+        "request_id={} tool={}{}: {}",
+        context.request_id(),
+        context.tool(),
+        tgt,
+        message
+    )
 }
 
 #[derive(Clone)]
@@ -163,7 +159,7 @@ pub(crate) async fn finish_scoped_tool_call(
 
         let result = future.await;
         let snapshot = crate::request_context::current()
-            .expect("request context should be available in scoped tool call");
+            .expect("finish_scoped_tool_call called outside a scope() block");
         let elapsed_ms = started.elapsed().as_millis() as u64;
         match &result {
             Ok(_) => {
@@ -181,7 +177,7 @@ pub(crate) async fn finish_scoped_tool_call(
                     tool = snapshot.tool(),
                     target = snapshot.target().unwrap_or("-"),
                     elapsed_ms,
-                    error = %format!("{err:#}"),
+                    error = %err,
                     "broker tool failed"
                 );
             }

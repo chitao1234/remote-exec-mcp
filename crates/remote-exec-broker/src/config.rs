@@ -680,8 +680,10 @@ fn validate_timeout_ms(target_name: &str, field: &str, value: u64) -> anyhow::Re
     Ok(())
 }
 
+const DEFAULT_STREAMABLE_HTTP_PATH: &str = "/mcp";
+
 fn default_streamable_http_path() -> String {
-    "/mcp".to_string()
+    DEFAULT_STREAMABLE_HTTP_PATH.to_string()
 }
 
 fn default_streamable_http_stateful() -> bool {

@@ -203,17 +203,19 @@ impl ReverseTransportManager {
             let listener = TcpListener::bind("127.0.0.1:0").await?;
             let addr = listener.local_addr()?;
             let lane_timeout = Duration::from_millis(listener_config.lane_wait_timeout_ms);
+            let key = name.clone();
             tokio::spawn(serve_bridge(
-                name.clone(),
+                key.clone(),
                 listener,
                 pool.clone(),
                 lane_timeout,
                 cancel.clone(),
             ));
             targets.insert(
-                name.clone(),
+                key,
                 ReverseTarget {
                     pool,
+                    // One-time setup: clone the bearer token from config for runtime auth checks.
                     bearer_token: target_config
                         .http_auth
                         .as_ref()

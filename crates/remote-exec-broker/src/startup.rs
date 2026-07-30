@@ -132,7 +132,7 @@ async fn insert_remote_targets(
 
     for (name, handle) in futures_util::future::join_all(probes).await {
         let handle = handle?;
-        targets.insert(name.clone(), handle);
+        targets.insert(name, handle);
     }
     Ok(())
 }
@@ -142,6 +142,7 @@ async fn build_remote_target_handle(
     target_config: &config::TargetConfig,
     reverse_transport: Option<&ReverseTransportManager>,
 ) -> anyhow::Result<TargetHandle> {
+    let expected_name = target_config.expected_daemon_name.clone();
     let reverse_connection =
         reverse_transport.and_then(|transport| transport.target_connection(name));
     let client = DaemonClient::new(name.to_string(), target_config, reverse_connection).await?;
@@ -158,7 +159,7 @@ async fn build_remote_target_handle(
             log_remote_target_startup_probe_timeout(name, target_config);
             Ok(TargetHandle::unavailable(
                 TargetBackend::remote(client),
-                target_config.expected_daemon_name.clone(),
+                expected_name,
             ))
         }
         Ok(Ok(info)) => {
@@ -170,7 +171,7 @@ async fn build_remote_target_handle(
             log_remote_target_available(name, target_config, &info);
             Ok(TargetHandle::verified(
                 TargetBackend::remote(client),
-                target_config.expected_daemon_name.clone(),
+                expected_name,
                 &info,
             ))
         }
@@ -178,7 +179,7 @@ async fn build_remote_target_handle(
             log_remote_target_unavailable(name, target_config, &err);
             Ok(TargetHandle::unavailable(
                 TargetBackend::remote(client),
-                target_config.expected_daemon_name.clone(),
+                expected_name,
             ))
         }
         Ok(Err(err)) => Err(err.into()),
