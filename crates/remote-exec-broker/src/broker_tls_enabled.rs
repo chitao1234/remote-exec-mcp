@@ -29,7 +29,7 @@ pub(crate) fn install_crypto_provider() -> anyhow::Result<()> {
     })
     .as_ref()
     .map(|_| ())
-    .map_err(|message| anyhow::anyhow!(message.clone()))
+    .map_err(|message| anyhow::anyhow!("{message}"))
 }
 
 pub(crate) fn ensure_broker_url_supported(_: &str) -> anyhow::Result<()> {

@@ -48,8 +48,7 @@ pub async fn export_path(
 
     let exported = remote_exec_host::transfer::export_path_byte_stream_local(state, req).await;
     let exported = crate::rpc_error::domain_response(exported)?;
-    let metadata =
-        codec::export_metadata(exported.source_type.clone(), exported.compression.clone());
+    let metadata = codec::export_metadata(exported.source_type, exported.compression);
     let body = Body::from_stream(framed_export_stream(exported.receiver));
     tracing::info!(
         source_type = codec::source_type_header_value(&metadata.source_type),
@@ -79,12 +78,12 @@ pub async fn import_archive(
         symlink_mode = ?metadata.symlink_mode,
         "transfer import received"
     );
-    let request = metadata.clone();
+    let destination_path = metadata.destination_path.clone();
     let reader = tokio_util::io::StreamReader::new(framed_import_data_stream(body).boxed());
-    let summary = remote_exec_host::transfer::import_archive_local(state, request, reader).await;
+    let summary = remote_exec_host::transfer::import_archive_local(state, metadata, reader).await;
     let summary = crate::rpc_error::domain_response(summary)?;
     tracing::info!(
-        destination_path = %metadata.destination_path,
+        destination_path = %destination_path,
         bytes_copied = summary.bytes_copied,
         files_copied = summary.files_copied,
         directories_copied = summary.directories_copied,
