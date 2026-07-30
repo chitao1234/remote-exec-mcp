@@ -40,7 +40,7 @@ impl TransferLimits {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferSourceType {
     File,
@@ -54,7 +54,7 @@ wire::wire_value_mappings!(TransferSourceType {
     Multiple => "multiple",
 });
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferOverwrite {
     Fail,
@@ -69,7 +69,7 @@ wire::wire_value_mappings!(TransferOverwrite {
     Replace => "replace",
 });
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferSymlinkMode {
     #[default]
@@ -84,7 +84,7 @@ wire::wire_value_mappings!(TransferSymlinkMode {
     Skip => "skip",
 });
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferCompression {
     #[default]
