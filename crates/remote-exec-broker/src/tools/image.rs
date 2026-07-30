@@ -9,15 +9,13 @@ pub async fn view_image(
     state: &crate::BrokerState,
     input: ViewImageInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    let target_name = input.target.clone();
-    crate::request_context::set_current_target(target_name.clone());
-    let detail = input.detail.clone();
+    crate::request_context::set_current_target(input.target.clone());
     let path = input.path.clone();
     tracing::info!(
         tool = "view_image",
-        target = %target_name,
+        target = %input.target,
         path = %path,
-        detail = detail.as_deref().unwrap_or("default"),
+        detail = input.detail.as_deref().unwrap_or("default"),
         has_workdir = input.workdir.is_some(),
         "image read requested"
     );
@@ -27,7 +25,7 @@ pub async fn view_image(
             &ImageReadRequest {
                 path: input.path,
                 workdir: input.workdir,
-                detail: input.detail.clone(),
+                detail: input.detail,
             },
         )
         .await?;
@@ -35,7 +33,7 @@ pub async fn view_image(
 
     tracing::info!(
         tool = "view_image",
-        target = %target_name,
+        target = %input.target,
         path = %path,
         detail = response.detail.as_deref().unwrap_or("default"),
         "image read completed"
@@ -60,5 +58,5 @@ fn content_from_data_url(image_url: &str) -> anyhow::Result<ContentBlock> {
         .and_then(|prefix| prefix.strip_suffix(";base64"))
         .context("image read did not return a base64 data URL")?;
 
-    Ok(ContentBlock::image(data.to_string(), mime_type.to_string()))
+    Ok(ContentBlock::image(data.to_owned(), mime_type.to_owned()))
 }
