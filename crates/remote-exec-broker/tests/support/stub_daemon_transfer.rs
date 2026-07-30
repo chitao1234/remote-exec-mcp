@@ -276,7 +276,7 @@ pub(super) async fn transfer_import(
         summarize_archive(&archive_body, &parsed_source_type, &compression);
 
     Ok(Json(TransferImportResponse {
-        source_type: parsed_source_type.clone(),
+        source_type: parsed_source_type,
         bytes_copied,
         files_copied,
         directories_copied,

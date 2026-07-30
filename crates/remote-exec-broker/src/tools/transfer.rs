@@ -49,7 +49,7 @@ pub async fn transfer_files(
             requested_destination: plan.requested_destination.clone(),
             destination: plan.destination.endpoint().clone(),
             destination_mode: plan.destination_mode.clone(),
-            symlink_mode: plan.symlink_mode.clone(),
+            symlink_mode: plan.symlink_mode,
             source_type,
             summary,
         },

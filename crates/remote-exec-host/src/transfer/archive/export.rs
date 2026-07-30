@@ -47,7 +47,7 @@ pub async fn export_path_to_archive(
     let exported = export_path_to_file(
         path,
         temp_path.as_ref(),
-        compression.clone(),
+        compression,
         symlink_mode,
         exclude,
         sandbox,
@@ -76,7 +76,7 @@ pub async fn export_path_to_file(
         prepare::prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root)
             .await?;
     let archive_path = archive_path.to_path_buf();
-    let source_type = prepared.source_type.clone();
+    let source_type = prepared.source_type;
 
     let warnings =
         single::write_prepared_export_to_file(prepared, archive_path, compression, symlink_mode)
@@ -99,9 +99,9 @@ pub async fn export_path_to_byte_stream(
     let prepared =
         prepare::prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root)
             .await?;
-    let source_type = prepared.source_type.clone();
-    let stream_compression = compression.clone();
-    let stream_symlink_mode = symlink_mode.clone();
+    let source_type = prepared.source_type;
+    let stream_compression = compression;
+    let stream_symlink_mode = symlink_mode;
     let (sender, receiver) = mpsc::channel(EXPORT_STREAM_CHANNEL_DEPTH);
 
     tokio::task::spawn_blocking(move || {

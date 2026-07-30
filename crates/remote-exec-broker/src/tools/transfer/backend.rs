@@ -341,7 +341,7 @@ impl TransferBackend for RemoteTransferBackend<'_> {
                 self.target.transfer_export_stream(request).await,
             )
             .await?;
-            let source_type = exported.source_type.clone();
+            let source_type = exported.source_type;
             Ok(TransferArchiveStream::new(
                 source_type,
                 exported.into_async_read(),

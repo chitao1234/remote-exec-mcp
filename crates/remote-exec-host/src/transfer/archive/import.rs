@@ -271,7 +271,7 @@ fn extract_archive_from_reader<R: Read>(
 
 fn new_import_summary(request: &TransferImportRequest, replaced: bool) -> TransferImportResponse {
     TransferImportResponse {
-        source_type: request.source_type.clone(),
+        source_type: request.source_type,
         bytes_copied: 0,
         files_copied: 0,
         directories_copied: matches!(
@@ -620,8 +620,8 @@ fn read_tar_block_or_eof<R: Read>(
 impl ReplaceUnits {
     fn new(request: &TransferImportRequest) -> Self {
         Self {
-            overwrite: request.overwrite.clone(),
-            source_type: request.source_type.clone(),
+            overwrite: request.overwrite,
+            source_type: request.source_type,
             replaced: HashSet::new(),
         }
     }

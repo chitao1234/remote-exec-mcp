@@ -550,8 +550,8 @@ async fn shared_transfer_export_cases_match() {
                 .to_string(),
             overwrite: TransferOverwrite::Replace,
             create_parent: true,
-            source_type: exported.source_type.clone(),
-            compression: exported.compression.clone(),
+            source_type: exported.source_type,
+            compression: exported.compression,
             symlink_mode: parse_symlink_mode(&case.symlink_mode),
         };
         let roundtrip =
