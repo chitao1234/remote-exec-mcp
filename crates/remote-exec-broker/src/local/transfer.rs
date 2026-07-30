@@ -33,8 +33,8 @@ pub async fn export_path_to_archive(
     let exported = remote_exec_host::transfer::archive::export_path_to_file(
         path,
         archive_path,
-        request.compression.clone(),
-        request.symlink_mode.clone(),
+        request.compression,
+        request.symlink_mode,
         &request.exclude,
         sandbox,
         windows_posix_root,
@@ -53,8 +53,8 @@ pub async fn export_path_to_byte_stream(
 ) -> anyhow::Result<ExportedArchiveByteStream> {
     remote_exec_host::transfer::archive::export_path_to_byte_stream(
         path,
-        request.compression.clone(),
-        request.symlink_mode.clone(),
+        request.compression,
+        request.symlink_mode,
         &request.exclude,
         sandbox,
         windows_posix_root,

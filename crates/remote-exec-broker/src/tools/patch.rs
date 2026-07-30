@@ -40,12 +40,11 @@ pub async fn apply_patch(
     state: &crate::BrokerState,
     input: ApplyPatchInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    let target_name = input.target.clone();
-    crate::request_context::set_current_target(target_name.clone());
+    crate::request_context::set_current_target(input.target.clone());
     let patch_len = input.input.len();
     tracing::info!(
         tool = "apply_patch",
-        target = %target_name,
+        target = %input.target,
         patch_len,
         has_workdir = input.workdir.is_some(),
         "patch apply requested"

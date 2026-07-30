@@ -40,11 +40,11 @@ async fn transfer_single_source(
         options.symlink_mode,
     );
     let exported = export_single_source(state, source, &export_request).await?;
-    let source_type = exported.source_type().clone();
+    let source_type = *exported.source_type();
     let request = build_import_request(
         destination.endpoint(),
         options.overwrite,
-        source_type.clone(),
+        source_type,
         options.compression,
         options.symlink_mode,
         options.create_parent,
@@ -87,13 +87,13 @@ async fn transfer_multiple_sources(
             .map(|source| crate::local::transfer::BundledArchiveSource {
                 source_path: source.source.endpoint.path.clone(),
                 source_policy: source.source.policy,
-                source_type: source.source_type.clone(),
-                compression: options.compression.clone(),
+                source_type: source.source_type,
+                compression: *options.compression,
                 archive_path: source.temp_path.to_path_buf(),
             })
             .collect(),
         bundled_path.as_ref(),
-        options.compression.clone(),
+        *options.compression,
     )
     .await?;
 
@@ -101,7 +101,7 @@ async fn transfer_multiple_sources(
     let request = build_import_request(
         destination.endpoint(),
         options.overwrite,
-        source_type.clone(),
+        source_type,
         options.compression,
         options.symlink_mode,
         options.create_parent,
@@ -119,8 +119,8 @@ fn build_export_request(
 ) -> TransferExportRequest {
     TransferExportRequest {
         path: endpoint.path.clone(),
-        compression: compression.clone(),
-        symlink_mode: symlink_mode.clone(),
+        compression: *compression,
+        symlink_mode: *symlink_mode,
         exclude: exclude.to_vec(),
     }
 }
@@ -187,10 +187,10 @@ fn build_import_request(
 ) -> TransferImportRequest {
     TransferImportRequest {
         destination_path: endpoint.path.clone(),
-        overwrite: overwrite.clone(),
+        overwrite: *overwrite,
         create_parent,
         source_type,
-        compression: compression.clone(),
-        symlink_mode: symlink_mode.clone(),
+        compression: *compression,
+        symlink_mode: *symlink_mode,
     }
 }

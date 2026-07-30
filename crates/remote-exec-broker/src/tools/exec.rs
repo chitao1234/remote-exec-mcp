@@ -26,12 +26,11 @@ pub async fn exec_command(
     state: &crate::BrokerState,
     input: ExecCommandInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    let target_name = input.target.clone();
-    crate::request_context::set_current_target(target_name.clone());
+    crate::request_context::set_current_target(input.target.clone());
     let cmd_preview = remote_exec_util::preview_text(&input.cmd, 120);
     tracing::info!(
         tool = "exec_command",
-        target = %target_name,
+        target = %input.target,
         tty = input.tty,
         has_workdir = input.workdir.is_some(),
         has_shell = input.shell.is_some(),
@@ -41,7 +40,7 @@ pub async fn exec_command(
     let path_policy = state.exec_path_policy(&input.target).await?;
 
     if let Some(output) =
-        maybe_intercepted_exec_output(state, &input, &target_name, path_policy).await?
+        maybe_intercepted_exec_output(state, &input, &input.target, path_policy).await?
     {
         return Ok(output);
     }
@@ -69,7 +68,7 @@ pub async fn exec_command(
 
     tracing::info!(
         tool = "exec_command",
-        target = %target_name,
+        target = %input.target,
         intercepted = false,
         running = output.running,
         exit_code = output.exit_code,
@@ -90,7 +89,7 @@ pub async fn write_stdin(
     if let Some(target) = &requested_target {
         crate::request_context::set_current_target(target.clone());
     }
-    let chars_len = input.chars.as_ref().map(|chars| chars.len()).unwrap_or(0);
+    let chars_len = input.chars.as_ref().map_or(0, |chars| chars.len());
     tracing::info!(
         tool = "write_stdin",
         session_id = %session_id,

@@ -7,8 +7,7 @@ use remote_exec_proto::rpc::{
 use crate::mcp_server::ToolCallOutput;
 
 pub async fn read(state: &crate::BrokerState, input: ReadInput) -> anyhow::Result<ToolCallOutput> {
-    let target_name = input.target.clone();
-    crate::request_context::set_current_target(target_name.clone());
+    crate::request_context::set_current_target(input.target.clone());
     let limit = input
         .limit
         .unwrap_or(state.tools.file.default_read_limit_lines);
@@ -21,7 +20,7 @@ pub async fn read(state: &crate::BrokerState, input: ReadInput) -> anyhow::Resul
 
     tracing::info!(
         tool = "read",
-        target = %target_name,
+        target = %input.target,
         path = %input.file_path,
         offset = input.offset,
         limit,
@@ -30,7 +29,7 @@ pub async fn read(state: &crate::BrokerState, input: ReadInput) -> anyhow::Resul
     );
     let response = state
         .file_read(
-            &target_name,
+            &input.target,
             &FileReadRequest {
                 path: input.file_path.clone(),
                 offset: input.offset,
@@ -39,7 +38,7 @@ pub async fn read(state: &crate::BrokerState, input: ReadInput) -> anyhow::Resul
             },
         )
         .await?;
-    log_read_completed(&target_name, &input.file_path, &response);
+    log_read_completed(&input.target, &input.file_path, &response);
 
     Ok(ToolCallOutput::text(response.output))
 }
@@ -48,18 +47,17 @@ pub async fn write(
     state: &crate::BrokerState,
     input: WriteInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    let target_name = input.target.clone();
-    crate::request_context::set_current_target(target_name.clone());
+    crate::request_context::set_current_target(input.target.clone());
     tracing::info!(
         tool = "write",
-        target = %target_name,
+        target = %input.target,
         path = %input.file_path,
         content_len = input.content.len(),
         "file write requested"
     );
     let response = state
         .file_write(
-            &target_name,
+            &input.target,
             &FileWriteRequest {
                 path: input.file_path.clone(),
                 content: input.content,
@@ -67,7 +65,7 @@ pub async fn write(
             },
         )
         .await?;
-    log_write_completed(&target_name, &input.file_path, &response);
+    log_write_completed(&input.target, &input.file_path, &response);
 
     let action = if response.created {
         "created"
@@ -81,11 +79,10 @@ pub async fn write(
 }
 
 pub async fn edit(state: &crate::BrokerState, input: EditInput) -> anyhow::Result<ToolCallOutput> {
-    let target_name = input.target.clone();
-    crate::request_context::set_current_target(target_name.clone());
+    crate::request_context::set_current_target(input.target.clone());
     tracing::info!(
         tool = "edit",
-        target = %target_name,
+        target = %input.target,
         path = %input.file_path,
         old_string_len = input.old_string.len(),
         new_string_len = input.new_string.len(),
@@ -94,7 +91,7 @@ pub async fn edit(state: &crate::BrokerState, input: EditInput) -> anyhow::Resul
     );
     let response = state
         .file_edit(
-            &target_name,
+            &input.target,
             &FileEditRequest {
                 path: input.file_path.clone(),
                 old_string: input.old_string,
@@ -104,7 +101,7 @@ pub async fn edit(state: &crate::BrokerState, input: EditInput) -> anyhow::Resul
             },
         )
         .await?;
-    log_edit_completed(&target_name, &input.file_path, &response);
+    log_edit_completed(&input.target, &input.file_path, &response);
 
     let replacement_label = if response.replacements == 1 {
         "replacement"
