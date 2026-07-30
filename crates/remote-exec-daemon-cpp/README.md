@@ -1,311 +1,197 @@
 # remote-exec-daemon-cpp
 
-The standalone C++11 daemon supports explicit plain HTTP by default and
-optional OpenSSL mutual TLS for direct listeners and reverse connections.
-TLS requires OpenSSL 1.0.2 or newer, negotiates TLS 1.2 or newer, and supports
-the OpenSSL 1.0.x, 1.1.x, and 3.x API families.
+`remote-exec-daemon-cpp` is the standalone C++11 daemon for
+`remote-exec-mcp`. It is useful when the Rust daemon is too large for the host
+environment or when legacy Windows coverage is required. It supports explicit
+plain HTTP and optional OpenSSL mutual TLS for direct listeners and reverse
+connections. TLS requires OpenSSL 1.0.2 or newer, negotiates TLS 1.2 or newer,
+and supports the OpenSSL 1.0.x, 1.1.x, and 3.x API families.
 
-Standalone C++11 daemon for `remote-exec-mcp`.
+The former `remote-exec-daemon-xp` name described the original Windows XP-only
+shape. Current behavior is documented here and in the repository root
+`README.md`. The top-level `docs/` tree is historical implementation context,
+not the live contract.
 
-This daemon is intentionally narrower than the Rust daemon, but it now has these
-build paths:
+## At A Glance
 
-- native POSIX hosts through the platform `c++` driver
-- 32-bit GNU Windows hosts through `i686-w64-mingw32-g++`
-- 64-bit GNU Windows hosts through `x86_64-w64-mingw32-g++`
-- host-native Windows builds through MSVC/NMAKE
-- Windows XP-compatible hosts through MSVC/NMAKE with the `v141_xp` toolset
+| Area | Current behavior |
+| --- | --- |
+| Language level | C++11 on every supported build path. |
+| Transport | HTTP/1.1 JSON over optional OpenSSL direct/reverse mTLS or explicit plain HTTP. |
+| Authentication | Mutual TLS with optional certificate pinning, plus optional HTTP bearer auth. Bearer auth alone does not encrypt plain HTTP. |
+| Exec | POSIX and Windows shell execution, live sessions, and stdin polling/writes. |
+| PTY | POSIX PTY when available. GNU/MSVC Windows PTY depends on vendored `winpty`; Wine disables PTY capability reporting for GNU builds. |
+| Patch | Codex-style `apply_patch` with the project-wide preflighted/non-transactional contract. |
+| Images | Passthrough `view_image` for PNG, JPEG, and WebP only. No resizing or re-encoding. |
+| Transfers | Regular files, directory trees, and broker-built multi-source bundles. No transfer compression. |
+| Port forwarding | v4 TCP/UDP tunnel support with daemon-local worker, socket, queue, and reconnect limits. |
+| Hidden file tools | `read`, `write`, and `edit` are not implemented yet. |
+
+TLS builds use `https://...` broker targets. Plain targets use `http://...`
+plus `allow_insecure_http = true`:
+
+```toml
+[targets.builder-cpp]
+base_url = "https://builder-cpp.example.com:8181"
+expected_daemon_name = "builder-cpp"
+tls_ca_pem = "/etc/remote-exec/ca.pem"
+tls_client_cert_pem = "/etc/remote-exec/broker.pem"
+tls_client_key_pem = "/etc/remote-exec/broker.key"
+
+#[targets.builder-cpp.http_auth]
+#bearer_token = "replace-me"
+```
+
+## Quick Start
+
+Build and test a POSIX daemon:
+
+```sh
+make check-posix
+```
+
+Run it:
+
+```sh
+build/remote-exec-daemon-cpp config/daemon-cpp.example.ini
+```
+
+Run the BSD make POSIX path:
+
+```sh
+bmake check-posix
+```
+
+Run the common GNU Windows XP-compatible cross-build:
+
+```sh
+make prepare-openssl-xp OPENSSL_DEPS_DIR=/path/to/deps
+make check-windows-xp OPENSSL_ROOT=/path/to/deps/openssl-1.0.2u
+```
+
+Run the MSVC native path from an x86 Visual Studio developer prompt:
+
+```bat
+nmake /f NMakefile check-msvc-native OPENSSL_ROOT=C:\path\to\openssl
+```
+
+Run the MSVC XP-compatible path from an x86 prompt with a `v141_xp`-capable
+C++11 toolset, such as `vcvarsall.bat x86 -vcvars_ver=14.16`:
+
+```bat
+nmake /f NMakefile check-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp
+```
+
+## Compatibility Matrix
 
 The daemon builds as C++11 across all supported toolchains. In this repository,
 "Windows XP-compatible" means a toolchain that can target Windows XP while
 compiling the daemon as C++11; it does not imply a pre-C++11 language level.
-The minimum supported Windows runtime family is Windows NT 3.x through the GNU
-`nt3x-ws1` Winsock 1.1 path, which keeps the 0x0400 Win32 API floor and
-disables winpty for NT 3.x compatibility. The GNU Winsock 1.1 Unicode variant
-has also been tested on Windows NT 3.51 and Windows NT 4.0. The GNU Windows NT
-4.0 API-floor build also supports Winsock 2 when that runtime is installed. A
-GNU ANSI Win32 API path is available for Windows 9x/Me compatibility work and
-has been tested on Windows 95 and Windows 98 SE. Its 9x aliases keep a 0x0400
-Win32 API floor, define `_WIN32_WINDOWS=0x0400`, support Winsock 1.1 and
-Winsock 2, and exclude winpty.
 
-GNU Windows builds default to `WINDOWS_ARCH=x86` for the existing legacy matrix.
-`WINDOWS_ARCH=x64` selects the x86_64 MinGW cross compiler for NT-family builds
-and produces `x64-...` binary tags. The Windows 9x/Me GNU family is x86-only.
+| Path | Target family | Notes |
+| --- | --- | --- |
+| `make check-posix` | Native POSIX | Uses the platform `c++` driver. |
+| `bmake check-posix` | Native POSIX through BSD make | POSIX-only; no Windows cross targets. |
+| `make check-windows-xp` | GNU x86 Windows XP, Winsock 2 | Common legacy Windows cross-build. |
+| `make check-windows-2000` | GNU x86 Windows 2000, Winsock 2 | NT-family Unicode path. |
+| `make check-windows-x64` | GNU x64 NT-family Windows, Winsock 2 | NT-family only. |
+| `make check-windows-nt3x-ws1` | GNU x86 NT 3.x API-floor, Winsock 1.1 | Keeps the 0x0400 Win32 API floor and disables winpty. |
+| `make check-windows-nt4-ws1` | GNU x86 NT 4.0 API-floor, Winsock 1.1 | Unicode variant tested on Windows NT 3.51 and Windows NT 4.0. |
+| `make check-windows-nt4-ws2` | GNU x86 NT 4.0 API-floor, Winsock 2 | Requires Winsock 2 at runtime. |
+| `make check-windows-9x-ws1-ansi` | GNU x86 Windows 9x/Me ANSI, Winsock 1.1 | Tested on Windows 95 and Windows 98 SE. |
+| `make check-windows-9x-ws2-ansi` | GNU x86 Windows 9x/Me ANSI, Winsock 2 | Older systems such as Windows 95 require Winsock 2 to be installed. |
+| `nmake /f NMakefile check-msvc-native` | Host-native MSVC | CI runs the 32-bit native path on `windows-latest`. |
+| `nmake /f NMakefile check-msvc-xp` | MSVC XP-compatible x86 | Requires an XP-capable C++11 toolset such as VS 2017 `v141_xp`. |
 
-The former `remote-exec-daemon-xp` name referred to the original Windows XP-only
-shape. Current live behavior is documented here and in the repository root
-`README.md`. The dated material under the top-level `docs/` tree is historical
-implementation detail, not the current contract.
+GNU Windows builds default to `WINDOWS_ARCH=x86` and Unicode Win32 APIs for the
+historical legacy matrix. `WINDOWS_ARCH=x64` selects the x86_64 MinGW cross
+compiler for NT-family builds. The Windows 9x/Me GNU aliases require x86 and
+the ANSI Win32 API path.
 
-## Architecture Boundaries
+## Build Guide
 
-The C++ daemon is split by ownership rather than by build target:
-
-- `platform/` owns raw OS primitives, compatibility fallbacks, fd/handle/socket
-  wrappers, EINTR retry policy, close-on-exec and inheritance behavior, wakeup
-  helpers, monotonic waits, PTY probes, process waits, and signal installation.
-- `runtime/` owns daemon lifecycle, accept/maintenance workers, connection
-  accounting, shutdown propagation, and daemon-owned thread joins.
-- `http/` owns request parsing, body streams, response rendering, upgrade
-  mechanics, and transport lifetime.
-- `rpc/` owns route dispatch, request validation, typed error translation, and
-  capability response shaping.
-- `policy/` owns path comparison and sandbox evaluation.
-- `exec/`, `transfer/`, and `port_forward/` own their feature behavior and use
-  the lower layers instead of touching raw OS calls directly.
-
-Feature code should not call raw blocking OS APIs such as `read`, `write`,
-`recv`, `send`, `accept`, `connect`, `poll`, `select`, `waitpid`,
-`pthread_cond_*`, `fcntl`, `open`, `pipe`, `sigaction`, `kill`, `execve`,
-`fork`, `bind`, `listen`, `setsockopt`, `getsockname`, `ioctl`, filesystem
-mutation calls, or Win32 wait/process/socket primitives when a platform wrapper
-exists. If a new raw OS call is required, add the wrapper or fallback in
-`platform/` first, then call that wrapper from the feature module.
-
-Feature code should also avoid hand-rolled elapsed/remaining timeout arithmetic
-for blocking waits. Use `platform/deadline.h` so timeout saturation, bounded
-wait slices, and POSIX `poll` retry behavior stay in one place.
-
-The POSIX design intentionally does not use `openat`. Path authorization must
-therefore be complete and consistent for every materialized path, but it must
-not be described as race-free filesystem security. Recursive transfer import,
-export, replacement, and cleanup code must authorize the concrete path it is
-about to open, remove, create, or rename.
-
-Port forwarding has stricter ownership rules because it is reconnect-aware.
-`PortTunnelService` owns global limits and the retained session map,
-`PortTunnelSession` owns retained session state and retained resources,
-`PortTunnelConnection` owns one upgraded tunnel connection and connection-local
-streams, and the resource objects own their sockets and budget leases. Resource
-objects move through explicit `open`, `closing`, and `closed` states; callers
-should ask the resource for its state instead of carrying separate closed flags.
-Close work should be returned to callers and performed outside unrelated locks.
-
-## Build
-
-Build outputs are written to this directory's `build/` tree even when `make` is
-invoked from another working directory. Incremental builds reuse cached object
-files under `build/obj/`, so repeated `make` runs only rebuild sources whose
-inputs changed.
+Build outputs are written under this directory's `build/` tree even when `make`
+is invoked from the repository root. Incremental object files live under
+`build/obj/`.
 
 GNU make, BSD make, and NMAKE default to optimized builds (`-O2` or `/O2`).
 Pass `DEBUG=1` to switch the relevant entry point to `-O0 -g` or
 `/Od /Zi /DEBUG`.
-NMAKE passes `/utf-8` so MSVC reads UTF-8 source files consistently across
-host code pages, and enables `cl /MP` by default so each large multi-source
-compile step can use multiple cores even though `nmake` itself remains
-single-threaded. Override the compiler-side parallelism with `MSVC_JOBS=<n>`
-or force serial compilation with `MSVC_JOBS=1`.
 
-Host-native POSIX daemon:
+NMAKE passes `/utf-8` so MSVC reads UTF-8 source files consistently across host
+code pages. It enables `cl /MP` by default; override that compiler-side
+parallelism with `MSVC_JOBS=<n>` or force serial compilation with
+`MSVC_JOBS=1`.
 
-- `make`
-- `make all-posix`
-- `make check`
-- `make check-posix`
-- `make stress-posix` runs repeated `check-posix -j 8` loops for
-  load-sensitive lifecycle flakes. Override with `STRESS_RUNS=<n>` and
-  `STRESS_JOBS=<n>`.
+Common targets:
 
-Windows GNU build matrix:
+| Task | Command |
+| --- | --- |
+| Build POSIX daemon | `make` or `make all-posix` |
+| Test POSIX daemon | `make check` or `make check-posix` |
+| Stress POSIX lifecycle tests | `make STRESS_RUNS=10 STRESS_JOBS=8 stress-posix` |
+| Build all GNU Windows variants | `make all-windows` plus the controls below |
+| Test GNU Windows XP | `make check-windows-xp` |
+| Test GNU Windows x64 | `make check-windows-x64` |
+| Test BSD make POSIX path | `bmake check-posix` |
+| Test MSVC native | `nmake /f NMakefile check-msvc-native` |
+| Test MSVC XP-compatible | `nmake /f NMakefile check-msvc-xp` |
 
-- `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2`
-- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2`
-- `make all-windows-x64`
-- `make check-windows-x64`
-- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2 WINDOWS_CHAR_API=ansi`
-- `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0500 WINDOWS_WINSOCK_VERSION=2`
-- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0500 WINDOWS_WINSOCK_VERSION=2`
-- `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=2`
-- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=2`
-- `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1`
-- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1`
-- `make all-windows-nt3x-ws1`
-- `make check-windows-nt3x-ws1`
-- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1 WINDOWS_CHAR_API=ansi`
-- `make check-windows-9x-ws1-ansi`
-- `make check-windows-9x-ws2-ansi`
-- `make all-windows WINDOWS_TOOLCHAIN=native WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2` on Windows
-  under MSYS2/MINGW32
-- `make check-windows WINDOWS_TOOLCHAIN=native WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2` on Windows
-  under MSYS2/MINGW32
-- `WINDOWS_TOOLCHAIN=cross` uses the compiler selected by `WINDOWS_ARCH`, links
-  `-static-libgcc -static-libstdc++`, and defaults `WINDOWS_TEST_RUNNER` to
-  `wine` on non-Windows hosts.
-- `WINDOWS_TOOLCHAIN=native` uses the host `g++` in a Windows GNU environment
-  and runs test binaries directly.
-- `WINDOWS_ARCH=x86|x64` selects the GNU Windows target architecture. The
-  default `x86` path uses `i686-w64-mingw32-g++` and keeps the historical
-  artifact names. The `x64` path uses `x86_64-w64-mingw32-g++`, emits `x64-...`
-  artifact names, and is supported only for the NT-family GNU build path.
-- `WINDOWS_WINVER` and `WINDOWS_WIN32_WINNT` select the Win32 API floor. By
-  default `WINDOWS_WIN32_WINNT` follows `WINDOWS_WINVER`.
-- `WINDOWS_FAMILY=nt|9x` selects the Windows SDK family macros for GNU builds.
-  The default is `nt`. The `9x` family defines `_WIN32_WINDOWS` and `_CHICAGO_`
-  in addition to the requested `WINVER`/`_WIN32_WINNT` values and requires
-  `WINDOWS_ARCH=x86`.
-- `WINDOWS_CHAR_API=unicode|ansi` selects the daemon-owned Win32 string API
-  path. `unicode` is the default and defines `UNICODE`/`_UNICODE`; `ansi`
-  defines `REMOTE_EXEC_CPP_WINDOWS_ANSI_API`, uses `A` Win32 file/process/path
-  calls, converts UTF-8 JSON strings through the active Windows ANSI code page,
-  and rejects paths or command strings that cannot be represented without
-  default-character substitution. The ANSI path is intended for Windows 9x/Me
-  compatibility work and has been tested on Windows 95 and Windows 98 SE
-  through the `9x` aliases.
-- `WINDOWS_WINSOCK_VERSION=2` builds the Winsock 2 path: `ws2_32`, negotiates
-  Winsock 2.2, 2.1, or 2.0 at startup, and uses native
-  `getaddrinfo`/`getnameinfo` when the runtime exports them. Older stacks
-  without those exports use IPv4 legacy resolution.
-- `WINDOWS_WINSOCK_VERSION=1` builds the NT-era Winsock 1.1 path:
-  `REMOTE_EXEC_CPP_WINSOCK1`, `wsock32`, IPv4 only, and explicit rejection of
-  IPv6 endpoints with an `invalid_endpoint` error.
-- `WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1 WINDOWS_WINPTY=off
-  WINDOWS_VARIANT_LABEL=nt3x` is the GNU Windows NT 3.x Winsock 1.1 path. Use
-  `nt3x-ws1` aliases for this variant; it intentionally keeps `WINVER` and
-  `_WIN32_WINNT` at `0x0400` and disables winpty.
-- `WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1` is the GNU NT 4.0
-  API-floor Winsock 1.1 path. The GNU Winsock 1.1 Unicode variant has been
-  tested on Windows NT 3.51 and Windows NT 4.0.
-- `WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=2` is the GNU Windows NT 4.0
-  API-floor Winsock 2 path. Use `nt4-ws2` aliases for this variant.
-- `WINDOWS_FAMILY=9x WINDOWS_WINVER=0x0400 WINDOWS_WIN32_WINDOWS=0x0400
-  WINDOWS_WINSOCK_VERSION=1 WINDOWS_CHAR_API=ansi` is the GNU 9x/Me ANSI
-  Winsock 1.1 path. Use `9x-ws1-ansi` aliases for this variant.
-- `WINDOWS_FAMILY=9x WINDOWS_WINVER=0x0400 WINDOWS_WIN32_WINDOWS=0x0400
-  WINDOWS_WINSOCK_VERSION=2 WINDOWS_CHAR_API=ansi` is the GNU 9x/Me ANSI
-  Winsock 2 path. Use `9x-ws2-ansi` aliases for this variant. Older 9x systems
-  such as Windows 95 require Winsock 2 to be installed.
-- `WINDOWS_WINPTY=auto|on|off` controls whether the GNU build vendors `winpty`.
-  `auto` enables `winpty` for Windows NT 4.0, Windows 2000, and XP API-floor
-  Unicode builds, independent of the selected Winsock backend. GNU ANSI builds
-  disable `auto` winpty because winpty still uses wide Win32 APIs and newer API
-  calls outside the daemon-owned ANSI path.
-- The MSVC/NMAKE native and XP entry points vendor the same `winpty` sources
-  and stage `winpty-agent.exe` beside the built daemon and test binaries. NMAKE
-  does not expose a Windows 2000 entry point.
-- The default `WINDOWS_TOOLCHAIN` is `cross` on non-Windows hosts and `native`
-  on Windows GNU hosts.
-- The defaults are `WINDOWS_WINVER=0x0501`,
-  `WINDOWS_WIN32_WINNT=WINDOWS_WINVER`, `WINDOWS_WINSOCK_VERSION=2`, and
-  `WINDOWS_ARCH=x86`.
+GNU Windows controls:
 
-Compatibility aliases remain:
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `WINDOWS_TOOLCHAIN` | `cross` on non-Windows, `native` on Windows GNU hosts | Selects MinGW cross compiler or host `g++`. Cross builds link `-static-libgcc -static-libstdc++`; non-Windows cross tests default `WINDOWS_TEST_RUNNER` to `wine`. |
+| `WINDOWS_ARCH` | `x86` | Selects `i686-w64-mingw32-g++` or `x86_64-w64-mingw32-g++`. x64 is NT-family only. |
+| `WINDOWS_WINVER` | `0x0501` | Selects the Win32 API floor. |
+| `WINDOWS_WIN32_WINNT` | follows `WINDOWS_WINVER` | Overrides `_WIN32_WINNT` when needed. |
+| `WINDOWS_FAMILY` | `nt` | Use `9x` for Windows 9x/Me aliases; this also defines `_WIN32_WINDOWS` and `_CHICAGO_`. |
+| `WINDOWS_CHAR_API` | `unicode` | Use `ansi` for daemon-owned `A` Win32 file/process/path calls. ANSI builds reject UTF-8 paths or commands that are not representable in the active Windows ANSI code page. |
+| `WINDOWS_WINSOCK_VERSION` | `2` | Use `1` for Winsock 1.1, IPv4-only, `wsock32`, and IPv6 rejection with `invalid_endpoint`. |
+| `WINDOWS_WINPTY` | `auto` | Enables vendored `winpty` for NT 4.0, Windows 2000, and XP API-floor Unicode GNU builds. ANSI and NT 3.x auto-disable it. |
+| `WINDOWS_TEST_RUNNER` | `wine` on non-Windows cross builds | Command used to run generated Windows test binaries. Leave empty to run directly. |
 
-- `make all-windows-nt3x-ws1`
-- `make check-windows-nt3x-ws1`
-- `make all-windows-nt4-ws1`
-- `make check-windows-nt4-ws1`
-- `make all-windows-nt4-ws1-ansi`
-- `make check-windows-nt4-ws1-ansi`
-- `make all-windows-9x-ws1-ansi`
-- `make check-windows-9x-ws1-ansi`
-- `make all-windows-9x-ws2-ansi`
-- `make check-windows-9x-ws2-ansi`
-- `make all-windows-nt4-ws2`
-- `make check-windows-nt4-ws2`
-- `make all-windows-2000`
-- `make check-windows-2000`
-- `make all-windows-xp`
-- `make check-windows-xp`
-- `make all-windows-x64`
-- `make check-windows-x64`
-- `make all-windows-xp-ansi`
-- `make check-windows-xp-ansi`
-- `make all-windows-native`
-- `make check-windows-native`
+Useful GNU aliases:
+
+| Alias family | Commands |
+| --- | --- |
+| NT 3.x Winsock 1.1 | `all-windows-nt3x-ws1`, `check-windows-nt3x-ws1` |
+| NT 4.0 Winsock 1.1 | `all-windows-nt4-ws1`, `check-windows-nt4-ws1` |
+| NT 4.0 Winsock 1.1 ANSI | `all-windows-nt4-ws1-ansi`, `check-windows-nt4-ws1-ansi` |
+| NT 4.0 Winsock 2 | `all-windows-nt4-ws2`, `check-windows-nt4-ws2` |
+| Windows 9x/Me ANSI | `all-windows-9x-ws1-ansi`, `check-windows-9x-ws1-ansi`, `all-windows-9x-ws2-ansi`, `check-windows-9x-ws2-ansi` |
+| Windows 2000 | `all-windows-2000`, `check-windows-2000` |
+| Windows XP | `all-windows-xp`, `check-windows-xp`, `all-windows-xp-ansi`, `check-windows-xp-ansi` |
+| Windows x64 | `all-windows-x64`, `check-windows-x64` |
+| Windows GNU native | `all-windows-native`, `check-windows-native` |
 
 The XP, x64, XP ANSI, and native aliases resolve `TLS=auto` to OpenSSL and
 therefore require a compatible OpenSSL installation. Pass `OPENSSL_ROOT`, or
 use `TLS=off` when intentionally validating only the plain-HTTP build.
 
-Host-native Windows MSVC/NMAKE build:
+MSVC/NMAKE targets:
 
-- Open a Visual Studio developer prompt. Use an x86 prompt for the same 32-bit
-  native path that CI runs.
-- `nmake /f NMakefile`
-- `nmake /f NMakefile all-msvc-native`
-- `nmake /f NMakefile check-msvc-native`
-- `nmake /f NMakefile test-msvc-native-console-output`
-- `nmake /f NMakefile test-msvc-native-session-store`
-- `nmake /f NMakefile test-msvc-native-transfer`
-- `nmake /f NMakefile test-msvc-native-server-routes-common`
-- `nmake /f NMakefile test-msvc-native-server-runtime`
-- `nmake /f NMakefile test-msvc-native-server-transport`
-- `nmake /f NMakefile test-msvc-native-connection-manager`
-
-Windows XP-compatible MSVC/NMAKE build:
-
-- Open an x86 Visual Studio developer prompt with an XP-capable C++11 VS 2017
-  toolset, such as `vcvarsall.bat x86 -vcvars_ver=14.16`.
-- `nmake /f NMakefile all-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp`
-- `nmake /f NMakefile check-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp`
-- `nmake /f NMakefile test-msvc-xp-console-output`
-- `nmake /f NMakefile test-msvc-xp-session-store`
-- `nmake /f NMakefile test-msvc-xp-transfer`
-- `nmake /f NMakefile test-msvc-xp-server-routes-common`
-- `nmake /f NMakefile test-msvc-xp-server-runtime`
-- `nmake /f NMakefile test-msvc-xp-server-transport`
-- `nmake /f NMakefile test-msvc-xp-connection-manager`
-
-The top-level `GNUmakefile` is the GNU make public entry point. Shared source
-lists live in `mk/sources.mk`, shared GNU make helpers live in `mk/common.mk`,
-the shared Windows GNU build matrix lives in `mk/windows-gnu.mk`, and
-host-native POSIX rules live in `mk/posix.mk`. GNU make prefers `GNUmakefile`,
-so plain `make` selects that file automatically.
+| Variant | Build | Check | Focused tests |
+| --- | --- | --- | --- |
+| Native | `nmake /f NMakefile all-msvc-native` | `nmake /f NMakefile check-msvc-native` | `test-msvc-native-console-output`, `test-msvc-native-session-store`, `test-msvc-native-transfer`, `test-msvc-native-server-routes-common`, `test-msvc-native-server-runtime`, `test-msvc-native-server-transport`, `test-msvc-native-connection-manager` |
+| XP-compatible | `nmake /f NMakefile all-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp` | `nmake /f NMakefile check-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp` | `test-msvc-xp-console-output`, `test-msvc-xp-session-store`, `test-msvc-xp-transfer`, `test-msvc-xp-server-routes-common`, `test-msvc-xp-server-runtime`, `test-msvc-xp-server-transport`, `test-msvc-xp-connection-manager` |
 
 `NMakefile` is intentionally separate from the GNU/BSD make entry points. It
-builds a host-native MSVC daemon and a Windows XP-compatible MSVC daemon, uses
-the static C runtime (`/MT`), and exposes Win32 session/transfer runtime test
-targets for both toolchains. The public `*-native` and `*-xp` targets are
-compatibility aliases over shared `all-msvc`, `test-msvc`, and `check-msvc`
-rules selected by `MSVC_VARIANT=native` or `MSVC_VARIANT=xp`. The XP targets
-link as an x86 console program with a Windows XP minimum subsystem version.
+uses the static C runtime (`/MT`), vendors the same `winpty` sources as GNU
+Windows builds, stages `winpty-agent.exe` beside the daemon and test binaries,
+and links XP targets as x86 console programs with a Windows XP minimum
+subsystem version. NMAKE does not expose a Windows 2000 entry point.
 
-Runtime coverage note: host-native POSIX C++ daemon runtime tests run on Unix.
-GNU Windows binaries and tests, including the 64-bit GNU path, run under Wine on
-Linux. MSVC native binaries and tests run on Windows, and MSVC XP-compatible
-binaries run natively there when the XP-capable toolset is available. CI builds
-and runs the 32-bit host-native MSVC NMAKE test path on `windows-latest`. The
-Windows Rust test job
-first builds `build\msvc-native\remote-exec-daemon-cpp-msvc.exe`, then points
-`REMOTE_EXEC_CPP_DAEMON` at that binary while running the Rust integration
-tests.
+Makefile layout:
 
-BSD make has a separate POSIX-only entry point. It intentionally does not expose
-the Windows cross-build targets:
+- `GNUmakefile` is the GNU make public entry point.
+- `Makefile` is the BSD make POSIX-only entry point.
+- `mk/sources.mk` owns shared source lists.
+- `mk/common.mk` owns shared GNU make helpers.
+- `mk/windows-gnu.mk` owns the GNU Windows matrix.
+- `mk/posix.mk` owns host-native POSIX rules.
 
-- `bmake`
-- `bmake all-posix`
-- `bmake check`
-- `bmake check-posix`
-- `bmake stress-posix`
-
-Invoke BSD make from this directory, or use `bmake -C
-crates/remote-exec-daemon-cpp ...` from the repository root, so the relative
-source paths and `build/` output tree resolve correctly. BSD make selects the
-top-level `Makefile` automatically.
-
-Focused host-native tests:
-
-Use the same target names with `bmake ...` for the BSD make path.
-
-- `make test-host-patch`
-- `make test-host-transfer`
-- `make test-host-config`
-- `make test-host-http-request`
-- `make test-host-server-transport`
-- `make test-host-session-store`
-- `make test-host-connection-manager`
-- `make test-host-tls-transport`
-- `make test-host-server-runtime`
-- `make test-host-server-routes`
-- `make test-host-server-streaming`
-- `make test-host-sandbox`
-
-## Run
-
-### TLS Build
+## TLS Builds
 
 `TLS=auto` is the default. On POSIX it probes the selected compiler, OpenSSL
 headers, minimum 1.0.2 version, and link libraries; TLS is enabled only when the
@@ -319,8 +205,7 @@ Use an installed OpenSSL:
 make TLS=openssl OPENSSL_ROOT=/opt/openssl
 ```
 
-Or prepare the checksum-pinned preferred OpenSSL 3.5.7 static dependency and
-build against it:
+Or prepare the checksum-pinned preferred OpenSSL 3.5.7 static dependency:
 
 ```sh
 make prepare-openssl OPENSSL_JOBS=8
@@ -329,14 +214,12 @@ make TLS=openssl OPENSSL_ROOT="$PWD/build/deps/openssl-3.5.7"
 
 `prepare-openssl` accepts `OPENSSL_ARCHIVE` for offline use,
 `OPENSSL_CONFIGURE_TARGET` for cross builds, and
-`OPENSSL_CONFIGURE_OPTIONS` for target-specific OpenSSL options. It builds with
+`OPENSSL_CONFIGURE_OPTIONS` for target-specific options. It builds with
 `no-shared no-module no-tests no-asm`. External OpenSSL 1.x installs remain
 supported through `OPENSSL_ROOT`, `OPENSSL_CPPFLAGS`, and `OPENSSL_LDLIBS`.
 
 For an XP GNU cross-build, use a complete `i686-w64-mingw32-` tool prefix and
-build the checksum-pinned OpenSSL 1.0.2u dependency with OpenSSL's `mingw`
-target. The XP preparation target builds and installs only the static libraries
-and headers consumed by the daemon, avoiding legacy optional engines and tools:
+the checksum-pinned OpenSSL 1.0.2u dependency:
 
 ```sh
 CROSS_COMPILE=i686-w64-mingw32- make prepare-openssl-xp \
@@ -346,279 +229,76 @@ make check-windows-xp \
   OPENSSL_ROOT="$PWD/build/deps-mingw-xp/openssl-1.0.2u"
 ```
 
-The XP GNU path is tested with the pinned OpenSSL 1.0.2u static libraries,
-including the mutual-TLS full-duplex transport and client-pin rejection test.
-OpenSSL 1.0.2u is end-of-life and is provided only for legacy XP compatibility;
-use the preferred pinned OpenSSL 3.5.7 build on supported modern systems.
+The XP GNU path tests the pinned OpenSSL 1.0.2u static libraries, including
+mutual-TLS full-duplex transport and client-pin rejection. OpenSSL 1.0.2u is
+end-of-life and is provided only for legacy XP compatibility; use the preferred
+pinned OpenSSL 3.5.7 build on supported modern systems.
 
-Windows TLS builds use the same knob. GNU and NMAKE output/object names are
-TLS-tagged to avoid mixing objects from disabled and enabled builds. No Windows
-family, API-floor, or Winsock combination is rejected merely for explicitly
-enabling TLS; pre-XP combinations are best-effort and may fail in the selected
-OpenSSL/toolchain build because they are not all tested.
+GNU and NMAKE output/object names are TLS-tagged to avoid mixing disabled and
+enabled builds. Pre-XP Windows TLS combinations are best-effort and may fail in
+the selected OpenSSL/toolchain build because they are not all tested.
 
-POSIX:
+## Run
 
-```sh
-build/remote-exec-daemon-cpp config/daemon-cpp.example.ini
-```
+Use `config/daemon-cpp.example.ini` as the starting config. The configured
+`default_workdir` must already exist when the daemon starts.
 
-Windows XP-compatible GNU Winsock 2:
+| Build | Binary |
+| --- | --- |
+| POSIX | `build/remote-exec-daemon-cpp` |
+| GNU Windows XP/Winsock 2 | `build\remote-exec-daemon-cpp-xp-ws2-tls-openssl.exe` |
+| GNU Windows x64 XP/Winsock 2 | `build\remote-exec-daemon-cpp-x64-xp-ws2-tls-openssl.exe` |
+| GNU Windows 2000/Winsock 2 | `build\remote-exec-daemon-cpp-2000-ws2.exe` |
+| GNU host-native Windows XP/Winsock 2 | `build\remote-exec-daemon-cpp-native-xp-ws2-tls-openssl.exe` |
+| GNU Windows NT 3.x Winsock 1.1 | `build\remote-exec-daemon-cpp-nt3x-ws1.exe` |
+| GNU Windows NT 4.0 Winsock 1.1 | `build\remote-exec-daemon-cpp-nt4-ws1.exe` |
+| GNU Windows NT 4.0 Winsock 1.1 ANSI | `build\remote-exec-daemon-cpp-nt4-ws1-ansi.exe` |
+| GNU Windows 9x/Me Winsock 1.1 ANSI | `build\remote-exec-daemon-cpp-9x-ws1-ansi.exe` |
+| GNU Windows 9x/Me Winsock 2 ANSI | `build\remote-exec-daemon-cpp-9x-ws2-ansi.exe` |
+| GNU Windows NT 4.0 Winsock 2 | `build\remote-exec-daemon-cpp-nt4-ws2.exe` |
+| MSVC XP-compatible | `build\msvc-xp\remote-exec-daemon-cpp-xp-msvc-tls-openssl.exe` |
+
+Example:
 
 ```bat
 build\remote-exec-daemon-cpp-xp-ws2-tls-openssl.exe config\daemon-cpp.example.ini
 ```
 
-Windows x64 GNU XP/Winsock 2:
-
-```bat
-build\remote-exec-daemon-cpp-x64-xp-ws2-tls-openssl.exe config\daemon-cpp.example.ini
-```
-
-Windows 2000-compatible GNU Winsock 2:
-
-```bat
-build\remote-exec-daemon-cpp-2000-ws2.exe config\daemon-cpp.example.ini
-```
-
-Windows host-native GNU XP/Winsock 2:
-
-```bat
-build\remote-exec-daemon-cpp-native-xp-ws2-tls-openssl.exe config\daemon-cpp.example.ini
-```
-
-Windows NT 3.51/4.0-compatible GNU Winsock 1.1:
-
-```bat
-build\remote-exec-daemon-cpp-nt4-ws1.exe config\daemon-cpp.example.ini
-```
-
-Windows NT 3.x-compatible GNU Winsock 1.1 without WinPTY:
-
-```bat
-build\remote-exec-daemon-cpp-nt3x-ws1.exe config\daemon-cpp.example.ini
-```
-
-Windows NT 4.0 API-floor GNU Winsock 1.1 with ANSI Win32 APIs:
-
-```bat
-build\remote-exec-daemon-cpp-nt4-ws1-ansi.exe config\daemon-cpp.example.ini
-```
-
-Windows 9x/Me GNU Winsock 1.1 with ANSI Win32 APIs:
-
-```bat
-build\remote-exec-daemon-cpp-9x-ws1-ansi.exe config\daemon-cpp.example.ini
-```
-
-Windows 9x/Me GNU Winsock 2 with ANSI Win32 APIs:
-
-```bat
-build\remote-exec-daemon-cpp-9x-ws2-ansi.exe config\daemon-cpp.example.ini
-```
-
-Windows NT 4.0-compatible GNU Winsock 2:
-
-```bat
-build\remote-exec-daemon-cpp-nt4-ws2.exe config\daemon-cpp.example.ini
-```
-
-Windows XP-compatible MSVC/NMAKE:
-
-```bat
-build\msvc-xp\remote-exec-daemon-cpp-xp-msvc-tls-openssl.exe config\daemon-cpp.example.ini
-```
-
 Logs go to `stderr`. Set `REMOTE_EXEC_LOG=debug` to raise the level, or use a
-shared filter string such as
-`REMOTE_EXEC_LOG=warn,remote_exec_daemon_cpp=debug`.
-
-## Windows Console Encoding
-
-Windows command stdout and stderr are captured as pipe bytes and normalized to
-UTF-8 before they are returned over RPC. The daemon decodes those bytes with the
-system OEM code page first and falls back to the ANSI code page if that decode
-fails. If both code-page decodes fail, the daemon falls back to UTF-8 replacement
-decoding. This covers legacy console encodings such as GBK, Shift-JIS, and Big5
-when the target Windows installation provides those code-page tables, while
-invalid final-fallback UTF-8 byte sequences are replaced with `U+FFFD`.
-
-Daemon-controlled UTF-8 inputs such as JSON paths and command strings are
-converted with a local UTF-8/UTF-16 implementation instead of relying on the
-`CP_UTF8` Windows code page. The command-output path still uses Windows NLS
-tables for legacy console code pages, but it does not require the UTF-8 code
-page to be available on older Windows targets.
-
-In GNU ANSI Win32 API builds, daemon-controlled UTF-8 paths and command strings
-are decoded locally and then encoded to the active Windows ANSI code page before
-calling `A` Win32 APIs such as `CreateProcessA`, `FindFirstFileA`, and
-`GetFullPathNameA`. Text that is valid UTF-8 but not representable in that
-active code page is rejected before the Win32 call instead of being silently
-replaced. Directory listings and canonicalized paths are converted back from the
-active ANSI code page to UTF-8 for RPC responses.
-
-## Lifecycle Debugging
-
-Lifecycle-sensitive tests should fail with bounded diagnostics instead of
-waiting forever on a socket read. Keep normal test output quiet with
-`REMOTE_EXEC_LOG=off`, and enable port-forward/session lifecycle traces only
-when chasing a race:
+shared filter string such as:
 
 ```sh
-REMOTE_EXEC_LOG=debug make test-host-server-streaming
-REMOTE_EXEC_LOG=debug make test-host-session-store
+REMOTE_EXEC_LOG=warn,remote_exec_daemon_cpp=debug
 ```
 
-The debug logs include tunnel session IDs, generations, close modes, retained
-resource kinds, worker start/finish events, writer shutdown, and tunnel read
-timeout decisions. These logs are intentionally `DEBUG` level so automated
-checks can continue to run with `REMOTE_EXEC_LOG=off`.
-
-Use the stress target for load-sensitive POSIX flakes:
-
-```sh
-make STRESS_RUNS=10 STRESS_JOBS=8 stress-posix
-bmake STRESS_RUNS=10 STRESS_JOBS=8 stress-posix
-```
-
-When a test is stuck or has already printed the failing process ID, attach a
-debugger to the running test process:
-
-```sh
-gdb -p <pid>
-```
-
-For a debugger-first reproduction, run the test binary directly:
-
-```sh
-REMOTE_EXEC_LOG=debug gdb --args build/test_server_streaming
-REMOTE_EXEC_LOG=debug gdb --args build/test_session_store
-```
-
-For Windows-shared lifecycle changes, run the GNU make Windows cross-build
-path. On non-Windows hosts this uses Wine when `WINDOWS_TEST_RUNNER` is unset
-and Wine is available:
-
-```sh
-make check-windows-xp
-make check-windows-x64
-make check-windows-2000
-make check-windows-nt4-ws1
-make check-windows-nt4-ws2
-```
-
-Idle keep-alive HTTP connections wait up to `http_connection_idle_timeout_ms`
-for the next request header before the daemon closes the socket.
-
-Non-TTY exec output merges `stdout` and `stderr` through one pipe, so the
-returned `output` field preserves their emitted order.
-
-POSIX builds support `tty=true` when the host can allocate a PTY. The daemon
-reports this through `/v1/target-info` as `supports_pty`, and rejects `tty=true`
-only when PTY allocation is unavailable. GNU Windows NT 4.0, Windows 2000, and
-XP API-floor builds use vendored `winpty` for `tty=true` sessions when `winpty`
-is enabled for the build and usable at runtime. The MSVC/NMAKE native and XP
-builds use the same vendored `winpty` path. GNU Windows builds where
-`WINDOWS_WINPTY` is effectively off report
-`supports_pty=false`. Under Wine, the GNU WinPTY path also reports
-`supports_pty=false` because `winpty` behavior there is not treated as
-authoritative.
-
-POSIX builds support `write_stdin.pty_size` for live `tty=true` sessions by
-applying `TIOCSWINSZ` to the PTY master. Windows GNU builds with `winpty`
-enabled forward PTY resize requests through `winpty`. Builds without `winpty`
-continue to reject `tty=true`, so
-resize requests return the same typed unsupported-session error path.
-
-POSIX non-TTY exec intentionally starts child processes with stdin attached to
-`/dev/null`, matching the Rust daemon's closed-stdin behavior. Start POSIX
-interactive commands with `tty=true` when later `write_stdin` input is needed.
-Windows C++ non-TTY exec intentionally keeps its pipe-backed stdin open to
-preserve the original XP daemon behavior.
-
-The C++ daemon implements the same daemon-side HTTP/1.1 Upgrade tunnel used by
-broker `forward_ports`: TCP listeners/connectors, full-duplex UDP datagram
-sockets, non-loopback listen binds, and the same bare-port normalization where
-`8080` means `127.0.0.1:8080`. The older lease-renewed port-forward routes are
-not exposed.
-
-The v4 frame numbers for `ForwardRecovering` and `ForwardRecovered` are
-reserved for compatibility with the Rust protocol table. Current C++ and Rust
-implementations report recovery through broker-owned `forward_ports list` state
-instead of daemon-emitted recovery frames.
-
-Live forwarded sockets are reconnect-aware in-memory daemon state. When only the
-broker-daemon transport drops and the daemon stays alive, the broker may
-recover from transport loss or missed heartbeat acknowledgements on either
-forwarding side while the daemon retains the forward itself plus future TCP
-accepts or future UDP datagrams on the listen side. Active TCP streams and UDP
-per-peer connector state are not
-preserved across reconnect. C++ forwarding worker threads are capped by
-`port_forward_max_worker_threads`; each active forwarded TCP stream uses
-separate read and write workers so slow peer writes cannot block the tunnel
-control reader. v4 `TunnelReady.limits` truthfully report the configured active
-TCP stream, UDP bind, and tunnel queued-byte limits.
-Retained sessions, retained listeners, UDP binds, active TCP streams, and
-outbound queued tunnel bytes are enforced daemon-wide. Upgraded tunnel socket
-reads and writes are bounded by `port_forward_tunnel_io_timeout_ms`, so a peer
-that sends an incomplete v4 frame cannot occupy a daemon worker indefinitely.
-Outbound TCP connect attempts are bounded by `port_forward_connect_timeout_ms`,
-and active TCP stream limits count established streams rather than pending
-connect attempts. Recoverable daemon-local pressure drops, such as rejected TCP
-accepts or UDP datagrams, are reported back to the broker for public drop
-counters. Per-stream TCP connect failures close only that accepted TCP stream
-and leave the parent forward open. A broker restart still drops the broker-owned
-`forward_id` mapping, and a daemon restart still destroys the forward. If the
-broker disappears without reconnecting, the daemon reclaims detached listeners
-and UDP sockets after the reconnect grace window expires.
-Daemon shutdown closes live forwarded sockets promptly.
-Recoverable peer abort/reset errors during forwarding are reported as normal
-request failures and do not terminate the daemon process.
-
-`view_image` supports passthrough reads for PNG, JPEG, and WebP only. The
-daemon does not resize or re-encode images, so omitted `detail` defaults to
-`original`.
+The old `remote_exec_daemon_xp=<level>` filter remains accepted as an alias.
 
 ## Config
 
-Example config:
+The full example lives at `config/daemon-cpp.example.ini`. The core shape is:
 
 ```ini
 target = builder-cpp
 listen_host = 0.0.0.0
 listen_port = 8181
-
-# POSIX example.
-# The configured default workdir must exist when the daemon starts.
 default_workdir = /work
-# default_shell = /bin/bash
 
-# Windows XP example.
-# default_workdir = C:\work
-# default_shell = cmd.exe
-# Windows 9x/Me ANSI builds should normally use the COMSPEC-provided
-# COMMAND.COM path, or configure it explicitly.
-# default_shell = C:\WINDOWS\COMMAND.COM
-
-# Login shells default to enabled.
-# allow_login_shell = true
-
-# Optional HTTP bearer auth. This authenticates broker requests but does not
-# add encryption or integrity protection on plain HTTP.
+# Optional plain-HTTP bearer auth.
 # http_auth_bearer_token = replace-me
 
-# Request/session safety limits.
+# Optional shell policy.
+# default_shell = /bin/bash
+# allow_login_shell = true
+
+# Optional request/session limits.
 # max_request_header_bytes = 65536
-# Applies to buffered HTTP request bodies. Streaming transfer imports are bounded
-# by transfer_max_archive_bytes and transfer_max_entry_bytes instead.
 # max_request_body_bytes = 536870912
 # http_connection_idle_timeout_ms = 30000
 # transfer_max_archive_bytes = 536870912
 # transfer_max_entry_bytes = 536870912
 # max_open_sessions = 64
-# C++ forwarding uses detached worker threads for retained listener, UDP,
-# reconnect-expiry, and TCP stream work. Each active TCP stream uses separate
-# read and write workers.
+
+# Optional forwarding limits.
 # port_forward_max_worker_threads = 256
 # port_forward_max_retained_sessions = 64
 # port_forward_max_retained_listeners = 64
@@ -628,7 +308,7 @@ default_workdir = /work
 # port_forward_tunnel_io_timeout_ms = 30000
 # port_forward_connect_timeout_ms = 10000
 
-# Optional per-operation yield-time policy overrides.
+# Optional per-operation yield-time limits.
 # yield_time_exec_command_default_ms = 10000
 # yield_time_exec_command_max_ms = 30000
 # yield_time_exec_command_min_ms = 250
@@ -640,8 +320,6 @@ default_workdir = /work
 # yield_time_write_stdin_input_min_ms = 250
 
 # Optional static path sandbox. Values are semicolon-separated path lists.
-# Missing allow lists, empty allow lists, or omitted sandbox keys mean "allow
-# all", then deny lists carve out exclusions.
 # sandbox_exec_cwd_allow = /work
 # sandbox_exec_cwd_deny = /work/private
 # sandbox_read_allow = /work;/assets
@@ -650,88 +328,297 @@ default_workdir = /work
 # sandbox_write_deny = /work/.git;/work/readonly
 ```
 
-`max_open_sessions` intentionally matches the Rust daemon default of 64. The
-request header/body byte limits are C++-specific because this daemon owns a
-handwritten HTTP parser, and `port_forward_max_worker_threads` plus
-`port_forward_tunnel_io_timeout_ms` are C++-specific because forwarding uses
-blocking socket workers.
+C++-specific limit notes:
 
-`max_request_body_bytes` applies to buffered HTTP request bodies. Streaming
-transfer imports are bounded by `transfer_max_archive_bytes` and
-`transfer_max_entry_bytes` instead, and the daemon allows a longer active
-read timeout for those streamed request bodies than for idle keep-alive
-connections.
+- `max_open_sessions` intentionally matches the Rust daemon default of 64.
+- `max_request_header_bytes` and `max_request_body_bytes` exist because this
+  daemon owns a handwritten HTTP parser.
+- `max_request_body_bytes` applies to buffered HTTP request bodies. Streaming
+  transfer imports are bounded by `transfer_max_archive_bytes` and
+  `transfer_max_entry_bytes` instead.
+- `port_forward_max_worker_threads` and `port_forward_tunnel_io_timeout_ms`
+  exist because forwarding uses blocking socket workers.
+
+Reverse mode is exclusive and supports TLS in an OpenSSL-enabled build or
+explicit plain HTTP:
+
+```ini
+#connection_mode=reverse
+#reverse_broker_host=broker.example.com
+#reverse_broker_port=9555
+#reverse_transport=tls
+#reverse_tls_cert_pem=/etc/remote-exec/daemon.pem
+#reverse_tls_key_pem=/etc/remote-exec/daemon.key
+#reverse_tls_ca_pem=/etc/remote-exec/ca.pem
+#reverse_tls_server_name=broker.example.com
+#reverse_bearer_token=replace-me
+#reverse_min_idle_connections=4
+#reverse_max_connections=128
+#reverse_reconnect_ms=1000
+```
 
 Sandbox rules mirror the Rust daemon's static allow/deny model:
 
-- `sandbox_exec_cwd_*` applies to the resolved starting `cwd` for `exec_command`.
+- `sandbox_exec_cwd_*` applies to the resolved starting `cwd` for
+  `exec_command`.
 - `sandbox_read_*` applies to transfer export source paths.
 - `sandbox_write_*` applies to transfer import destinations, transfer path-info
   destination probes, and resolved `apply_patch` write targets.
 - Empty or omitted `allow` lists allow all paths for that access class; `deny`
   entries override allow membership.
 - POSIX roots are canonicalized through existing ancestors, so symlinks in
-  configured roots or requested paths cannot bypass boundary checks. Windows
-  roots use Windows-style normalization and case-insensitive matching.
+  configured roots or requested paths cannot bypass boundary checks.
+- Windows roots use Windows-style normalization and case-insensitive matching.
 
-## Shell Policy
+## Behavior Notes
 
-- POSIX default shell selection follows the Rust daemon's policy: configured
+### Shells And Encoding
+
+- POSIX default shell selection follows the Rust daemon policy: configured
   `default_shell`, then `SHELL`, passwd shell, `bash`, and `/bin/sh`.
 - POSIX exec uses `shell -c <cmd>` or `shell -l -c <cmd>` for login shells.
 - POSIX child processes currently force `LC_ALL=C.UTF-8` and `LANG=C.UTF-8`.
-- Windows C++ exec supports `cmd.exe` and `command.com`. `cmd.exe` uses `/C`
-  and adds `/D` when `login=false`; `command.com` uses `/C` without `/D`
-  because `/D` is a `cmd.exe`-specific flag. The default shell is configured
-  `default_shell`, then supported `COMSPEC`, then a runtime-family fallback:
-  `cmd.exe` on NT-family Windows and `command.com` on Windows 9x/Me.
+- Windows exec supports `cmd.exe` and `command.com`. `cmd.exe` uses `/C` and
+  adds `/D` when `login=false`; `command.com` uses `/C`.
+- Windows command stdout/stderr bytes are decoded as OEM code page first, then
+  ANSI code page, then UTF-8 replacement decoding. This covers legacy console
+  encodings such as GBK, Shift-JIS, and Big5 when the OS provides those code
+  page tables.
+- GNU ANSI Win32 API builds convert daemon-controlled UTF-8 paths and commands
+  through the active Windows ANSI code page before calling `A` Win32 APIs, and
+  reject unrepresentable input instead of silently replacing it.
+
+### Exec And PTY
+
+- Non-TTY exec output merges `stdout` and `stderr` through one pipe, preserving
+  emitted order in the returned `output` field.
+- POSIX non-TTY exec starts child stdin at `/dev/null`, matching the Rust
+  daemon's closed-stdin behavior. Use `tty=true` for interactive POSIX
+  commands that need later `write_stdin` input.
+- Windows C++ non-TTY exec keeps pipe-backed stdin open to preserve the
+  original XP daemon behavior.
+- POSIX builds support `write_stdin.pty_size` for live `tty=true` sessions via
+  `TIOCSWINSZ`.
+- Windows GNU/MSVC builds with `winpty` enabled forward PTY resize requests
+  through `winpty`.
+- Builds without `winpty` reject `tty=true` and return the same typed
+  unsupported-session error path for resize requests.
+
+### Transfers
+
+- `transfer_files` supports regular files, directory trees, and broker-built
+  multi-source bundles.
+- Export-side `exclude` patterns match paths relative to each source root, use
+  `/` as the logical separator on all platforms, and support `*`, `?`, `**`,
+  `[abc]`, `[a-z]`, `[!abc]`, `[!a-c]`, `[^abc]`, and `[^a-c]`.
+- Excluded matches are silent, excluded directories are pruned recursively, and
+  single-file sources ignore `exclude` in v1.
+- HTTP transfer imports and exports stream archive bodies instead of staging
+  the full tar payload in memory.
+- Transfer imports support `fail`, `merge`, and `replace` overwrite modes.
+  `merge` overlays compatible existing destinations without deleting unrelated
+  entries. `replace` refreshes a single file or directory destination; for
+  multi-source bundle imports, it replaces only incoming top-level entries.
+- Transfer imports are not transactional; failed imports can leave partial
+  destination changes.
+- POSIX exports skip unsupported special entries in directory trees and report
+  warnings.
+- POSIX symlink modes support preserving, following, or skipping symlinks.
+- Windows C++ builds skip symlink entries when preservation is unavailable;
+  follow mode copies regular-file and directory targets when the platform
+  exposes them.
+- Transfer payloads use GNU tar for files and directories. Single-file
+  transfers use the fixed archive entry `.remote-exec-file`.
+- Transfer warnings use `.remote-exec-transfer-summary.json`, which is consumed
+  during import and is not extracted.
+- Unsupported archive entries remain rejected: hard links, special files unless
+  skipped during export, sparse entries, and malformed paths.
+
+### Port Forwarding
+
+- The daemon implements the same HTTP/1.1 Upgrade v4 tunnel used by broker
+  `forward_ports`.
+- TCP listeners/connectors, full-duplex UDP datagram sockets, non-loopback
+  listen binds, and bare-port normalization are supported.
+- The older lease-renewed port-forward routes are not exposed.
+- The v4 frame numbers for `ForwardRecovering` and `ForwardRecovered` are
+  reserved for compatibility with the Rust protocol table. Current public
+  recovery state is reported through broker-owned `forward_ports list` state.
+- When only broker-daemon transport drops and the daemon stays alive, the
+  broker may recover the forward itself plus future TCP accepts or UDP datagrams
+  on the listen side.
+- Active TCP streams and UDP per-peer connector state are not preserved across
+  reconnect.
+- Each active forwarded TCP stream uses separate read and write workers.
+- Retained sessions, retained listeners, UDP binds, active TCP streams, and
+  outbound queued tunnel bytes are enforced daemon-wide.
+- Tunnel socket reads/writes are bounded by
+  `port_forward_tunnel_io_timeout_ms`; outbound TCP connects are bounded by
+  `port_forward_connect_timeout_ms`.
+- Per-stream TCP connect failures close only that accepted TCP stream and leave
+  the parent forward open.
+- Broker restart drops broker-owned `forward_id` mappings. Daemon restart
+  destroys daemon-local forward state.
+- If the broker disappears without reconnecting, the daemon reclaims detached
+  listeners and UDP sockets after the reconnect grace window expires.
+
+### Images And Patches
+
+- `view_image` supports passthrough reads for PNG, JPEG, and WebP only.
+- Omitted `view_image.detail` defaults to `original`.
+- `apply_patch` rejects deterministic failures before writing, including
+  missing files, non-file targets, sandbox denial, and unmatched hunks.
+- Runtime races and write/remove failures after patch preflight remain
+  non-transactional; earlier executed patch actions remain applied.
+
+## Debugging And Tests
+
+Keep normal test output quiet with `REMOTE_EXEC_LOG=off`, and raise logs only
+when chasing lifecycle-sensitive failures:
+
+```sh
+REMOTE_EXEC_LOG=debug make test-host-server-streaming
+REMOTE_EXEC_LOG=debug make test-host-session-store
+```
+
+Lifecycle debug logs include tunnel session IDs, generations, close modes,
+retained resource kinds, worker start/finish events, writer shutdown, and
+tunnel read timeout decisions.
+
+Use stress targets for load-sensitive POSIX flakes:
+
+```sh
+make STRESS_RUNS=10 STRESS_JOBS=8 stress-posix
+bmake STRESS_RUNS=10 STRESS_JOBS=8 stress-posix
+```
+
+Attach a debugger to a stuck process:
+
+```sh
+gdb -p <pid>
+```
+
+Run a test binary directly under a debugger:
+
+```sh
+REMOTE_EXEC_LOG=debug gdb --args build/test_server_streaming
+REMOTE_EXEC_LOG=debug gdb --args build/test_session_store
+```
+
+For Windows-shared lifecycle changes, run representative GNU Windows paths. On
+non-Windows hosts these use Wine when `WINDOWS_TEST_RUNNER` is unset and Wine is
+available:
+
+```sh
+make check-windows-xp
+make check-windows-x64
+make check-windows-2000
+make check-windows-nt4-ws1
+make check-windows-nt4-ws2
+```
+
+Focused host-native tests:
+
+```sh
+make test-host-patch
+make test-host-transfer
+make test-host-config
+make test-host-http-request
+make test-host-server-transport
+make test-host-session-store
+make test-host-connection-manager
+make test-host-tls-transport
+make test-host-server-runtime
+make test-host-server-routes
+make test-host-server-streaming
+make test-host-sandbox
+```
+
+Use the same target names with `bmake ...` for the BSD make path.
+
+Runtime coverage note:
+
+- POSIX C++ daemon runtime tests run on Unix.
+- GNU Windows binaries and tests, including x64, run under Wine on Linux.
+- MSVC native binaries and tests run on Windows.
+- MSVC XP-compatible binaries run natively on Windows when the XP-capable
+  toolset is available.
+- The Windows Rust test job first builds
+  `build\msvc-native\remote-exec-daemon-cpp-msvc.exe`, then sets
+  `REMOTE_EXEC_CPP_DAEMON` to that binary for Rust integration tests.
+
+## Internal Boundaries
+
+The C++ daemon is split by ownership rather than by build target:
+
+| Area | Owns |
+| --- | --- |
+| `platform/` | Raw OS primitives, compatibility fallbacks, fd/handle/socket wrappers, EINTR retry policy, close-on-exec and inheritance behavior, wakeup helpers, monotonic waits, PTY probes, process waits, and signal installation. |
+| `runtime/` | Daemon lifecycle, accept/maintenance workers, connection accounting, shutdown propagation, and daemon-owned thread joins. |
+| `http/` | Request parsing, body streams, response rendering, upgrade mechanics, and transport lifetime. |
+| `rpc/` | Route dispatch, request validation, typed error translation, and capability response shaping. |
+| `policy/` | Path comparison and sandbox evaluation. |
+| `exec/`, `transfer/`, `port_forward/` | Feature behavior built on the lower layers. |
+
+Feature code should use existing `platform/` wrappers instead of raw blocking OS
+APIs such as `read`, `write`, `recv`, `send`, `accept`, `connect`, `poll`,
+`select`, `waitpid`, `pthread_cond_*`, `fcntl`, `open`, `pipe`, `sigaction`,
+`kill`, `execve`, `fork`, `bind`, `listen`, `setsockopt`, `getsockname`,
+`ioctl`, filesystem mutation calls, or Win32 wait/process/socket primitives. If
+a new raw OS call is required, add the wrapper or fallback in `platform/`
+first.
+
+Feature code should also avoid hand-rolled elapsed/remaining timeout arithmetic
+for blocking waits. Use `platform/deadline.h` so timeout saturation, bounded
+wait slices, and POSIX `poll` retry behavior stay in one place.
+
+The POSIX design intentionally does not use `openat`. Path authorization must
+therefore be complete and consistent for every materialized path, but it should
+not be described as race-free filesystem security. Recursive transfer import,
+export, replacement, and cleanup code must authorize the concrete path it is
+about to open, remove, create, or rename.
+
+Port forwarding has stricter ownership rules because it is reconnect-aware:
+
+- `PortTunnelService` owns global limits and the retained session map.
+- `PortTunnelSession` owns retained session state and retained resources.
+- `PortTunnelConnection` owns one upgraded tunnel connection and
+  connection-local streams.
+- Resource objects own their sockets and budget leases.
+- Resource objects move through explicit `open`, `closing`, and `closed`
+  states. Callers should ask the resource for its state instead of carrying
+  separate closed flags.
+- Close work should be returned to callers and performed outside unrelated
+  locks.
 
 ## Limitations
 
 - `TLS=auto` enables usable OpenSSL on POSIX and enables it for Windows XP and
-  newer targets; pre-XP Windows targets default to TLS off
-- daemon RPC is HTTP/1.1-only; sequential requests may reuse a persistent connection, but HTTP pipelining is not supported
-- OpenSSL older than 1.0.2 is rejected; TLS 1.0 and 1.1 are disabled
-- POSIX PTY support depends on host PTY allocation
-- Windows GNU PTY support depends on `winpty` being enabled for the build and
-  available at runtime; Wine intentionally disables PTY capability reporting
-- no PTY support in builds where `winpty` is disabled, including GNU NT 3.x
-  builds and GNU ANSI API builds where `WINDOWS_WINPTY=auto` resolves to
-  disabled
-- Windows runtime support is strongest on Unicode NT-family Windows. The GNU
-  NT 3.x Winsock 1.1 path is the minimum supported Windows path and disables
-  winpty. The GNU Winsock 1.1 Unicode variant has been tested on Windows NT
-  3.51 and Windows NT 4.0. The GNU NT 4.0 API-floor build also supports
-  Winsock 2 when that runtime is installed. The GNU ANSI API build path exists
-  for Windows 9x/Me compatibility work and has been tested with Winsock 1.1 and
-  Winsock 2 on Windows 95 and Windows 98 SE. GNU x64 builds are NT-family only;
-  the 9x/Me aliases require `WINDOWS_ARCH=x86`.
-- `view_image` supports passthrough PNG, JPEG, and WebP only
-- omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
-- broker-owned `forward_id` values do not persist across broker restart
-- transient broker-daemon transport drops preserve only the forward itself plus future listen-side TCP accepts or UDP datagrams; active TCP streams and UDP per-peer connector state are lost
-- per-stream TCP connect failures close only that accepted TCP stream and leave the parent forward open
-- transfer compression is not supported
-- `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles
-- `transfer_files` accepts an optional export-side `exclude` array. Patterns match paths relative to each source root, use `/` as the logical separator on all platforms, and support `*`, `?`, `**`, `[abc]`, `[a-z]`, `[!abc]`, `[!a-c]`, `[^abc]`, and `[^a-c]`
-- excluded matches are silent, excluded directories are pruned recursively, and single-file sources ignore `exclude` in v1
-- daemon HTTP transfer imports and exports stream archive bodies instead of staging the full tar payload in memory
-- `transfer_max_archive_bytes` and `transfer_max_entry_bytes` bound streamed transfer imports; `max_request_body_bytes` still applies to buffered HTTP request bodies
-- transfer imports support `fail`, `merge`, and `replace` overwrite modes; `merge` overlays compatible existing destinations without deleting unrelated directory entries; `replace` refreshes a single file or directory destination, while multi-source bundle imports replace only incoming top-level entries and preserve unrelated existing destination entries
-- transfer imports are not transactional; failed imports can leave partial destination changes
-- POSIX transfer exports skip unsupported special entries in directory trees and report warnings
-- POSIX transfer symlink modes support preserving, following, or skipping symlinks
-- Windows C++ transfer builds skip symlink entries inside directory transfers and import archives when preservation is unavailable; follow mode copies regular-file and directory targets when the platform exposes them
-- transfer payloads use GNU tar for files and directories
-- single-file transfers use the fixed archive entry `.remote-exec-file`
-- transfer warnings use the reserved archive summary entry `.remote-exec-transfer-summary.json`, which is consumed during import and is not extracted
-- unsupported archive entries remain rejected: hard links, special files unless skipped during export, sparse entries, and malformed paths
-- `apply_patch` follows the project-wide preflighted patch contract:
-  deterministic failures such as missing files, non-file targets, sandbox
-  denial, and unmatched hunks are rejected before writing, but runtime races and
-  write/remove failures after preflight remain non-transactional and earlier
-  executed actions remain applied
-- broker targets use `https://...` for TLS builds; plain targets use
-  `http://...` plus `allow_insecure_http = true`
-- optional `http_auth_bearer_token` can additionally authenticate requests;
-  on plain HTTP it still does not encrypt traffic
+  newer targets; pre-XP Windows targets default to TLS off.
+- HTTP/1.1 only. Sequential requests may reuse a persistent connection, but
+  HTTP pipelining is not supported.
+- OpenSSL older than 1.0.2 is rejected; TLS 1.0 and 1.1 are disabled.
+- No transfer compression support.
+- No default-hidden `read`, `write`, or `edit` tool support yet.
+- `view_image` supports passthrough PNG, JPEG, and WebP only.
+- POSIX PTY support depends on host PTY allocation.
+- Windows PTY support depends on `winpty` being enabled and usable at runtime.
+- GNU NT 3.x builds and GNU ANSI API builds where `WINDOWS_WINPTY=auto`
+  resolves to disabled have no PTY support.
+- Windows runtime support is strongest on Unicode NT-family Windows.
+- GNU x64 builds are NT-family only; Windows 9x/Me aliases require
+  `WINDOWS_ARCH=x86`.
+- The GNU Winsock 1.1 Unicode variant has been tested on Windows NT 3.51 and
+  Windows NT 4.0.
+- The GNU ANSI API path has been tested with Winsock 1.1 and Winsock 2 on
+  Windows 95 and Windows 98 SE.
+- `transfer_files` is not transactional and can leave partial destination
+  changes after failure.
+- Broker-owned `forward_id` values do not persist across broker restart.
+- Transient broker-daemon transport drops preserve only the forward itself plus
+  future listen-side TCP accepts or UDP datagrams; active TCP streams and UDP
+  per-peer connector state are lost.
+- TLS builds use `https://...` broker targets; plain targets use `http://...`
+  plus `allow_insecure_http = true`.
+- Optional bearer auth can additionally authenticate requests; on plain HTTP it
+  still does not encrypt traffic.

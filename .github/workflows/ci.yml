@@ -51,8 +51,19 @@ jobs:
 
       - name: Install clang-format
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format
+          apt_get() {
+            local command_timeout="$1"
+            shift
+            sudo timeout --signal=TERM --kill-after=30s "$command_timeout" \
+              env DEBIAN_FRONTEND=noninteractive apt-get \
+              -o Acquire::Retries=5 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              -o DPkg::Lock::Timeout=60 \
+              "$@"
+          }
+          apt_get 5m update
+          apt_get 10m install -y clang-format
 
       - name: Check formatting
         run: crates/remote-exec-daemon-cpp/scripts/clang_format.sh check
@@ -269,8 +280,19 @@ jobs:
 
       - name: Install Linux C++ dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y g++ make
+          apt_get() {
+            local command_timeout="$1"
+            shift
+            sudo timeout --signal=TERM --kill-after=30s "$command_timeout" \
+              env DEBIAN_FRONTEND=noninteractive apt-get \
+              -o Acquire::Retries=5 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              -o DPkg::Lock::Timeout=60 \
+              "$@"
+          }
+          apt_get 5m update
+          apt_get 10m install -y g++ make
 
       - name: Run POSIX C++ checks
         shell: bash
@@ -311,8 +333,19 @@ jobs:
       - name: Install Linux C++ dependencies
         run: |
           sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y g++ make g++-mingw-w64-i686 g++-mingw-w64-x86-64 wine wine32:i386
+          apt_get() {
+            local command_timeout="$1"
+            shift
+            sudo timeout --signal=TERM --kill-after=30s "$command_timeout" \
+              env DEBIAN_FRONTEND=noninteractive apt-get \
+              -o Acquire::Retries=5 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              -o DPkg::Lock::Timeout=60 \
+              "$@"
+          }
+          apt_get 5m update
+          apt_get 15m install -y g++ make g++-mingw-w64-i686 g++-mingw-w64-x86-64 wine wine32:i386
 
       - name: Run Windows C++ cross checks
         shell: bash
