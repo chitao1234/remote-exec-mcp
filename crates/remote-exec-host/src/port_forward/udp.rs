@@ -20,6 +20,10 @@ use super::frames::{endpoint_ok_frame, frame as raw_frame, meta_frame};
 use super::session::{AttachmentState, SessionState, reactivate_retained_udp_bind};
 use super::{ConnectionLocalUdpBind, READ_BUF_SIZE, TunnelState, send_forward_drop_report};
 
+fn bind_error(code: RpcErrorCode) -> impl FnOnce(std::io::Error) -> HostRpcError {
+    move |err| operational_error(code, err.to_string())
+}
+
 trait UdpTunnelContext: Send + Sync {
     fn tx(&self) -> &super::TunnelSender;
     fn generation(&self) -> u64;
@@ -139,13 +143,14 @@ pub(super) async fn tunnel_udp_bind(
             let meta: EndpointMeta = decode_frame_meta(&frame)?;
             let endpoint = normalize_endpoint(&meta.endpoint)
                 .map_err(|err| request_error(RpcErrorCode::InvalidEndpoint, err.to_string()))?;
-            let socket =
-                Arc::new(UdpSocket::bind(&endpoint).await.map_err(|err| {
-                    operational_error(RpcErrorCode::PortBindFailed, err.to_string())
-                })?);
+            let socket = Arc::new(
+                UdpSocket::bind(&endpoint)
+                    .await
+                    .map_err(bind_error(RpcErrorCode::PortBindFailed))?,
+            );
             let bound_endpoint = socket
                 .local_addr()
-                .map_err(|err| operational_error(RpcErrorCode::PortBindFailed, err.to_string()))?
+                .map_err(bind_error(RpcErrorCode::PortBindFailed))?
                 .to_string();
             listen
                 .session()
@@ -181,11 +186,11 @@ pub(super) async fn tunnel_udp_bind_connection_local(
     let socket = Arc::new(
         UdpSocket::bind(&endpoint)
             .await
-            .map_err(|err| operational_error(RpcErrorCode::PortBindFailed, err.to_string()))?,
+            .map_err(bind_error(RpcErrorCode::PortBindFailed))?,
     );
     let bound_endpoint = socket
         .local_addr()
-        .map_err(|err| operational_error(RpcErrorCode::PortBindFailed, err.to_string()))?
+        .map_err(bind_error(RpcErrorCode::PortBindFailed))?
         .to_string();
     let permit = tunnel.state.port_forward_limiter.try_acquire_udp_bind()?;
     let stream_cancel = connect.cancel().child_token();
@@ -337,6 +342,6 @@ pub(super) async fn tunnel_udp_datagram(
     socket
         .send_to(&frame.data, &meta.peer)
         .await
-        .map_err(|err| operational_error(RpcErrorCode::PortWriteFailed, err.to_string()))?;
+        .map_err(bind_error(RpcErrorCode::PortWriteFailed))?;
     Ok(())
 }

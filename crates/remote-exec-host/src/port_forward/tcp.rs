@@ -35,6 +35,10 @@ use super::{
 const TCP_CONTROL_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 type TcpStreamMap = tokio::sync::Mutex<std::collections::HashMap<u32, TcpStreamEntry>>;
 
+fn bind_error(code: RpcErrorCode) -> impl FnOnce(std::io::Error) -> HostRpcError {
+    move |err| operational_error(code, err.to_string())
+}
+
 enum AcceptLoopOutcome {
     Continue,
     Return,
@@ -156,7 +160,7 @@ async fn tcp_connect_with_timeout(
     tokio::time::timeout(connect_timeout, TcpStream::connect(endpoint))
         .await
         .map_err(|_| operational_error(RpcErrorCode::PortConnectFailed, "tcp connect timed out"))?
-        .map_err(|err| operational_error(RpcErrorCode::PortConnectFailed, err.to_string()))
+        .map_err(bind_error(RpcErrorCode::PortConnectFailed))
 }
 
 pub(super) async fn tunnel_tcp_listen(
@@ -172,11 +176,11 @@ pub(super) async fn tunnel_tcp_listen(
     let listener = Arc::new(
         TcpListener::bind(&endpoint)
             .await
-            .map_err(|err| operational_error(RpcErrorCode::PortBindFailed, err.to_string()))?,
+            .map_err(bind_error(RpcErrorCode::PortBindFailed))?,
     );
     let bound_endpoint = listener
         .local_addr()
-        .map_err(|err| operational_error(RpcErrorCode::PortBindFailed, err.to_string()))?
+        .map_err(bind_error(RpcErrorCode::PortBindFailed))?
         .to_string();
     listen
         .session()
