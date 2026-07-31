@@ -128,12 +128,19 @@ fn render_image_bytes(
     _detail: Option<&str>,
     bytes: Vec<u8>,
 ) -> Result<(ImageFormat, Vec<u8>), ImageError> {
-    let source_format = image::guess_format(&bytes).map_err(|err| process_error(path, err))?;
+    let source_format = match image::guess_format(&bytes) {
+        Ok(format) => format,
+        Err(err) => match ImageFormat::from_path(path) {
+            Ok(ImageFormat::Tga) => ImageFormat::Tga,
+            _ => return Err(process_error(path, err)),
+        },
+    };
     if passthrough_format(source_format) {
         return Ok((source_format, bytes));
     }
 
-    let image = image::load_from_memory(&bytes).map_err(|err| process_error(path, err))?;
+    let image = image::load_from_memory_with_format(&bytes, source_format)
+        .map_err(|err| process_error(path, err))?;
     let output_format = output_format_for_processed_image(source_format);
     let rendered_bytes = encode_processed_image(&image, output_format).map_err(|err| {
         ImageError::internal(format!(

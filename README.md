@@ -362,6 +362,8 @@ Default-hidden file tools:
 - reads an image from one target
 - accepts `detail` for compatibility but does not use it
 - preserves PNG, JPEG, and WebP bytes without resizing
+- Rust daemon transcodes BMP, GIF, ICO, PNM (including PPM), and TGA to PNG;
+  the C++ daemon supports passthrough PNG, JPEG, and WebP only
 
 `transfer_files`:
 

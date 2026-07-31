@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use base64::Engine;
-use image::ImageFormat;
+use image::{GenericImageView, ImageFormat};
 use remote_exec_proto::rpc::{ImageReadRequest, ImageReadResponse};
 use support::test_helpers::DEFAULT_TEST_TARGET;
 
@@ -173,6 +173,62 @@ async fn image_read_reencodes_gif_in_default_mode() {
     let (mime, bytes) = decode_data_url(&response.image_url);
     assert_eq!(mime, "image/png");
     assert_ne!(bytes, original);
+}
+
+#[tokio::test]
+async fn image_read_transcodes_ppm_to_png() {
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+    let path = fixture.workdir.join("chart.ppm");
+    let original = b"P6\n2 1\n255\n\xFF\x00\x00\x00\x80\xFF";
+    tokio::fs::write(&path, original).await.unwrap();
+
+    let response = fixture
+        .rpc::<ImageReadRequest, ImageReadResponse>(
+            "/v1/image/read",
+            &ImageReadRequest {
+                path: "chart.ppm".to_string(),
+                workdir: Some(".".to_string()),
+                detail: None,
+            },
+        )
+        .await;
+
+    let (mime, bytes) = decode_data_url(&response.image_url);
+    let image = image::load_from_memory(&bytes).unwrap();
+    assert_eq!(mime, "image/png");
+    assert_eq!(image.dimensions(), (2, 1));
+    assert_ne!(bytes, original);
+}
+
+#[tokio::test]
+async fn image_read_transcodes_additional_non_native_formats_to_png() {
+    for (extension, format) in [
+        ("bmp", ImageFormat::Bmp),
+        ("ico", ImageFormat::Ico),
+        ("tga", ImageFormat::Tga),
+    ] {
+        let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+        let path = fixture.workdir.join(format!("chart.{extension}"));
+        write_image(&path, 2, 1, format).await;
+        let original = tokio::fs::read(&path).await.unwrap();
+
+        let response = fixture
+            .rpc::<ImageReadRequest, ImageReadResponse>(
+                "/v1/image/read",
+                &ImageReadRequest {
+                    path: format!("chart.{extension}"),
+                    workdir: Some(".".to_string()),
+                    detail: None,
+                },
+            )
+            .await;
+
+        let (mime, bytes) = decode_data_url(&response.image_url);
+        let image = image::load_from_memory(&bytes).unwrap();
+        assert_eq!(mime, "image/png");
+        assert_eq!(image.dimensions(), (2, 1));
+        assert_ne!(bytes, original);
+    }
 }
 
 #[tokio::test]

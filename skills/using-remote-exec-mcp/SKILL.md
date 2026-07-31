@@ -258,6 +258,8 @@ Guidance:
 - Use `workdir` only for relative path resolution.
 - `detail` is accepted for compatibility but has no effect.
 - PNG, JPEG, and WebP are returned without resizing.
+- Rust daemon also transcodes BMP, GIF, ICO, PNM (including PPM), and TGA to
+  PNG; C++ daemon targets support PNG, JPEG, and WebP only.
 
 ### `transfer_files`
 
