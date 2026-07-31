@@ -13,9 +13,9 @@ OPENSSL_CONFIGURE_OPTIONS ?=
 OPENSSL_JOBS ?= 1
 OPENSSL_BUILD_MAKE ?= make
 OPENSSL_BUILD_MODE ?= default
-OPENSSL_XP_VERSION ?= 1.0.2u
-OPENSSL_XP_SHA256 ?= ecd0c6ffb493dd06707d38b14bb4d8c2288bb7033735606569d8f90f89669d16
-OPENSSL_XP_URL ?= https://www.openssl.org/source/old/1.0.2/openssl-$(OPENSSL_XP_VERSION).tar.gz
+OPENSSL_1X_VERSION ?= 1.0.2u
+OPENSSL_1X_SHA256 ?= ecd0c6ffb493dd06707d38b14bb4d8c2288bb7033735606569d8f90f89669d16
+OPENSSL_1X_URL ?= https://www.openssl.org/source/old/1.0.2/openssl-$(OPENSSL_1X_VERSION).tar.gz
 
 prepare-openssl:
 	OPENSSL_VERSION="$(OPENSSL_VERSION)" \
@@ -34,11 +34,16 @@ prepare-openssl:
 
 prepare-openssl-xp:
 	$(MAKE) prepare-openssl \
-		OPENSSL_VERSION="$(OPENSSL_XP_VERSION)" \
-		OPENSSL_SHA256="$(OPENSSL_XP_SHA256)" \
-		OPENSSL_URL="$(OPENSSL_XP_URL)" \
+		OPENSSL_CONFIGURE_TARGET=mingw \
+		OPENSSL_CONFIGURE_OPTIONS=no-apps
+
+prepare-openssl-xp-1.0.x:
+	$(MAKE) prepare-openssl \
+		OPENSSL_VERSION="$(OPENSSL_1X_VERSION)" \
+		OPENSSL_SHA256="$(OPENSSL_1X_SHA256)" \
+		OPENSSL_URL="$(OPENSSL_1X_URL)" \
 		OPENSSL_CONFIGURE_TARGET=mingw \
 		OPENSSL_CONFIGURE_OPTIONS=no-apps \
 		OPENSSL_BUILD_MODE=static-libraries-only
 
-.PHONY: prepare-openssl prepare-openssl-xp
+.PHONY: prepare-openssl prepare-openssl-xp prepare-openssl-xp-1.0.x

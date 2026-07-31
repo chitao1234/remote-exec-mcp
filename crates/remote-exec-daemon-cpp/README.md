@@ -66,7 +66,7 @@ Run the common GNU Windows XP-compatible cross-build:
 
 ```sh
 make prepare-openssl-xp OPENSSL_DEPS_DIR=/path/to/deps
-make check-windows-xp OPENSSL_ROOT=/path/to/deps/openssl-1.0.2u
+make check-windows-xp OPENSSL_ROOT=/path/to/deps/openssl-3.5.7
 ```
 
 Run the MSVC native path from an x86 Visual Studio developer prompt:
@@ -219,20 +219,21 @@ make TLS=openssl OPENSSL_ROOT="$PWD/build/deps/openssl-3.5.7"
 supported through `OPENSSL_ROOT`, `OPENSSL_CPPFLAGS`, and `OPENSSL_LDLIBS`.
 
 For an XP GNU cross-build, use a complete `i686-w64-mingw32-` tool prefix and
-the checksum-pinned OpenSSL 1.0.2u dependency:
+the checksum-pinned OpenSSL 3.5.7 dependency:
 
 ```sh
 CROSS_COMPILE=i686-w64-mingw32- make prepare-openssl-xp \
   OPENSSL_DEPS_DIR="$PWD/build/deps-mingw-xp" \
   OPENSSL_JOBS=8
 make check-windows-xp \
-  OPENSSL_ROOT="$PWD/build/deps-mingw-xp/openssl-1.0.2u"
+  OPENSSL_ROOT="$PWD/build/deps-mingw-xp/openssl-3.5.7"
 ```
 
-The XP GNU path tests the pinned OpenSSL 1.0.2u static libraries, including
-mutual-TLS full-duplex transport and client-pin rejection. OpenSSL 1.0.2u is
-end-of-life and is provided only for legacy XP compatibility; use the preferred
-pinned OpenSSL 3.5.7 build on supported modern systems.
+The XP GNU path tests the pinned OpenSSL 3.5.7 static libraries, including
+mutual-TLS full-duplex transport and client-pin rejection. OpenSSL 3.5.7 is the
+preferred XP and modern-host dependency. For the legacy OpenSSL 1.x API path,
+use the explicitly named `prepare-openssl-xp-1.0.x` target. OpenSSL 1.0.2u is
+end-of-life and is provided only for compatibility testing.
 
 GNU and NMAKE output/object names are TLS-tagged to avoid mixing disabled and
 enabled builds. Pre-XP Windows TLS combinations are best-effort and may fail in
