@@ -139,7 +139,7 @@ jobs:
           set "cpp_status=0"
           set "rust_status=0"
 
-          nmake /K /f crates\remote-exec-daemon-cpp\NMakefile all-msvc-native
+          nmake /K /f crates\remote-exec-daemon-cpp\NMakefile all-msvc-native TLS=off
           if errorlevel 1 set "cpp_status=%errorlevel%"
 
           cargo test --workspace --locked --no-fail-fast
@@ -383,4 +383,4 @@ jobs:
       - name: Run Windows C++ checks
         shell: cmd
         run: |
-          nmake /K /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
+          nmake /K /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native TLS=off

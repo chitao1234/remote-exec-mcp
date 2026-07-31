@@ -153,7 +153,7 @@ mod tests {
         use crate::config::ProcessEnvironment;
 
         let tempdir = tempfile::tempdir().expect("tempdir");
-        let script = "trap 'exit 0' TERM; (trap 'exit 0' TERM; while :; do sleep 1; done) & echo ready:$!; while :; do sleep 1; done";
+        let script = "child=''; trap 'kill \"$child\" 2>/dev/null; wait \"$child\" 2>/dev/null; exit 0' TERM; (trap 'exit 0' TERM; while :; do sleep 1; done) & child=$!; echo ready:$child; while :; do sleep 1; done";
         let cmd = vec![TEST_SHELL.to_string(), "-c".to_string(), script.to_string()];
 
         let mut session = super::spawn::spawn(
@@ -185,7 +185,7 @@ mod tests {
         use crate::config::ProcessEnvironment;
 
         let tempdir = tempfile::tempdir().expect("tempdir");
-        let script = "trap 'exit 0' TERM; (trap 'exit 0' TERM; while :; do sleep 1; done) & echo ready:$!; while :; do sleep 1; done";
+        let script = "child=''; trap 'kill \"$child\" 2>/dev/null; wait \"$child\" 2>/dev/null; exit 0' TERM; (trap 'exit 0' TERM; while :; do sleep 1; done) & child=$!; echo ready:$child; while :; do sleep 1; done";
         let cmd = vec![TEST_SHELL.to_string(), "-c".to_string(), script.to_string()];
 
         let mut session = super::spawn::spawn(
