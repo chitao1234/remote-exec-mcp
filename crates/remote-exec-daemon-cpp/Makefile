@@ -15,24 +15,7 @@ STRESS_JOBS ?= 8
 
 COMMON_CPPFLAGS = -I${MAKEFILE_DIR}include -I${MAKEFILE_DIR}third_party
 TLS ?= auto
-OPENSSL_ROOT ?=
-OPENSSL_CPPFLAGS ?=
-OPENSSL_LDLIBS ?=
-OPENSSL_VERSION ?= 3.5.7
-OPENSSL_SHA256 ?= a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8
-OPENSSL_URL ?=
-OPENSSL_DEPS_DIR ?= ${BUILD_DIR}/deps
-OPENSSL_ARCHIVE ?=
-OPENSSL_SOURCE_DIR ?=
-OPENSSL_INSTALL_DIR ?=
-OPENSSL_CONFIGURE_TARGET ?=
-OPENSSL_CONFIGURE_OPTIONS ?=
-OPENSSL_JOBS ?= 1
-OPENSSL_BUILD_MAKE ?= make
-OPENSSL_BUILD_MODE ?= default
-OPENSSL_XP_VERSION ?= 1.0.2u
-OPENSSL_XP_SHA256 ?= ecd0c6ffb493dd06707d38b14bb4d8c2288bb7033735606569d8f90f89669d16
-OPENSSL_XP_URL ?= https://www.openssl.org/source/old/1.0.2/openssl-${OPENSSL_XP_VERSION}.tar.gz
+.include "${MAKEFILE_DIR}mk/openssl.bsd.mk"
 .if "${TLS}" != "auto" && "${TLS}" != "off" && "${TLS}" != "openssl"
 .error unsupported TLS '${TLS}'; use auto, off, or openssl
 .endif
@@ -127,36 +110,6 @@ HOST_TEST_COMPILE_SRCS = ${HOST_TEST_SRCS:O:u}
 
 all: all-posix
 
-prepare-openssl:
-	OPENSSL_VERSION="${OPENSSL_VERSION}" \
-	OPENSSL_SHA256="${OPENSSL_SHA256}" \
-	OPENSSL_URL="${OPENSSL_URL}" \
-	OPENSSL_DEPS_DIR="${OPENSSL_DEPS_DIR}" \
-	OPENSSL_ARCHIVE="${OPENSSL_ARCHIVE}" \
-	OPENSSL_SOURCE_DIR="${OPENSSL_SOURCE_DIR}" \
-	OPENSSL_INSTALL_DIR="${OPENSSL_INSTALL_DIR}" \
-	OPENSSL_CONFIGURE_TARGET="${OPENSSL_CONFIGURE_TARGET}" \
-	OPENSSL_CONFIGURE_OPTIONS="${OPENSSL_CONFIGURE_OPTIONS}" \
-	OPENSSL_JOBS="${OPENSSL_JOBS}" \
-	OPENSSL_BUILD_MAKE="${OPENSSL_BUILD_MAKE}" \
-	OPENSSL_BUILD_MODE="${OPENSSL_BUILD_MODE}" \
-	sh "${MAKEFILE_DIR}scripts/prepare_openssl.sh"
-
-prepare-openssl-xp:
-	OPENSSL_VERSION="${OPENSSL_XP_VERSION}" \
-	OPENSSL_SHA256="${OPENSSL_XP_SHA256}" \
-	OPENSSL_URL="${OPENSSL_XP_URL}" \
-	OPENSSL_DEPS_DIR="${OPENSSL_DEPS_DIR}" \
-	OPENSSL_ARCHIVE="${OPENSSL_ARCHIVE}" \
-	OPENSSL_SOURCE_DIR="${OPENSSL_SOURCE_DIR}" \
-	OPENSSL_INSTALL_DIR="${OPENSSL_INSTALL_DIR}" \
-	OPENSSL_CONFIGURE_TARGET=mingw \
-	OPENSSL_CONFIGURE_OPTIONS=no-apps \
-	OPENSSL_JOBS="${OPENSSL_JOBS}" \
-	OPENSSL_BUILD_MAKE="${OPENSSL_BUILD_MAKE}" \
-	OPENSSL_BUILD_MODE=static-libraries-only \
-	sh "${MAKEFILE_DIR}scripts/prepare_openssl.sh"
-
 all-posix: ${POSIX_TARGET}
 
 check: check-posix
@@ -218,6 +171,5 @@ ${HOST_TEST_OBJ_DIR}/${src:S|.cpp|.o|}: ${src} ${POSIX_CONFIG_HEADER}
 clean:
 	rm -rf ${BUILD_DIR}
 
-.PHONY: all all-posix check check-posix clean force-posix-config prepare-openssl \
-	prepare-openssl-xp stress-posix test-server-streaming \
+.PHONY: all all-posix check check-posix clean force-posix-config stress-posix test-server-streaming \
 	${HOST_TEST_PHONY_TARGETS}
