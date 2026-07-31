@@ -35,6 +35,8 @@ pub struct BrokerConfig {
     pub transfer_limits: TransferLimits,
     #[serde(default)]
     pub disable_structured_content: bool,
+    #[serde(default = "default_prepend_tool_names")]
+    pub prepend_tool_names: bool,
     #[serde(default)]
     pub tools: BrokerToolsConfig,
     #[serde(default)]
@@ -84,6 +86,10 @@ pub struct ValidatedBrokerConfig(BrokerConfig);
 pub struct BrokerToolsConfig {
     #[serde(default)]
     pub file: FileToolConfig,
+}
+
+const fn default_prepend_tool_names() -> bool {
+    true
 }
 
 const DEFAULT_TARGET_HEALTHY_REFRESH_INTERVAL_MS: u64 = 60_000;

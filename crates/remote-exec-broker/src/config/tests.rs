@@ -385,6 +385,26 @@ async fn load_accepts_disabling_structured_content() {
 }
 
 #[tokio::test]
+async fn load_prepends_mcp_tool_names_by_default_and_allows_legacy_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let default_config = load_config(&dir, valid_target_config(DEFAULT_TEST_TARGET))
+        .await
+        .unwrap();
+    assert!(default_config.prepend_tool_names);
+
+    let legacy_config = load_config(
+        &dir,
+        format!(
+            "prepend_tool_names = false\n\n{}",
+            valid_target_config(DEFAULT_TEST_TARGET)
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(!legacy_config.prepend_tool_names);
+}
+
+#[tokio::test]
 async fn load_defaults_hidden_file_tools_off() {
     let dir = tempfile::tempdir().unwrap();
     let config = load_config(&dir, valid_target_config(DEFAULT_TEST_TARGET))

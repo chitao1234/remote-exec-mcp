@@ -94,6 +94,11 @@ pub fn assert_correlated_tool_error(
     target: Option<&str>,
     expected_suffix: &str,
 ) {
+    let tool = if tool.starts_with("remote_") {
+        tool.to_string()
+    } else {
+        format!("remote_{tool}")
+    };
     assert!(
         error.starts_with("request_id=req_"),
         "missing request_id prefix in error: {error}"
@@ -229,7 +234,8 @@ impl BrokerFixture {
     }
 
     async fn raw_call_tool(&self, name: &str, arguments: serde_json::Value) -> ToolResult {
-        let params = CallToolRequestParams::new(name.to_string())
+        let mcp_name = mcp_tool_name(name);
+        let params = CallToolRequestParams::new(mcp_name)
             .with_arguments(arguments.as_object().unwrap().clone());
         let result = tokio::time::timeout(BROKER_TOOL_CALL_TIMEOUT, self.client.call_tool(params))
             .await
@@ -241,6 +247,14 @@ impl BrokerFixture {
             .unwrap_or_else(|err| panic!("tool call `{name}` failed: {err}; arguments={arguments}"));
 
         ToolResult::from_call_tool_result(result)
+    }
+}
+
+fn mcp_tool_name(name: &str) -> String {
+    if name.starts_with("remote_") {
+        name.to_string()
+    } else {
+        format!("remote_{name}")
     }
 }
 

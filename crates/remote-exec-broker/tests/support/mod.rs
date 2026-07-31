@@ -36,6 +36,11 @@ pub fn assert_correlated_tool_error(
     target: Option<&str>,
     expected_suffix: &str,
 ) {
+    let tool = if tool.starts_with("remote_") {
+        tool.to_string()
+    } else {
+        format!("remote_{tool}")
+    };
     assert!(
         error.starts_with("request_id=req_"),
         "missing request_id prefix in error: {error}"

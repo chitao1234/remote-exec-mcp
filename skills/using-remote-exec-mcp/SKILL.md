@@ -10,16 +10,18 @@ does not require repository knowledge.
 
 ## Mental Model
 
-- The broker exposes seven standard MCP tools: `list_targets`, `exec_command`,
-  `write_stdin`, `apply_patch`, `view_image`, `transfer_files`, and
-  `forward_ports`.
-- Brokers may additionally expose default-hidden `read`, `write`, and `edit`
+- The broker exposes seven standard MCP tools: `remote_list_targets`,
+  `remote_exec_command`, `remote_write_stdin`, `remote_apply_patch`,
+  `remote_view_image`, `remote_transfer_files`, and `remote_forward_ports`.
+- Brokers may additionally expose default-hidden `remote_read`, `remote_write`, and `remote_edit`
   tools only when config explicitly enables them.
+- A broker can set `prepend_tool_names = false` for legacy unprefixed MCP tool
+  names. Use the names advertised by the broker when that compatibility mode is enabled.
 - Every machine-local operation is scoped to a logical `target`.
 - `local` means the broker host, not necessarily your current shell.
 - `session_id` and `forward_id` are opaque broker runtime tokens. Do not treat
   them as process IDs or daemon-local state.
-- `list_targets` is broker inventory backed by cached metadata. It performs a
+- `remote_list_targets` is broker inventory backed by cached metadata. It performs a
   bounded recheck for unavailable or unhealthy remote targets before returning.
 - A configured target can have `healthy: false` and `daemon_info: null`; stale
   daemon metadata is hidden while the target remains unhealthy.
@@ -31,16 +33,16 @@ does not require repository knowledge.
   target transport; one isolated timeout does not force a connection reset.
 - Choosing a target grants broad access on that machine unless static sandbox
   config narrows the relevant path operation.
-- A single command runs on one endpoint. Use `transfer_files` to move bytes
+- A single command runs on one endpoint. Use `remote_transfer_files` to move bytes
   between endpoints.
 - A port forward has a `listen_side` and a `connect_side`; swap them to reverse
   direction.
-- `transfer_files` can use `target: "local"` even when `local` does not appear
-  in `list_targets`.
-- `forward_ports` can use side `"local"` even when `local` does not appear in
-  `list_targets`.
+- `remote_transfer_files` can use `target: "local"` even when `local` does not appear
+  in `remote_list_targets`.
+- `remote_forward_ports` can use side `"local"` even when `local` does not appear in
+  `remote_list_targets`.
 - If broker structured content is disabled, rely on normal text/image content.
-  `apply_patch`, `read`, `write`, and `edit` are text-only either way.
+  `remote_apply_patch`, `remote_read`, `remote_write`, and `remote_edit` are text-only either way.
 - Tool errors include `request_id`, `tool`, and `target` when known. Keep the
   request ID for broker and daemon log correlation.
 
@@ -51,25 +53,25 @@ does not require repository knowledge.
 3. Use endpoint-native paths: `/srv/app/file` on Unix, `C:/work/file` on
    Windows. Windows targets may also accept MSYS/Cygwin-style paths such as
    `/c/work/file`.
-4. Use `exec_command`, `apply_patch`, `view_image`, or enabled hidden file
+4. Use `remote_exec_command`, `remote_apply_patch`, `remote_view_image`, or enabled hidden file
    tools for one endpoint.
-5. Use `transfer_files` for endpoint-to-endpoint copy.
-6. Use `forward_ports` for TCP/UDP tunneling.
-7. If `exec_command` returns `session_id`, keep it and use `write_stdin` until
+5. Use `remote_transfer_files` for endpoint-to-endpoint copy.
+6. Use `remote_forward_ports` for TCP/UDP tunneling.
+7. If `remote_exec_command` returns `session_id`, keep it and use `remote_write_stdin` until
    the returned `session_id` becomes `null`.
 
 ## Tool Selection
 
-- Discover targets, PTY support, and forwarding support: `list_targets`
-- Run a command on one target: `exec_command`
-- Continue or poll a live command: `write_stdin`
-- Edit files on one target with patch syntax: `apply_patch`
-- If enabled, read a text file with line prefixes: `read`
-- If enabled, overwrite or create a text file: `write`
-- If enabled, replace text in a file: `edit`
-- Read an image file from one target: `view_image`
-- Copy files or directories between endpoints: `transfer_files`
-- Open, list, or close TCP/UDP forwards: `forward_ports`
+- Discover targets, PTY support, and forwarding support: `remote_list_targets`
+- Run a command on one target: `remote_exec_command`
+- Continue or poll a live command: `remote_write_stdin`
+- Edit files on one target with patch syntax: `remote_apply_patch`
+- If enabled, read a text file with line prefixes: `remote_read`
+- If enabled, overwrite or create a text file: `remote_write`
+- If enabled, replace text in a file: `remote_edit`
+- Read an image file from one target: `remote_view_image`
+- Copy files or directories between endpoints: `remote_transfer_files`
+- Open, list, or close TCP/UDP forwards: `remote_forward_ports`
 
 ## MCP JSON vs CLI Arguments
 
@@ -81,18 +83,18 @@ not use the same input syntax.
 - When using the `remote-exec` CLI, use the flag syntax shown under
   **`remote-exec` CLI**. The CLI accepts convenience shorthands and converts
   them into MCP-shaped requests.
-- `transfer_files` MCP endpoints are objects such as
+- `remote_transfer_files` MCP endpoints are objects such as
   `{"target": "xp", "path": "C:/WINDOWS/win.ini"}`. NEVER send
   `xp:C:/WINDOWS/win.ini` or any other `target:path` CLI shorthand in MCP JSON;
   that shorthand is only for `remote-exec transfer-files`.
-- `forward_ports` MCP specs are objects with `listen_endpoint`,
+- `remote_forward_ports` MCP specs are objects with `listen_endpoint`,
   `connect_endpoint`, and `protocol`. NEVER send
   `tcp:127.0.0.1:15432=127.0.0.1:5432` or any other forward CLI shorthand in
   MCP JSON; that shorthand is only for `remote-exec forward-ports`.
 
 ## MCP Tools
 
-### `list_targets`
+### `remote_list_targets`
 
 Input:
 
@@ -106,7 +108,7 @@ unhealthy ones, `daemon_info.platform` for path choices, `supports_pty` before
 `supports_port_forward` is true only when the target reports forwarding support
 and the broker verifies a supported tunnel protocol version.
 
-### `exec_command`
+### `remote_exec_command`
 
 Input:
 
@@ -129,12 +131,12 @@ Guidance:
 - `session_id: null` means the command completed.
 - `max_output_tokens` is approximate; output may be head/tail truncated.
 - Read `warnings` when present.
-- Do not send patch text through shell commands; use `apply_patch`.
+- Do not send patch text through shell commands; use `remote_apply_patch`.
 
 Optional fields: `workdir`, `shell`, `tty`, `yield_time_ms`,
 `max_output_tokens`, `login`.
 
-### `write_stdin`
+### `remote_write_stdin`
 
 Input:
 
@@ -164,7 +166,7 @@ Guidance:
 - Unknown or daemon-lost sessions surface as `Unknown process id ...`.
 - If stdin was closed, rerun with `exec_command(..., "tty": true)`.
 
-### `apply_patch`
+### `remote_apply_patch`
 
 Input:
 
@@ -181,7 +183,7 @@ Guidance:
 - Use normal Codex patch syntax.
 - Relative patch paths resolve from `workdir` when supplied.
 - Existing `LF` versus `CRLF` style is preserved for updated files.
-- `apply_patch` preflights deterministic failures before writing, including
+- `remote_apply_patch` preflights deterministic failures before writing, including
   missing files, non-file targets, sandbox denial, decode failures, and
   unmatched hunks.
 - Multi-file patches are still not transactional for runtime races or
@@ -189,7 +191,7 @@ Guidance:
   risk would be hard to recover from, split the patch.
 - Successful calls return text output only.
 
-### Hidden `read`, `write`, `edit`
+### Hidden `remote_read`, `remote_write`, `remote_edit`
 
 These tools are default-hidden and may be absent from `list_tools`.
 
@@ -232,16 +234,16 @@ Guidance:
   daemon/default workdir.
 - `read.offset` is one-based; omitted or `0` means line `1`.
 - `read.limit` is in lines and defaults to the broker config limit.
-- `read` prefixes every returned line as `N: text` and ends with a reminder
+- `remote_read` prefixes every returned line as `N: text` and ends with a reminder
   describing EOF, an out-of-range offset, an empty file, or the displayed range.
-- `write` overwrites the file or creates it if missing.
-- `edit` rejects multiple `old_string` matches unless `replace_all` is true.
-- `read`, `write`, and `edit` use the same experimental target encoding
-  autodetection policy as `apply_patch` when enabled.
-- If these tools are absent, use `exec_command`, `apply_patch`, or
-  `transfer_files` instead.
+- `remote_write` overwrites the file or creates it if missing.
+- `remote_edit` rejects multiple `old_string` matches unless `replace_all` is true.
+- `remote_read`, `remote_write`, and `remote_edit` use the same experimental target encoding
+  autodetection policy as `remote_apply_patch` when enabled.
+- If these tools are absent, use `remote_exec_command`, `remote_apply_patch`, or
+  `remote_transfer_files` instead.
 
-### `view_image`
+### `remote_view_image`
 
 Input:
 
@@ -261,7 +263,7 @@ Guidance:
 - Rust daemon also transcodes BMP, GIF, ICO, PNM (including PPM), and TGA to
   PNG; C++ daemon targets support PNG, JPEG, and WebP only.
 
-### `transfer_files`
+### `remote_transfer_files`
 
 Input:
 
@@ -312,10 +314,10 @@ Guidance:
   separator on every platform.
 - `symlink_mode` is `preserve`, `follow`, or `skip`.
 - Do not send a public `compression` field; compression is broker-internal.
-- Prefer `transfer_files` over `scp`, shell redirection, or ad hoc archives for
+- Prefer `remote_transfer_files` over `scp`, shell redirection, or ad hoc archives for
   cross-endpoint data movement.
 
-### `forward_ports`
+### `remote_forward_ports`
 
 Open:
 
@@ -427,30 +429,30 @@ stdin.
 
 Inspect and edit remote code:
 
-1. `list_targets`
-2. `exec_command` to inspect/search
-3. `apply_patch` on that target
-4. `exec_command` to verify
+1. `remote_list_targets`
+2. `remote_exec_command` to inspect/search
+3. `remote_apply_patch` on that target
+4. `remote_exec_command` to verify
 
 Upload, run, retrieve:
 
-1. `transfer_files` from `local` to target
-2. `exec_command` on target
-3. `transfer_files` from target to `local` for artifacts
+1. `remote_transfer_files` from `local` to target
+2. `remote_exec_command` on target
+3. `remote_transfer_files` from target to `local` for artifacts
 
 Interactive session:
 
 1. Check `supports_pty`
-2. `exec_command` with `tty: true`
-3. Use `write_stdin` to send input or poll
+2. `remote_exec_command` with `tty: true`
+3. Use `remote_write_stdin` to send input or poll
 
 Port forward:
 
-1. `list_targets` and confirm forwarding support
-2. `forward_ports` open
-3. `forward_ports` list until `phase = "ready"`
+1. `remote_list_targets` and confirm forwarding support
+2. `remote_forward_ports` open
+3. `remote_forward_ports` list until `phase = "ready"`
 4. Use the forwarded service
-5. `forward_ports` close
+5. `remote_forward_ports` close
 
 ## Capability Notes
 
@@ -458,7 +460,7 @@ Port forward:
   the tools and capabilities it reports.
 - Do not infer behavior from operating system names, daemon implementation,
   version strings, or build labels.
-- Trust `list_targets` health and capability fields and the tools exposed by the
+- Trust `remote_list_targets` health and capability fields and the tools exposed by the
   broker.
 - Use `supports_pty` before `tty: true`; if PTY support is false or unknown,
   run non-interactively or expect a typed unsupported error.
@@ -468,15 +470,15 @@ Port forward:
 
 ## Common Mistakes
 
-- Guessing target names instead of calling `list_targets`.
+- Guessing target names instead of calling `remote_list_targets`.
 - Forgetting that `local` means broker host.
 - Running a command on one target and expecting it to read another target's
   filesystem.
-- Using shell tricks instead of `transfer_files` for cross-endpoint copy.
+- Using shell tricks instead of `remote_transfer_files` for cross-endpoint copy.
 - Copying CLI endpoint or forward shorthand into direct MCP tool calls.
-- Sending relative paths to `transfer_files`.
+- Sending relative paths to `remote_transfer_files`.
 - Assuming `overwrite: "merge"` deletes destination files absent from source.
-- Treating `status = "open"` as readiness for `forward_ports`; check `phase`.
+- Treating `status = "open"` as readiness for `remote_forward_ports`; check `phase`.
 - Leaving port forwards open after use.
 - Reusing `session_id` or `forward_id` after broker restart.
-- Sending patch text through `exec_command` instead of `apply_patch`.
+- Sending patch text through `remote_exec_command` instead of `remote_apply_patch`.

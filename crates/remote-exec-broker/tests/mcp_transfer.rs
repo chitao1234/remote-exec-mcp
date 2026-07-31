@@ -43,7 +43,7 @@ async fn transfer_files_is_listed_for_mcp_clients() {
         tools
             .tools
             .iter()
-            .any(|tool| tool.name.as_ref() == "transfer_files")
+            .any(|tool| tool.name.as_ref() == "remote_transfer_files")
     );
 }
 

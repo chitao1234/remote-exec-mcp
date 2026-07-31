@@ -23,9 +23,34 @@ async fn hidden_file_tools_are_not_listed_by_default() {
         .map(|tool| tool.name.as_ref())
         .collect::<std::collections::BTreeSet<_>>();
 
-    assert!(!names.contains("read"));
-    assert!(!names.contains("write"));
-    assert!(!names.contains("edit"));
+    assert!(!names.contains("remote_read"));
+    assert!(!names.contains("remote_write"));
+    assert!(!names.contains("remote_edit"));
+}
+
+#[tokio::test]
+async fn legacy_mcp_tool_names_are_advertised_when_prefixing_is_disabled() {
+    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version_and_port_forward_limits(
+        4,
+        "prepend_tool_names = false",
+    )
+    .await;
+
+    let tools = fixture
+        .client
+        .list_tools(Some(PaginatedRequestParams::default()))
+        .await
+        .expect("list tools");
+    let names = tools
+        .tools
+        .iter()
+        .map(|tool| tool.name.as_ref())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert!(names.contains("list_targets"));
+    assert!(names.contains("exec_command"));
+    assert!(!names.contains("remote_list_targets"));
+    assert!(!names.contains("remote_exec_command"));
 }
 
 #[tokio::test]
@@ -46,15 +71,15 @@ async fn hidden_file_tools_are_listed_when_enabled() {
         .map(|tool| tool.name.as_ref())
         .collect::<std::collections::BTreeSet<_>>();
 
-    assert!(names.contains("read"));
-    assert!(names.contains("write"));
-    assert!(names.contains("edit"));
+    assert!(names.contains("remote_read"));
+    assert!(names.contains("remote_write"));
+    assert!(names.contains("remote_edit"));
 
     let read = tools
         .tools
         .into_iter()
-        .find(|tool| tool.name.as_ref() == "read")
-        .expect("read tool");
+        .find(|tool| tool.name.as_ref() == "remote_read")
+        .expect("remote_read tool");
     assert_eq!(
         read.annotations
             .as_ref()

@@ -39,10 +39,11 @@ impl BrokerFixture {
     }
 
     async fn raw_call_tool(&self, name: &str, arguments: serde_json::Value) -> ToolResult {
+        let name = mcp_tool_name(name);
         let result = self
             .client
             .call_tool(
-                CallToolRequestParams::new(name.to_string())
+                CallToolRequestParams::new(name)
                     .with_arguments(arguments.as_object().unwrap().clone()),
             )
             .await
@@ -83,6 +84,14 @@ impl BrokerFixture {
             }),
         )
         .await
+    }
+}
+
+fn mcp_tool_name(name: &str) -> String {
+    if name.starts_with("remote_") {
+        name.to_string()
+    } else {
+        format!("remote_{name}")
     }
 }
 

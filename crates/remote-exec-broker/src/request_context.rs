@@ -6,14 +6,14 @@ use remote_exec_proto::request_id::RequestId;
 #[derive(Debug, Clone)]
 pub(crate) struct RequestContext {
     request_id: RequestId,
-    tool: &'static str,
+    tool: String,
     target: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct RequestContextSnapshot {
     request_id: RequestId,
-    tool: &'static str,
+    tool: String,
     target: Option<String>,
 }
 
@@ -22,10 +22,10 @@ tokio::task_local! {
 }
 
 impl RequestContext {
-    pub(crate) fn new(tool: &'static str) -> Self {
+    pub(crate) fn new(tool: impl Into<String>) -> Self {
         Self {
             request_id: RequestId::new(),
-            tool,
+            tool: tool.into(),
             target: Arc::new(Mutex::new(None)),
         }
     }
@@ -34,8 +34,8 @@ impl RequestContext {
         &self.request_id
     }
 
-    pub(crate) fn tool(&self) -> &'static str {
-        self.tool
+    pub(crate) fn tool(&self) -> &str {
+        &self.tool
     }
 
     pub(crate) fn set_target(&self, target: impl Into<String>) {
@@ -49,7 +49,7 @@ impl RequestContext {
     fn snapshot(&self) -> RequestContextSnapshot {
         RequestContextSnapshot {
             request_id: self.request_id.clone(),
-            tool: self.tool,
+            tool: self.tool.clone(),
             target: lock_unpoisoned(&self.target).clone(),
         }
     }
@@ -60,8 +60,8 @@ impl RequestContextSnapshot {
         &self.request_id
     }
 
-    pub(crate) fn tool(&self) -> &'static str {
-        self.tool
+    pub(crate) fn tool(&self) -> &str {
+        &self.tool
     }
 
     pub(crate) fn target(&self) -> Option<&str> {

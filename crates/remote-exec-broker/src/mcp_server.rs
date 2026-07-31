@@ -98,20 +98,20 @@ pub struct BrokerServer {
 
 impl BrokerServer {
     pub fn new(state: crate::BrokerState) -> Self {
-        let mut tool_router = Self::tool_router();
+        let mut tool_router = Self::tool_router(state.prepend_tool_names);
         for tool in BrokerTool::ALL {
             if !tool.enabled_by_config(&state.tools) {
-                tool_router.remove_route(tool.name());
+                tool_router.remove_route(&tool.mcp_name(state.prepend_tool_names));
             }
         }
 
         Self { state, tool_router }
     }
 
-    fn tool_router() -> ToolRouter<Self> {
+    fn tool_router(prepend_tool_names: bool) -> ToolRouter<Self> {
         let mut tool_router = ToolRouter::new();
         for tool in BrokerTool::ALL.iter().copied() {
-            tool_router.add_route(tool_route(tool));
+            tool_router.add_route(tool_route(tool, prepend_tool_names));
         }
         tool_router
     }
@@ -121,14 +121,17 @@ impl BrokerServer {
     }
 }
 
-fn tool_route(tool: BrokerTool) -> ToolRoute<BrokerServer> {
+fn tool_route(tool: BrokerTool, prepend_tool_names: bool) -> ToolRoute<BrokerServer> {
+    let mcp_name = tool.mcp_name(prepend_tool_names);
     ToolRoute::new_dyn(
-        tool.mcp_tool(),
+        tool.mcp_tool(mcp_name.clone()),
         move |context: ToolCallContext<'_, BrokerServer>| {
+            let mcp_name = mcp_name.clone();
             Box::pin(async move {
                 let arguments = context.arguments.unwrap_or_default();
                 tool.call_mcp(
                     &context.service.state,
+                    mcp_name,
                     arguments,
                     context.service.include_structured_content(),
                 )
@@ -143,7 +146,15 @@ pub(crate) async fn finish_scoped_tool_call(
     include_structured_content: bool,
     future: ToolCallFuture<'_>,
 ) -> CallToolResult {
-    let context = RequestContext::new(tool.name());
+    finish_scoped_tool_call_named(tool.name().to_string(), include_structured_content, future).await
+}
+
+pub(crate) async fn finish_scoped_tool_call_named(
+    tool_name: String,
+    include_structured_content: bool,
+    future: ToolCallFuture<'_>,
+) -> CallToolResult {
+    let context = RequestContext::new(tool_name);
     crate::request_context::scope(context.clone(), async {
         let started = Instant::now();
         tracing::debug!(
@@ -206,13 +217,16 @@ mod tool_router_contract_tests {
 
     #[test]
     fn tool_router_matches_registry_names() {
-        let router = BrokerServer::tool_router();
+        let router = BrokerServer::tool_router(true);
         let mut actual: Vec<_> = router
             .list_all()
             .into_iter()
             .map(|tool| tool.name.into_owned())
             .collect();
-        let mut expected: Vec<_> = BrokerTool::ALL.iter().map(|tool| tool.name()).collect();
+        let mut expected: Vec<_> = BrokerTool::ALL
+            .iter()
+            .map(|tool| tool.mcp_name(true))
+            .collect();
         actual.sort_unstable();
         expected.sort_unstable();
         assert_eq!(actual, expected);
@@ -220,9 +234,10 @@ mod tool_router_contract_tests {
 
     #[test]
     fn tool_router_metadata_matches_registry() {
-        let router = BrokerServer::tool_router();
+        let router = BrokerServer::tool_router(true);
         for tool in BrokerTool::ALL {
-            let route = router.get(tool.name()).expect("registered tool is routed");
+            let name = tool.mcp_name(true);
+            let route = router.get(&name).expect("registered tool is routed");
             assert_eq!(route.description.as_deref(), Some(tool.description()));
             let read_only_hint = route
                 .annotations
@@ -238,6 +253,7 @@ mod tool_router_contract_tests {
             enable_transfer_compression: true,
             transfer_limits: Default::default(),
             disable_structured_content: false,
+            prepend_tool_names: true,
             health_refresh_intervals: crate::state::TargetHealthRefreshIntervals {
                 healthy: std::time::Duration::from_secs(60),
                 unhealthy: std::time::Duration::from_secs(15),
@@ -258,9 +274,9 @@ mod tool_router_contract_tests {
             .map(|tool| tool.name.into_owned())
             .collect();
 
-        assert!(!names.contains("read"));
-        assert!(!names.contains("write"));
-        assert!(!names.contains("edit"));
+        assert!(!names.contains("remote_read"));
+        assert!(!names.contains("remote_write"));
+        assert!(!names.contains("remote_edit"));
     }
 }
 

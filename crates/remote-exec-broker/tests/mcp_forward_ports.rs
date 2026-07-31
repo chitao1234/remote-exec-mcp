@@ -19,7 +19,7 @@ async fn forward_ports_is_listed_for_mcp_clients() {
         tools
             .tools
             .iter()
-            .any(|tool| tool.name.as_ref() == "forward_ports")
+            .any(|tool| tool.name.as_ref() == "remote_forward_ports")
     );
 }
 

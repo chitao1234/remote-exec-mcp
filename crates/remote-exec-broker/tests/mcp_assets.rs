@@ -298,7 +298,7 @@ async fn apply_patch_local_target_preflights_later_failures_before_mutation() {
         .await;
 
     assert!(result.is_error, "expected preflight error");
-    assert!(result.text_output.contains(" tool=apply_patch "));
+    assert!(result.text_output.contains(" tool=remote_apply_patch "));
     assert!(result.text_output.contains(" target=local: "));
     assert_eq!(std::fs::read_to_string(path).unwrap(), "before\n");
 }
@@ -490,8 +490,8 @@ async fn list_targets_is_advertised_as_read_only() {
     let list_targets = tools
         .tools
         .into_iter()
-        .find(|tool| tool.name.as_ref() == "list_targets")
-        .expect("list_targets tool");
+        .find(|tool| tool.name.as_ref() == "remote_list_targets")
+        .expect("remote_list_targets tool");
 
     assert_eq!(
         list_targets
@@ -515,8 +515,8 @@ async fn view_image_is_advertised_as_read_only() {
     let view_image = tools
         .tools
         .into_iter()
-        .find(|tool| tool.name.as_ref() == "view_image")
-        .expect("view_image tool");
+        .find(|tool| tool.name.as_ref() == "remote_view_image")
+        .expect("remote_view_image tool");
 
     assert_eq!(
         view_image

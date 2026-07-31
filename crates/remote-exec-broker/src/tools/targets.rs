@@ -83,6 +83,7 @@ mod tests {
             enable_transfer_compression: true,
             transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
             disable_structured_content: false,
+            prepend_tool_names: true,
             health_refresh_intervals: crate::state::TargetHealthRefreshIntervals {
                 healthy: std::time::Duration::from_secs(60),
                 unhealthy: std::time::Duration::from_secs(15),

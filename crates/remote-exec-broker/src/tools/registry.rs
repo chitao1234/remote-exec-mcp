@@ -187,14 +187,15 @@ macro_rules! define_broker_tool_impl {
         pub(crate) async fn call_mcp(
             self,
             state: &crate::BrokerState,
+            mcp_name: String,
             arguments: JsonObject,
             include_structured_content: bool,
         ) -> Result<CallToolResult, McpError> {
             match self {
                 $(Self::$variant => {
                     let input = deserialize_mcp_arguments::<$input>(arguments)?;
-                    Ok(crate::mcp_server::finish_scoped_tool_call(
-                        self,
+                    Ok(crate::mcp_server::finish_scoped_tool_call_named(
+                        mcp_name,
                         include_structured_content,
                         Box::pin($handler(state, input)),
                     )
@@ -230,6 +231,14 @@ macro_rules! define_broker_tool_impl {
             }
         }
 
+        pub(crate) fn mcp_name(self, prepend_tool_names: bool) -> String {
+            if prepend_tool_names {
+                format!("remote_{}", self.name())
+            } else {
+                self.name().to_string()
+            }
+        }
+
         pub(crate) const fn description(self) -> &'static str {
             match self {
                 $(Self::$variant => $description,)*
@@ -248,9 +257,9 @@ macro_rules! define_broker_tool_impl {
             }
         }
 
-        pub(crate) fn mcp_tool(self) -> Tool {
+        pub(crate) fn mcp_tool(self, mcp_name: String) -> Tool {
             let mut tool = Tool::new_with_raw(
-                self.name(),
+                mcp_name,
                 Some(self.description().into()),
                 self.input_schema(),
             );

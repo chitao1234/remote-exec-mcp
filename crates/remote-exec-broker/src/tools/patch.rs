@@ -23,11 +23,11 @@ fn log_patch_audit(target_name: &str, response: &PatchApplyResponse) {
         remote_exec_util::preview_text(&response.updated_paths.join(", "), 240)
     };
     let tool = crate::request_context::current()
-        .map(|context| context.tool())
-        .unwrap_or("apply_patch");
+        .map(|context| context.tool().to_string())
+        .unwrap_or_else(|| "apply_patch".to_string());
 
     tracing::info!(
-        tool,
+        tool = %tool,
         target = %target_name,
         daemon_instance_id = response.daemon_instance_id.as_deref().unwrap_or("-"),
         updated_path_count = response.updated_paths.len(),

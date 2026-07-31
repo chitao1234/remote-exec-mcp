@@ -61,24 +61,24 @@ crates/remote-exec-daemon-cpp/build/remote-exec-daemon-cpp \
 
 ## Public Surface
 
-Implemented public MCP tools:
+Implemented public MCP tools (prefixed with `remote_` by default):
 
 | Tool | Purpose |
 | --- | --- |
-| `list_targets` | Report configured targets and cached daemon metadata. |
-| `exec_command` | Start a command on one target. |
-| `write_stdin` | Write to or poll a live command session. |
-| `apply_patch` | Apply a Codex-style patch on one target. |
-| `view_image` | Read an image from one target. |
-| `transfer_files` | Transfer files or directory trees between local and remote endpoints. |
-| `forward_ports` | Open, list, or close TCP/UDP forwards between two sides. |
+| `remote_list_targets` | Report configured targets and cached daemon metadata. |
+| `remote_exec_command` | Start a command on one target. |
+| `remote_write_stdin` | Write to or poll a live command session. |
+| `remote_apply_patch` | Apply a Codex-style patch on one target. |
+| `remote_view_image` | Read an image from one target. |
+| `remote_transfer_files` | Transfer files or directory trees between local and remote endpoints. |
+| `remote_forward_ports` | Open, list, or close TCP/UDP forwards between two sides. |
 
 Default-hidden file tools are available only when explicitly enabled under
 `[tools.file]` in broker config:
 
-- `read`
-- `write`
-- `edit`
+- `remote_read`
+- `remote_write`
+- `remote_edit`
 
 ## Components
 
@@ -108,7 +108,7 @@ Important invariants:
 - Public `session_id` and `forward_id` values are broker-owned opaque tokens.
   They are not daemon process IDs, daemon-local session IDs, tunnel IDs, or
   stream IDs.
-- `list_targets` reports configured targets and cached daemon metadata. It may
+- `remote_list_targets` reports configured targets and cached daemon metadata. It may
   perform a short bounded status refresh for targets without currently
   available metadata, but it does not expose stale daemon metadata while a
   target is unavailable.
@@ -120,7 +120,7 @@ Important invariants:
   HTTP/1.1 Upgrade tunnels.
 - Direct targets and daemon-initiated reverse targets preserve the same public
   MCP behavior and broker-owned ID namespaces.
-- `forward_ports` v4 uses `X-Remote-Exec-Port-Tunnel-Version: 4`. Frame numbers
+- `remote_forward_ports` v4 uses `X-Remote-Exec-Port-Tunnel-Version: 4`. Frame numbers
   20 and 21 are reserved as `ForwardRecovering` and `ForwardRecovered`; public
   recovery state is reported through broker-owned `forward_ports list` fields.
 
@@ -247,6 +247,10 @@ listen = "127.0.0.1:8787"
 path = "/mcp"
 ```
 
+MCP tool names are prefixed with `remote_` by default. Set
+`prepend_tool_names = false` in the broker config to retain legacy unprefixed
+MCP names; this does not change the `remote-exec` CLI subcommands.
+
 Run the C++ daemon:
 
 ```bash
@@ -257,7 +261,8 @@ crates/remote-exec-daemon-cpp/build/remote-exec-daemon-cpp \
 
 ## CLI Client
 
-The `remote-exec` CLI calls the same public broker tools.
+The `remote-exec` CLI keeps its existing subcommand names and automatically
+uses either prefixed or legacy MCP tool names advertised by an HTTP broker.
 
 Use a broker config in-process:
 
@@ -317,7 +322,7 @@ port forwards require a long-running broker, so prefer `--broker-url` for
 
 ## Tool Behavior
 
-`exec_command`:
+`remote_exec_command`:
 
 - runs one command on one target
 - returns `session_id` when still running
@@ -326,7 +331,7 @@ port forwards require a long-running broker, so prefer `--broker-url` for
 - truncates output by approximate token budget, where one token is about four
   UTF-8 bytes
 
-`write_stdin`:
+`remote_write_stdin`:
 
 - writes to or polls a broker-owned live session
 - can route by `session_id` alone
@@ -334,7 +339,7 @@ port forwards require a long-running broker, so prefer `--broker-url` for
 - accepts `pty_size` for live TTY resize before writing or polling
 - normalizes lost daemon sessions into the usual unknown-process error
 
-`apply_patch`:
+`remote_apply_patch`:
 
 - applies Codex-style patches on one target
 - preserves existing `LF` versus `CRLF` style for updated files
@@ -347,17 +352,17 @@ port forwards require a long-running broker, so prefer `--broker-url` for
 
 Default-hidden file tools:
 
-- `read` reads one text file and returns text output only
+- `remote_read` reads one text file and returns text output only
 - `read.file_path`, `write.file_path`, and `edit.file_path` resolve relative to
   the target default workdir unless they are target-native absolute paths
 - `read.offset` is one-based; omitted or `0` means line `1`
 - `read.limit` defaults to `tools.file.default_read_limit_lines`
-- `write` overwrites an existing file or creates a new file
-- `edit` replaces `old_string` with `new_string`; if `old_string` matches more
+- `remote_write` overwrites an existing file or creates a new file
+- `remote_edit` replaces `old_string` with `new_string`; if `old_string` matches more
   than once, the call fails unless `replace_all = true`
 - these tools are not listed or callable unless enabled under `[tools.file]`
 
-`view_image`:
+`remote_view_image`:
 
 - reads an image from one target
 - accepts `detail` for compatibility but does not use it
@@ -365,7 +370,7 @@ Default-hidden file tools:
 - Rust daemon transcodes BMP, GIF, ICO, PNM (including PPM), and TGA to PNG;
   the C++ daemon supports passthrough PNG, JPEG, and WebP only
 
-`transfer_files`:
+`remote_transfer_files`:
 
 - supports `local -> remote`, `remote -> local`, `remote -> remote`, and
   `local -> local`
@@ -381,7 +386,7 @@ Default-hidden file tools:
 - does not expose a public compression option; compression is broker-internal
 - is not transactional; failed transfers can leave partial destination changes
 
-`forward_ports`:
+`remote_forward_ports`:
 
 - supports `action = "open" | "list" | "close"`
 - supports `tcp` and `udp`
@@ -404,14 +409,14 @@ Default-hidden file tools:
 
 The name `local` means the broker host.
 
-- `[local]` enables `target: "local"` for `exec_command`, `write_stdin`,
-  `apply_patch`, `view_image`, and enabled default-hidden file tools.
-- `transfer_files` can use `target: "local"` for broker-host filesystem access
+- `[local]` enables `target: "local"` for `remote_exec_command`, `remote_write_stdin`,
+  `remote_apply_patch`, `remote_view_image`, and enabled default-hidden file tools.
+- `remote_transfer_files` can use `target: "local"` for broker-host filesystem access
   even when `[local]` is omitted.
-- `forward_ports` can use side `"local"` for broker-host network access even
+- `remote_forward_ports` can use side `"local"` for broker-host network access even
   when `[local]` is omitted.
 - Broker `host_sandbox` governs broker-host filesystem access. It does not
-  restrict `forward_ports` network access.
+  restrict `remote_forward_ports` network access.
 
 ## Trust Model
 
@@ -423,13 +428,13 @@ Sandbox rules are static allow/deny lists:
 
 - missing `allow` or `allow = []` means allow all
 - `deny` entries refine the allowed set
-- `exec_command` checks only the resolved starting `cwd`
+- `remote_exec_command` checks only the resolved starting `cwd`
 - command text is not inspected for arbitrary path references
-- `view_image` and `read` check read paths
-- `write`, `edit`, and `apply_patch` check write paths
-- `transfer_files` checks source read access and destination write access on
+- `remote_view_image` and `remote_read` check read paths
+- `remote_write`, `remote_edit`, and `remote_apply_patch` check write paths
+- `remote_transfer_files` checks source read access and destination write access on
   their respective endpoints
-- `forward_ports` can bind non-loopback addresses and connect to arbitrary
+- `remote_forward_ports` can bind non-loopback addresses and connect to arbitrary
   endpoints reachable from each side, subject to configured forwarding limits
 
 Security is based on explicit target selection plus broker-to-daemon mutual TLS
@@ -445,7 +450,7 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 - After repeated direct-target timeouts without a successful HTTP response, the
   broker replaces the target's HTTP client pool. Reverse targets additionally
   discard queued idle lanes so the daemon replenishes them.
-- `exec_command` and `write_stdin` use at least `yield_time_ms` plus a small
+- `remote_exec_command` and `remote_write_stdin` use at least `yield_time_ms` plus a small
   slow-host margin for their daemon RPC timeout.
 - Rust daemon and broker-host live exec sessions are capped by
   `max_open_sessions` and prune older sessions under pressure, preferring
@@ -469,7 +474,7 @@ The C++ daemon intentionally supports a smaller surface than the Rust daemon:
 | Transport | Optional OpenSSL direct/reverse mTLS, or explicit plain HTTP. TLS builds use `https://...`; plain targets use `http://...` and `allow_insecure_http = true`. |
 | Security | Mutual TLS with OpenSSL 1.0.2 or newer, optional bearer auth, certificate pinning, and static path sandboxing. |
 | Exec | C++11 implementation for POSIX and legacy Windows hosts. POSIX PTY is supported when the host can allocate one. GNU/MSVC Windows PTY support depends on vendored `winpty`. |
-| Files | `apply_patch`, `view_image` passthrough for PNG/JPEG/WebP, and transfer import/export. Default-hidden `read` / `write` / `edit` are not implemented yet. |
+| Files | `remote_apply_patch`, `remote_view_image` passthrough for PNG/JPEG/WebP, and transfer import/export. Default-hidden `remote_read` / `remote_write` / `remote_edit` are not implemented yet. |
 | Transfers | File, directory, and broker-built multi-source transfers. No transfer compression. |
 | Forwarding | v4 TCP/UDP port-forward tunnel support with daemon-local worker and queue limits. |
 | Legacy Windows | GNU paths cover NT 3.x Winsock 1.1, NT 4.0 Winsock 1.1/2, Windows 2000, XP, x64 NT-family, and ANSI Windows 9x/Me variants. MSVC covers native and `v141_xp` XP-compatible paths. |

@@ -1,9 +1,12 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
-    model::{CallToolRequestParams, CallToolResult, ClientInfo, ContentBlock},
+    model::{
+        CallToolRequestParams, CallToolResult, ClientInfo, ContentBlock, PaginatedRequestParams,
+    },
     service::RunningService,
     transport::StreamableHttpClientTransport,
     transport::streamable_http_client::StreamableHttpClientTransportConfig,
@@ -24,11 +27,16 @@ pub struct RemoteExecClient {
 
 enum ClientTransport {
     Direct(DirectBrokerClient),
-    Mcp(RunningService<RoleClient, RemoteExecClientHandler>),
+    Mcp(McpBrokerClient),
 }
 
 struct DirectBrokerClient {
     state: crate::BrokerState,
+}
+
+struct McpBrokerClient {
+    service: RunningService<RoleClient, RemoteExecClientHandler>,
+    tool_names: BTreeSet<String>,
 }
 
 impl RemoteExecClient {
@@ -58,13 +66,15 @@ impl RemoteExecClient {
 
         let result = match &self.transport {
             ClientTransport::Direct(client) => client.call_tool(name, arguments).await,
-            ClientTransport::Mcp(service) => {
-                let result = service
+            ClientTransport::Mcp(client) => {
+                let mcp_name = client.tool_name(name);
+                let result = client
+                    .service
                     .call_tool(
-                        CallToolRequestParams::new(name.to_string()).with_arguments(arguments),
+                        CallToolRequestParams::new(mcp_name.clone()).with_arguments(arguments),
                     )
                     .await
-                    .with_context(|| format!("calling `{name}`"))?;
+                    .with_context(|| format!("calling `{mcp_name}`"))?;
                 ToolResponse::from_call_tool_result(result)
             }
         };
@@ -139,9 +149,7 @@ async fn connect_direct(config_path: &Path) -> anyhow::Result<DirectBrokerClient
     Ok(DirectBrokerClient { state })
 }
 
-async fn connect_streamable_http(
-    url: &str,
-) -> anyhow::Result<RunningService<RoleClient, RemoteExecClientHandler>> {
+async fn connect_streamable_http(url: &str) -> anyhow::Result<McpBrokerClient> {
     crate::broker_tls::ensure_broker_url_supported(url)?;
     crate::install_crypto_provider()?;
     let client = reqwest::Client::builder()
@@ -151,10 +159,23 @@ async fn connect_streamable_http(
         client,
         StreamableHttpClientTransportConfig::with_uri(url.to_string()),
     );
-    RemoteExecClientHandler
+    let service = RemoteExecClientHandler
         .serve(transport)
         .await
-        .context("connecting to broker over streamable HTTP")
+        .context("connecting to broker over streamable HTTP")?;
+    let tools = service
+        .list_tools(Some(PaginatedRequestParams::default()))
+        .await
+        .context("listing broker MCP tools")?;
+
+    Ok(McpBrokerClient {
+        service,
+        tool_names: tools
+            .tools
+            .into_iter()
+            .map(|tool| tool.name.into_owned())
+            .collect(),
+    })
 }
 
 impl DirectBrokerClient {
@@ -168,6 +189,25 @@ impl DirectBrokerClient {
             )
             .await,
         )
+    }
+}
+
+impl McpBrokerClient {
+    fn tool_name(&self, name: &str) -> String {
+        resolve_mcp_tool_name(&self.tool_names, name)
+    }
+}
+
+fn resolve_mcp_tool_name(tool_names: &BTreeSet<String>, name: &str) -> String {
+    if tool_names.contains(name) {
+        return name.to_string();
+    }
+
+    let prefixed = format!("remote_{name}");
+    if tool_names.contains(&prefixed) {
+        prefixed
+    } else {
+        name.to_string()
     }
 }
 
@@ -193,4 +233,30 @@ fn normalize_content(content: &ContentBlock) -> serde_json::Value {
             "error": err.to_string(),
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::resolve_mcp_tool_name;
+
+    #[test]
+    fn resolves_prefixed_and_legacy_mcp_tool_names() {
+        let prefixed = BTreeSet::from(["remote_exec_command".to_string()]);
+        assert_eq!(
+            resolve_mcp_tool_name(&prefixed, "exec_command"),
+            "remote_exec_command"
+        );
+        assert_eq!(
+            resolve_mcp_tool_name(&prefixed, "remote_exec_command"),
+            "remote_exec_command"
+        );
+
+        let legacy = BTreeSet::from(["exec_command".to_string()]);
+        assert_eq!(
+            resolve_mcp_tool_name(&legacy, "exec_command"),
+            "exec_command"
+        );
+    }
 }

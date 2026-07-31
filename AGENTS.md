@@ -41,17 +41,20 @@ separate from compiler target libraries and vendored `winpty` compatibility
 concerns. Public README text should describe supported build paths and tested
 daemon behavior without exposing that implementation boundary.
 
-The MCP tool surface is:
+The default MCP tool surface is:
 
-- `list_targets`
-- `exec_command`
-- `write_stdin`
-- `apply_patch`
-- `view_image`
-- `transfer_files`
-- `forward_ports`
-- default-hidden `read`, `write`, and `edit` when explicitly enabled in broker
+- `remote_list_targets`
+- `remote_exec_command`
+- `remote_write_stdin`
+- `remote_apply_patch`
+- `remote_view_image`
+- `remote_transfer_files`
+- `remote_forward_ports`
+- default-hidden `remote_read`, `remote_write`, and `remote_edit` when explicitly enabled in broker
   config
+
+Set broker `prepend_tool_names = false` only when compatibility with legacy
+unprefixed MCP tool names is required.
 
 The architecture is intentionally split:
 
@@ -125,7 +128,7 @@ C++11, and legacy-Windows-targeting C++11 split actually needs them.
   validation and routing are part of the MCP interface contract.
 - Maintain per-target isolation. A session, file operation, or forward created
   for one target must not be usable as another target.
-- Keep `list_targets` broker-local and cache-based. It must not probe daemons at
+- Keep `remote_list_targets` broker-local and cache-based. It must not probe daemons at
   read time. It should report current cached daemon metadata truthfully,
   including `supports_pty`, `supports_port_forward`, and
   `port_forward_protocol_version` when known.
@@ -137,18 +140,18 @@ C++11, and legacy-Windows-targeting C++11 split actually needs them.
   path-based operations. Do not add interactive approval or sandbox-escalation
   flows unless the task explicitly changes the security model.
 - Preserve broker-host `local` semantics:
-  - `[local]` enables `target: "local"` for `exec_command`, `write_stdin`,
-    `apply_patch`, and `view_image`.
-  - `transfer_files` may use broker-host filesystem access with
+  - `[local]` enables `target: "local"` for `remote_exec_command`, `remote_write_stdin`,
+    `remote_apply_patch`, and `remote_view_image`.
+  - `remote_transfer_files` may use broker-host filesystem access with
     `target: "local"` even when `[local]` is omitted.
-  - `forward_ports` may use broker-host network access with side `"local"` even
+  - `remote_forward_ports` may use broker-host network access with side `"local"` even
     when `[local]` is omitted.
   - Broker `host_sandbox` applies to broker-host filesystem access, not to
-    `forward_ports` network access.
+    `remote_forward_ports` network access.
 - Preserve v4 port forwarding. The live daemon-private tunnel protocol uses
   `X-Remote-Exec-Port-Tunnel-Version: 4`. Legacy versions can remain reserved
   but unsupported.
-- Treat `forward_ports` `phase` as the precise live state. Legacy
+- Treat `remote_forward_ports` `phase` as the precise live state. Legacy
   `status = "open"` can coexist with `phase = "reconnecting"`.
 - Forwarding reconnect preserves the forward and future listen-side traffic when
   only broker-daemon transport is lost and the daemon stays alive. Active TCP
@@ -193,7 +196,7 @@ When changing broker-daemon RPC contracts:
 - protocol changes are allowed when they simplify a bad design or satisfy a new
   requirement, but avoid compatibility churn without a concrete reason
 
-When changing `forward_ports`:
+When changing `remote_forward_ports`:
 
 - update `crates/remote-exec-proto/src/public.rs`
 - update `crates/remote-exec-proto/src/port_forward.rs`
