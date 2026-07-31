@@ -58,7 +58,7 @@ async fn assert_default_passthrough(extension: &str, format: ImageFormat, expect
     assert_eq!(response.detail, None);
 }
 
-async fn assert_resized_output(
+async fn assert_large_passthrough(
     extension: &str,
     format: ImageFormat,
     expected_mime: &str,
@@ -68,6 +68,7 @@ async fn assert_resized_output(
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join(format!("large.{extension}"));
     write_image(&path, width, height, format).await;
+    let original = tokio::fs::read(&path).await.unwrap();
 
     let response = fixture
         .rpc::<ImageReadRequest, ImageReadResponse>(
@@ -80,16 +81,14 @@ async fn assert_resized_output(
         )
         .await;
 
-    let (mime, bytes) = decode_data_url(&response.image_url);
-    let image = image::load_from_memory(&bytes).unwrap();
+    let (mime, returned) = decode_data_url(&response.image_url);
     assert_eq!(mime, expected_mime);
-    assert!(image.width() <= 2048);
-    assert!(image.height() <= 2048);
+    assert_eq!(returned, original);
     assert_eq!(response.detail, None);
 }
 
 #[tokio::test]
-async fn image_read_preserves_large_passthrough_within_2048_square_threshold() {
+async fn image_read_preserves_large_passthrough_bytes_by_default() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("tall.webp");
     write_image(&path, 64, 2048, ImageFormat::WebP).await;
@@ -144,13 +143,13 @@ async fn image_read_preserves_original_detail_for_passthrough_formats() {
 }
 
 #[tokio::test]
-async fn image_read_resizes_large_png_and_keeps_png_encoding() {
-    assert_resized_output("png", ImageFormat::Png, "image/png", 2050, 64).await;
+async fn image_read_preserves_large_png_bytes_by_default() {
+    assert_large_passthrough("png", ImageFormat::Png, "image/png", 2050, 64).await;
 }
 
 #[tokio::test]
-async fn image_read_resizes_large_jpeg_and_keeps_jpeg_encoding() {
-    assert_resized_output("jpg", ImageFormat::Jpeg, "image/jpeg", 64, 2050).await;
+async fn image_read_preserves_large_jpeg_bytes_by_default() {
+    assert_large_passthrough("jpg", ImageFormat::Jpeg, "image/jpeg", 64, 2050).await;
 }
 
 #[tokio::test]
@@ -305,13 +304,13 @@ async fn image_read_wraps_invalid_image_failures_with_path_context() {
 }
 
 #[tokio::test]
-async fn image_read_rejects_unknown_detail_values() {
+async fn image_read_accepts_detail_as_a_noop() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("small.png");
     write_png(&path, 32, 32).await;
 
-    let err = fixture
-        .rpc_error(
+    let response = fixture
+        .rpc::<ImageReadRequest, ImageReadResponse>(
             "/v1/image/read",
             &ImageReadRequest {
                 path: "small.png".to_string(),
@@ -321,11 +320,10 @@ async fn image_read_rejects_unknown_detail_values() {
         )
         .await;
 
-    assert_eq!(err.wire_code(), "invalid_detail");
-    assert_eq!(
-        err.message,
-        "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `low`"
-    );
+    let (mime, returned) = decode_data_url(&response.image_url);
+    assert_eq!(mime, "image/png");
+    assert_eq!(returned, tokio::fs::read(path).await.unwrap());
+    assert_eq!(response.detail, Some("low".to_string()));
 }
 
 #[tokio::test]

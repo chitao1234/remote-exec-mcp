@@ -360,9 +360,8 @@ Default-hidden file tools:
 `view_image`:
 
 - reads an image from one target
-- supports `detail = "original"` for full-fidelity reads
-- Rust daemon can resize/default according to normal image handling
-- C++ daemon supports passthrough PNG, JPEG, and WebP only
+- accepts `detail` for compatibility but does not use it
+- preserves PNG, JPEG, and WebP bytes without resizing
 
 `transfer_files`:
 

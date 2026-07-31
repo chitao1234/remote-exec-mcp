@@ -22,7 +22,7 @@ not the live contract.
 | Exec | POSIX and Windows shell execution, live sessions, and stdin polling/writes. |
 | PTY | POSIX PTY when available. GNU/MSVC Windows PTY depends on vendored `winpty`; Wine disables PTY capability reporting for GNU builds. |
 | Patch | Codex-style `apply_patch` with the project-wide preflighted/non-transactional contract. |
-| Images | Passthrough `view_image` for PNG, JPEG, and WebP only. No resizing or re-encoding. |
+| Images | PNG, JPEG, and WebP passthrough without resizing. |
 | Transfers | Regular files, directory trees, and broker-built multi-source bundles. No transfer compression. |
 | Port forwarding | v4 TCP/UDP tunnel support with daemon-local worker, socket, queue, and reconnect limits. |
 | Hidden file tools | `read`, `write`, and `edit` are not implemented yet. |
@@ -464,8 +464,8 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 
 ### Images And Patches
 
-- `view_image` supports passthrough reads for PNG, JPEG, and WebP only.
-- Omitted `view_image.detail` defaults to `original`.
+- `view_image` returns PNG, JPEG, and WebP without resizing.
+- `view_image.detail` is accepted for compatibility but has no effect.
 - `apply_patch` rejects deterministic failures before writing, including
   missing files, non-file targets, sandbox denial, and unmatched hunks.
 - Runtime races and write/remove failures after patch preflight remain
@@ -600,7 +600,8 @@ Port forwarding has stricter ownership rules because it is reconnect-aware:
 - OpenSSL older than 1.0.2 is rejected; TLS 1.0 and 1.1 are disabled.
 - No transfer compression support.
 - No default-hidden `read`, `write`, or `edit` tool support yet.
-- `view_image` supports passthrough PNG, JPEG, and WebP only.
+- `view_image` preserves PNG, JPEG, and WebP without resizing; `detail` has no
+  effect.
 - POSIX PTY support depends on host PTY allocation.
 - Windows PTY support depends on `winpty` being enabled and usable at runtime.
 - GNU NT 3.x builds and GNU ANSI API builds where `WINDOWS_WINPTY=auto`

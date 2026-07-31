@@ -389,20 +389,23 @@ static void assert_image_routes(TestRouteHarness& harness, const fs::path& root)
     );
     TEST_ASSERT(image_response.status == 200);
     const Json image = Json::parse(image_response.body);
-    TEST_ASSERT(image.at("detail").get<std::string>() == "original");
+    TEST_ASSERT(image.at("detail").is_null());
     TEST_ASSERT(image.at("image_url").get<std::string>().find("data:image/png;base64,") == 0);
     TEST_ASSERT(decode_data_url_bytes(image.at("image_url").get<std::string>()) == original_image);
 
-    const HttpResponse invalid_detail_response = route_request(
+    const HttpResponse noop_detail_response = route_request(
         harness,
         make_json_http_request(
             "/v1/image/read",
             Json{{"path", "tiny.png"}, {"workdir", root.string()}, {"detail", "low"}}
         )
     );
-    TEST_ASSERT(invalid_detail_response.status == 400);
-    const Json invalid_detail = Json::parse(invalid_detail_response.body);
-    TEST_ASSERT(invalid_detail.at("code").get<std::string>() == "invalid_detail");
+    TEST_ASSERT(noop_detail_response.status == 200);
+    const Json noop_detail = Json::parse(noop_detail_response.body);
+    TEST_ASSERT(noop_detail.at("detail").get<std::string>() == "low");
+    TEST_ASSERT(
+        decode_data_url_bytes(noop_detail.at("image_url").get<std::string>()) == original_image
+    );
 
     const HttpResponse missing_image_response = route_request(
         harness,

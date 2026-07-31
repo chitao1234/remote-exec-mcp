@@ -256,9 +256,8 @@ Input:
 Guidance:
 
 - Use `workdir` only for relative path resolution.
-- Omit `detail` for the target default.
-- Use `detail: "original"` for full-fidelity inspection.
-- Format and resize support can vary by target; trust the tool result or error.
+- `detail` is accepted for compatibility but has no effect.
+- PNG, JPEG, and WebP are returned without resizing.
 
 ### `transfer_files`
 

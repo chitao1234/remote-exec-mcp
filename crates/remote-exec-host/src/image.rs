@@ -14,9 +14,6 @@ use crate::AppState;
 use crate::error::ImageError;
 use crate::sandbox::SandboxAccess;
 
-const MAX_WIDTH: u32 = 2048;
-const MAX_HEIGHT: u32 = 2048;
-
 pub async fn read_image_local(
     state: Arc<AppState>,
     req: ImageReadRequest,
@@ -28,15 +25,6 @@ pub async fn read_image_local(
         has_workdir = req.workdir.is_some(),
         "image_read received"
     );
-    match req.detail.as_deref() {
-        None | Some("original") => {}
-        Some(other) => {
-            return Err(ImageError::invalid_detail(format!(
-                "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `{other}`"
-            )));
-        }
-    }
-
     let cwd = crate::exec::resolve_workdir_for_operation(&state, req.workdir.as_deref())
         .map_err(|err| ImageError::internal(err.to_string()))?;
     let resolved_path = crate::host_path::resolve_input_path_for_operation(
@@ -72,7 +60,7 @@ pub async fn read_image_local(
 
     Ok(ImageReadResponse {
         image_url,
-        detail: req.detail.filter(|value| value == "original"),
+        detail: req.detail,
     })
 }
 
@@ -137,28 +125,17 @@ fn encode_processed_image(
 
 fn render_image_bytes(
     path: &Path,
-    detail: Option<&str>,
+    _detail: Option<&str>,
     bytes: Vec<u8>,
 ) -> Result<(ImageFormat, Vec<u8>), ImageError> {
     let source_format = image::guess_format(&bytes).map_err(|err| process_error(path, err))?;
-    let keep_original = detail == Some("original");
-    if passthrough_format(source_format) && keep_original {
+    if passthrough_format(source_format) {
         return Ok((source_format, bytes));
     }
 
     let image = image::load_from_memory(&bytes).map_err(|err| process_error(path, err))?;
-    let needs_resize = image.width() > MAX_WIDTH || image.height() > MAX_HEIGHT;
-    if passthrough_format(source_format) && !needs_resize {
-        return Ok((source_format, bytes));
-    }
-
-    let rendered = if keep_original || !needs_resize {
-        image
-    } else {
-        image.resize(MAX_WIDTH, MAX_HEIGHT, image::imageops::FilterType::Triangle)
-    };
     let output_format = output_format_for_processed_image(source_format);
-    let rendered_bytes = encode_processed_image(&rendered, output_format).map_err(|err| {
+    let rendered_bytes = encode_processed_image(&image, output_format).map_err(|err| {
         ImageError::internal(format!(
             "unable to encode image at `{}`: {err}",
             path.display()
