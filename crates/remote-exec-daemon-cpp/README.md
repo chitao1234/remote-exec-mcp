@@ -215,7 +215,7 @@ make TLS=openssl OPENSSL_ROOT="$PWD/build/deps/openssl-3.5.7"
 `prepare-openssl` accepts `OPENSSL_ARCHIVE` for offline use,
 `OPENSSL_CONFIGURE_TARGET` for cross builds, and
 `OPENSSL_CONFIGURE_OPTIONS` for target-specific options. By default it builds
-with `no-shared no-module no-tests no-asm`; use
+with `no-shared no-module no-tests`; use
 `OPENSSL_BASE_CONFIGURE_OPTIONS` to replace that base set for an older OpenSSL
 release that does not accept one of those options. For example, the tested
 OpenSSL 1.1.x build is:
@@ -224,7 +224,7 @@ OpenSSL 1.1.x build is:
 make prepare-openssl \
   OPENSSL_VERSION=1.1.1w \
   OPENSSL_SHA256=cf3098950cb4d853ad95c0841f1f9c6d3dc102dccfcacd521d93925208b76ac8 \
-  OPENSSL_BASE_CONFIGURE_OPTIONS='no-shared no-tests no-asm'
+  OPENSSL_BASE_CONFIGURE_OPTIONS='no-shared no-tests'
 ```
 
 External OpenSSL 1.x installs remain supported through `OPENSSL_ROOT`,

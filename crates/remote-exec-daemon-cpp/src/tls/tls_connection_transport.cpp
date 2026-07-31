@@ -74,6 +74,9 @@ void configure_context_identity(
     if (!openssl_compat::set_minimum_tls12(context)) {
         throw std::runtime_error(openssl_compat::error_string("setting TLS minimum version"));
     }
+    if (!openssl_compat::configure_server_ecdh(context)) {
+        throw std::runtime_error(openssl_compat::error_string("configuring TLS ECDH"));
+    }
 #ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
     SSL_CTX_set_options(context, SSL_OP_IGNORE_UNEXPECTED_EOF);
 #endif

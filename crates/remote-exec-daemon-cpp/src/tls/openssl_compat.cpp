@@ -6,13 +6,19 @@
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
 #include <openssl/crypto.h>
 #include <openssl/err.h>
+#include <openssl/ec.h>
 #include <openssl/opensslv.h>
+#include <openssl/obj_mac.h>
 #include <openssl/x509_vfy.h>
 
 #include "platform/basic_mutex.h"
 
 #if OPENSSL_VERSION_NUMBER < 0x10002000L
 #error OpenSSL 1.0.2 or newer is required
+#endif
+
+#ifdef OPENSSL_NO_EC
+#error OpenSSL EC support is required for TLS 1.2 interoperability
 #endif
 
 namespace {
@@ -136,6 +142,20 @@ bool set_minimum_tls12(SSL_CTX* context) {
     return true;
 #else
     return SSL_CTX_set_min_proto_version(context, TLS1_2_VERSION) == 1;
+#endif
+}
+
+bool configure_server_ecdh(SSL_CTX* context) {
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    EC_KEY* key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+    if (key == nullptr) {
+        return false;
+    }
+    const int result = SSL_CTX_set_tmp_ecdh(context, key);
+    EC_KEY_free(key);
+    return result == 1;
+#else
+    return true;
 #endif
 }
 

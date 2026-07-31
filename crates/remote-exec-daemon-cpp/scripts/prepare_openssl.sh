@@ -10,10 +10,15 @@ source_dir=${OPENSSL_SOURCE_DIR:-${deps_dir}/src/openssl-${version}}
 install_dir=${OPENSSL_INSTALL_DIR:-${deps_dir}/openssl-${version}}
 configure_target=${OPENSSL_CONFIGURE_TARGET:-}
 configure_options=${OPENSSL_CONFIGURE_OPTIONS:-}
-base_configure_options=${OPENSSL_BASE_CONFIGURE_OPTIONS:-no-shared no-module no-tests no-asm}
+base_configure_options=${OPENSSL_BASE_CONFIGURE_OPTIONS:-no-shared no-module no-tests}
 jobs=${OPENSSL_JOBS:-1}
 make_command=${OPENSSL_BUILD_MAKE:-make}
 build_mode=${OPENSSL_BUILD_MODE:-default}
+
+case "$install_dir" in
+    /*) ;;
+    *) install_dir=$(pwd)/$install_dir ;;
+esac
 
 mkdir -p "$(dirname "$archive")" "$deps_dir/src"
 

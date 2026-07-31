@@ -21,6 +21,10 @@ cat > "$source" <<'EOF'
 #error OpenSSL 1.0.2 or newer is required
 #endif
 
+#ifdef OPENSSL_NO_EC
+#error OpenSSL EC support is required for TLS 1.2 interoperability
+#endif
+
 int main() {
     SSL_CTX* context = SSL_CTX_new(SSLv23_method());
     SSL_CTX_free(context);

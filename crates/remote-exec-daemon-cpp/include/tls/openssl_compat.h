@@ -17,6 +17,7 @@ std::string runtime_version();
 const SSL_METHOD* server_method();
 const SSL_METHOD* client_method();
 bool set_minimum_tls12(SSL_CTX* context);
+bool configure_server_ecdh(SSL_CTX* context);
 bool set_expected_host(SSL* ssl, const std::string& host);
 X509* peer_certificate(SSL* ssl);
 std::string error_string(const std::string& operation);
