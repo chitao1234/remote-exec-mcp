@@ -66,7 +66,7 @@ Run the common GNU Windows XP-compatible cross-build:
 
 ```sh
 make prepare-openssl-xp OPENSSL_DEPS_DIR=/path/to/deps
-make check-windows-xp OPENSSL_ROOT=/path/to/deps/openssl-1.0.2u
+make all-windows-xp OPENSSL_ROOT=/path/to/deps/openssl-1.1.1w
 ```
 
 Run the MSVC native path from an x86 Visual Studio developer prompt:
@@ -231,7 +231,7 @@ External OpenSSL 1.x installs remain supported through `OPENSSL_ROOT`,
 `OPENSSL_CPPFLAGS`, and `OPENSSL_LDLIBS`.
 
 For an XP GNU cross-build, use a complete `i686-w64-mingw32-` tool prefix and
-the XP-safe checksum-pinned OpenSSL 1.0.2u dependency. It defaults to the
+the checksum-pinned OpenSSL 1.1.1w dependency. It defaults to the
 `i686-w64-mingw32-` compiler prefix; set `CROSS_COMPILE` when the selected
 cross toolchain uses a different prefix:
 
@@ -239,16 +239,16 @@ cross toolchain uses a different prefix:
 make prepare-openssl-xp \
   OPENSSL_DEPS_DIR="$PWD/build/deps-mingw-xp" \
   OPENSSL_JOBS=8
-make check-windows-xp \
-  OPENSSL_ROOT="$PWD/build/deps-mingw-xp/openssl-1.0.2u"
+make all-windows-xp \
+  OPENSSL_ROOT="$PWD/build/deps-mingw-xp/openssl-1.1.1w"
 ```
 
-The XP GNU path defaults to OpenSSL 1.0.2u, the last OpenSSL release series
-that supports Windows XP. The tested OpenSSL 3.5.7 build imports Kernel32
-symbols unavailable on Windows XP. The `prepare-openssl-xp-1.0.x` alias
-explicitly selects the same legacy API build. OpenSSL 1.0.2u is end-of-life and
-remains only for XP compatibility; OpenSSL 3.5.7 is the preferred
-checksum-pinned dependency for modern hosts.
+The XP GNU path defaults to OpenSSL 1.1.1w, which has been built and exercised
+on the Windows XP target. The `prepare-openssl-xp-1.0.x` alias explicitly
+selects the legacy OpenSSL 1.0.2u API build. OpenSSL 1.0.2u is end-of-life and
+should be used only when a legacy OpenSSL 1.0.x compatibility path is required.
+OpenSSL 3.5.7 remains the preferred checksum-pinned dependency for modern
+hosts.
 
 GNU output/object names include the selected OpenSSL installation when TLS is
 enabled, avoiding stale objects compiled against a different OpenSSL API. NMAKE

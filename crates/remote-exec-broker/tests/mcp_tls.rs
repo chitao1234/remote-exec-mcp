@@ -5,6 +5,9 @@ mod support;
 
 use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
+#[cfg(feature = "broker-tls")]
+use remote_exec_proto::public::ExecCommandInput;
+
 #[tokio::test]
 async fn broker_can_skip_server_name_verification_for_https_targets() {
     let fixture = support::spawners::spawn_broker_with_tls_stub_daemon_and_daemon_spec(
@@ -94,4 +97,36 @@ async fn broker_rejects_mismatched_pinned_server_certificate() {
         .await;
 
     assert!(error.contains("pinned server certificate mismatch"));
+}
+
+#[cfg(feature = "broker-tls")]
+#[tokio::test]
+async fn rustls_broker_executes_command_through_cpp_openssl_tls_daemon() {
+    let Some(fixture) = support::cpp_daemon::CppDaemonBrokerFixture::spawn_tls().await else {
+        return;
+    };
+
+    let result = fixture
+        .client
+        .call_tool(
+            "exec_command",
+            &ExecCommandInput {
+                target: support::cpp_daemon::CPP_TARGET.to_string(),
+                cmd: "echo openssl-rustls".to_string(),
+                workdir: None,
+                shell: None,
+                tty: false,
+                yield_time_ms: Some(5_000),
+                max_output_tokens: None,
+                login: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        result.text_output.contains("openssl-rustls"),
+        "unexpected response: {}",
+        result.text_output
+    );
 }

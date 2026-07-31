@@ -10,13 +10,18 @@ OPENSSL_SOURCE_DIR ?=
 OPENSSL_INSTALL_DIR ?=
 OPENSSL_CONFIGURE_TARGET ?=
 OPENSSL_CONFIGURE_OPTIONS ?=
-OPENSSL_BASE_CONFIGURE_OPTIONS ?= no-shared no-module no-tests
+OPENSSL_BASE_CONFIGURE_OPTIONS ?= no-shared no-tests
 OPENSSL_JOBS ?= 1
 OPENSSL_BUILD_MAKE ?= make
 OPENSSL_BUILD_MODE ?= default
-OPENSSL_XP_VERSION ?= 1.0.2u
-OPENSSL_XP_SHA256 ?= ecd0c6ffb493dd06707d38b14bb4d8c2288bb7033735606569d8f90f89669d16
-OPENSSL_XP_URL ?= https://www.openssl.org/source/old/1.0.2/openssl-$(OPENSSL_XP_VERSION).tar.gz
+OPENSSL_XP_VERSION ?= 1.1.1w
+OPENSSL_XP_SHA256 ?= cf3098950cb4d853ad95c0841f1f9c6d3dc102dccfcacd521d93925208b76ac8
+OPENSSL_XP_URL ?= https://github.com/openssl/openssl/releases/download/OpenSSL_1_1_1w/openssl-$(OPENSSL_XP_VERSION).tar.gz
+OPENSSL_XP_BASE_CONFIGURE_OPTIONS ?= no-shared no-tests
+OPENSSL_XP_CONFIGURE_OPTIONS ?=
+OPENSSL_XP_LEGACY_VERSION ?= 1.0.2u
+OPENSSL_XP_LEGACY_SHA256 ?= ecd0c6ffb493dd06707d38b14bb4d8c2288bb7033735606569d8f90f89669d16
+OPENSSL_XP_LEGACY_URL ?= https://www.openssl.org/source/old/1.0.2/openssl-$(OPENSSL_XP_LEGACY_VERSION).tar.gz
 OPENSSL_XP_CROSS_COMPILE ?= $(if $(CROSS_COMPILE),$(CROSS_COMPILE),i686-w64-mingw32-)
 
 prepare-openssl:
@@ -36,16 +41,28 @@ prepare-openssl:
 	sh "$(MAKEFILE_DIR)scripts/prepare_openssl.sh"
 
 prepare-openssl-xp:
-	$(MAKE) prepare-openssl-xp-1.0.x
+	$(MAKE) prepare-openssl-xp-1.1.x
 
-prepare-openssl-xp-1.0.x:
+prepare-openssl-xp-1.1.x:
 	CROSS_COMPILE="$(OPENSSL_XP_CROSS_COMPILE)" \
 	$(MAKE) prepare-openssl \
 		OPENSSL_VERSION="$(OPENSSL_XP_VERSION)" \
 		OPENSSL_SHA256="$(OPENSSL_XP_SHA256)" \
 		OPENSSL_URL="$(OPENSSL_XP_URL)" \
 		OPENSSL_CONFIGURE_TARGET=mingw \
-		OPENSSL_CONFIGURE_OPTIONS=no-apps \
+		OPENSSL_CONFIGURE_OPTIONS="$(OPENSSL_XP_CONFIGURE_OPTIONS)" \
+		OPENSSL_BASE_CONFIGURE_OPTIONS="$(OPENSSL_XP_BASE_CONFIGURE_OPTIONS)" \
 		OPENSSL_BUILD_MODE=static-libraries-only
 
-.PHONY: prepare-openssl prepare-openssl-xp prepare-openssl-xp-1.0.x
+prepare-openssl-xp-1.0.x:
+	CROSS_COMPILE="$(OPENSSL_XP_CROSS_COMPILE)" \
+	$(MAKE) prepare-openssl \
+		OPENSSL_VERSION="$(OPENSSL_XP_LEGACY_VERSION)" \
+		OPENSSL_SHA256="$(OPENSSL_XP_LEGACY_SHA256)" \
+		OPENSSL_URL="$(OPENSSL_XP_LEGACY_URL)" \
+		OPENSSL_CONFIGURE_TARGET=mingw \
+		OPENSSL_CONFIGURE_OPTIONS=no-apps \
+		OPENSSL_BASE_CONFIGURE_OPTIONS='no-shared no-module no-tests' \
+		OPENSSL_BUILD_MODE=static-libraries-only
+
+.PHONY: prepare-openssl prepare-openssl-xp prepare-openssl-xp-1.1.x prepare-openssl-xp-1.0.x

@@ -11,6 +11,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, oneshot};
 
+#[cfg(feature = "broker-tls")]
+use super::certs::TestCerts;
+
 pub const CPP_TARGET: &str = "builder-cpp";
 
 const CPP_READY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -19,6 +22,8 @@ static MISSING_CPP_DAEMON_WARNING: Once = Once::new();
 
 pub struct CppDaemonBrokerFixture {
     _tempdir: TempDir,
+    #[cfg(feature = "broker-tls")]
+    _cert_tempdir: Option<TempDir>,
     pub client: RemoteExecClient,
     proxy: TunnelDropProxy,
     daemon: tokio::process::Child,
@@ -32,6 +37,33 @@ impl CppDaemonBrokerFixture {
     }
 
     pub async fn spawn_with_daemon_config(extra_daemon_config: &str) -> Option<Self> {
+        Self::spawn_with_transport(extra_daemon_config, None).await
+    }
+
+    #[cfg(feature = "broker-tls")]
+    pub async fn spawn_tls() -> Option<Self> {
+        Self::spawn_tls_with_daemon_config("").await
+    }
+
+    #[cfg(feature = "broker-tls")]
+    pub async fn spawn_tls_with_daemon_config(extra_daemon_config: &str) -> Option<Self> {
+        let cert_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../remote-exec-daemon-cpp/tests/fixtures/tls");
+        let certs = TestCerts {
+            ca_cert: cert_dir.join("ca.pem"),
+            client_cert: cert_dir.join("client.pem"),
+            client_key: cert_dir.join("client.key"),
+            daemon_cert: cert_dir.join("server.pem"),
+            daemon_key: cert_dir.join("server.key"),
+        };
+        Self::spawn_with_transport(extra_daemon_config, Some((None, certs))).await
+    }
+
+    async fn spawn_with_transport(
+        extra_daemon_config: &str,
+        #[cfg(feature = "broker-tls")] tls: Option<(Option<TempDir>, TestCerts)>,
+        #[cfg(not(feature = "broker-tls"))] _tls: Option<()>,
+    ) -> Option<Self> {
         let daemon_binary = match cpp_daemon_binary() {
             Some(path) => path,
             None => {
@@ -41,6 +73,10 @@ impl CppDaemonBrokerFixture {
         };
         remote_exec_broker::install_crypto_provider().unwrap();
 
+        #[cfg(feature = "broker-tls")]
+        let (cert_tempdir, certs) = tls
+            .map(|(tempdir, certs)| (tempdir, Some(certs)))
+            .unwrap_or((None, None));
         let tempdir = tempfile::tempdir().unwrap();
         let daemon_binary = stage_cpp_daemon_binary(&daemon_binary, tempdir.path());
         let broker_config = tempdir.path().join("broker.toml");
@@ -51,36 +87,72 @@ impl CppDaemonBrokerFixture {
         std::fs::create_dir_all(&local_workdir).unwrap();
 
         let daemon_bound_addr_file = tempdir.path().join("daemon-bound-addr.txt");
+        #[cfg(feature = "broker-tls")]
+        let tls_config = certs
+            .as_ref()
+            .map(|certs| {
+                format!(
+                    "transport = tls\ntls_cert_pem = {}\ntls_key_pem = {}\ntls_ca_pem = {}\n",
+                    cpp_config_path(&certs.daemon_cert),
+                    cpp_config_path(&certs.daemon_key),
+                    cpp_config_path(&certs.ca_cert),
+                )
+            })
+            .unwrap_or_default();
+        #[cfg(not(feature = "broker-tls"))]
+        let tls_config = String::new();
         let daemon_config_body = format!(
-            "target = {CPP_TARGET}\nlisten_host = 127.0.0.1\nlisten_port = 0\ndefault_workdir = {}\ntest_bound_addr_file = {}\n{}",
+            "target = {CPP_TARGET}\nlisten_host = 127.0.0.1\nlisten_port = 0\ndefault_workdir = {}\ntest_bound_addr_file = {}\n{}{}",
             cpp_config_path(&daemon_workdir),
             cpp_config_path(&daemon_bound_addr_file),
-            extra_daemon_config
+            tls_config,
+            extra_daemon_config,
         );
         let (daemon, backend_addr) = spawn_cpp_daemon_with_bound_addr(
             &daemon_binary,
             &daemon_config,
             &daemon_bound_addr_file,
             daemon_config_body,
+            #[cfg(feature = "broker-tls")]
+            certs.is_none(),
+            #[cfg(not(feature = "broker-tls"))]
+            true,
         )
         .await;
-        let proxy = TunnelDropProxy::spawn(backend_addr).await;
+        let proxy = TunnelDropProxy::spawn(backend_addr, certs.is_some()).await;
         let daemon_addr = proxy.listen_addr;
+
+        #[cfg(feature = "broker-tls")]
+        let broker_target = if let Some(certs) = certs.as_ref() {
+            format!(
+                "base_url = \"https://localhost:{}\"\nca_pem = {}\nclient_cert_pem = {}\nclient_key_pem = {}\nskip_server_name_verification = true\nexpected_daemon_name = \"{CPP_TARGET}\"",
+                daemon_addr.port(),
+                super::test_helpers::toml_string(&certs.ca_cert.display().to_string()),
+                super::test_helpers::toml_string(&certs.client_cert.display().to_string()),
+                super::test_helpers::toml_string(&certs.client_key.display().to_string()),
+            )
+        } else {
+            format!(
+                "base_url = \"http://{daemon_addr}\"\nallow_insecure_http = true\nexpected_daemon_name = \"{CPP_TARGET}\""
+            )
+        };
+        #[cfg(not(feature = "broker-tls"))]
+        let broker_target = format!(
+            "base_url = \"http://{daemon_addr}\"\nallow_insecure_http = true\nexpected_daemon_name = \"{CPP_TARGET}\""
+        );
 
         std::fs::write(
             &broker_config,
             format!(
                 r#"[targets.{target}]
-base_url = "http://{daemon_addr}"
-allow_insecure_http = true
-expected_daemon_name = "{target}"
+{broker_target}
 
 [local]
 default_workdir = {local_workdir}
 pty = "none"
 "#,
                 target = CPP_TARGET,
-                daemon_addr = daemon_addr,
+                broker_target = broker_target,
                 local_workdir =
                     super::test_helpers::toml_string(&local_workdir.display().to_string()),
             ),
@@ -95,6 +167,8 @@ pty = "none"
 
         Some(Self {
             _tempdir: tempdir,
+            #[cfg(feature = "broker-tls")]
+            _cert_tempdir: cert_tempdir,
             client,
             proxy,
             daemon,
@@ -249,6 +323,7 @@ impl CrashableCppDaemonBrokerFixture {
             &daemon_config,
             &daemon_bound_addr_file,
             daemon_config_body,
+            true,
         )
         .await;
 
@@ -385,7 +460,7 @@ struct TunnelDropProxy {
 }
 
 impl TunnelDropProxy {
-    async fn spawn(daemon_addr: std::net::SocketAddr) -> Self {
+    async fn spawn(daemon_addr: std::net::SocketAddr, raw_stream: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let listen_addr = listener.local_addr().unwrap();
         let active_port_tunnels = Arc::new(Mutex::new(Vec::new()));
@@ -406,7 +481,7 @@ impl TunnelDropProxy {
                         };
                         let active_port_tunnels = active_port_tunnels_task.clone();
                         let connection_handle = tokio::spawn(async move {
-                            if let Err(err) = proxy_connection(stream, daemon_addr, active_port_tunnels).await {
+                            if let Err(err) = proxy_connection(stream, daemon_addr, active_port_tunnels, raw_stream).await {
                                 if is_expected_proxy_teardown_error(&err) {
                                     return;
                                 }
@@ -477,8 +552,12 @@ async fn proxy_connection(
     mut client_stream: tokio::net::TcpStream,
     daemon_addr: std::net::SocketAddr,
     active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
+    raw_stream: bool,
 ) -> std::io::Result<()> {
     let mut backend_stream = tokio::net::TcpStream::connect(daemon_addr).await?;
+    if raw_stream {
+        return proxy_plain_streams(client_stream, backend_stream).await;
+    }
     let mut request = Vec::new();
     let mut byte = [0u8; 1];
 
@@ -645,6 +724,7 @@ async fn spawn_cpp_daemon_with_bound_addr(
     daemon_config: &Path,
     bound_addr_file: &Path,
     config_body: String,
+    wait_for_http_ready: bool,
 ) -> (tokio::process::Child, std::net::SocketAddr) {
     std::fs::write(daemon_config, config_body).unwrap();
     let mut daemon = tokio::process::Command::new(daemon_binary);
@@ -652,7 +732,9 @@ async fn spawn_cpp_daemon_with_bound_addr(
     apply_quiet_test_logging(&mut daemon);
     let child = spawn_cpp_daemon_process(&mut daemon).await;
     let daemon_addr = wait_for_bound_addr_file(bound_addr_file, "C++ daemon").await;
-    wait_until_ready_http(daemon_addr).await;
+    if wait_for_http_ready {
+        wait_until_ready_http(daemon_addr).await;
+    }
     (child, daemon_addr)
 }
 
