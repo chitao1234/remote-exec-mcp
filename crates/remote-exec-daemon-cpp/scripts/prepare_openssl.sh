@@ -10,6 +10,7 @@ source_dir=${OPENSSL_SOURCE_DIR:-${deps_dir}/src/openssl-${version}}
 install_dir=${OPENSSL_INSTALL_DIR:-${deps_dir}/openssl-${version}}
 configure_target=${OPENSSL_CONFIGURE_TARGET:-}
 configure_options=${OPENSSL_CONFIGURE_OPTIONS:-}
+base_configure_options=${OPENSSL_BASE_CONFIGURE_OPTIONS:-no-shared no-module no-tests no-asm}
 jobs=${OPENSSL_JOBS:-1}
 make_command=${OPENSSL_BUILD_MAKE:-make}
 build_mode=${OPENSSL_BUILD_MODE:-default}
@@ -59,11 +60,11 @@ if [ ! -f "$install_dir/lib/libssl.a" ] && [ ! -f "$install_dir/lib/libssl.lib" 
     cd "$source_dir"
     if [ -n "$configure_target" ]; then
         perl ./Configure "$configure_target" \
-            no-shared no-module no-tests no-asm \
+            $base_configure_options \
             $configure_options \
             --prefix="$install_dir" --openssldir="$install_dir/ssl" --libdir=lib
     else
-        ./config no-shared no-module no-tests no-asm \
+        ./config $base_configure_options \
             $configure_options \
             --prefix="$install_dir" --openssldir="$install_dir/ssl" --libdir=lib
     fi
