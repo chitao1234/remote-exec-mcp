@@ -9,6 +9,7 @@ $(error unsupported TLS '$(TLS)'; use auto, off, or openssl)
 endif
 OPENSSL_CANDIDATE_CPPFLAGS := $(if $(OPENSSL_ROOT),-I$(OPENSSL_ROOT)/include) $(OPENSSL_CPPFLAGS)
 OPENSSL_CANDIDATE_LDLIBS := $(if $(OPENSSL_LDLIBS),$(OPENSSL_LDLIBS),$(if $(OPENSSL_ROOT),-L$(OPENSSL_ROOT)/lib) -lssl -lcrypto)
+OPENSSL_BUILD_TAG ?= $(if $(OPENSSL_ROOT),$(notdir $(patsubst %/,%,$(OPENSSL_ROOT))),system)
 DEBUG ?= 0
 ifeq ($(filter 1 yes true on,$(DEBUG)),)
 MODE_CXXFLAGS := -O2
