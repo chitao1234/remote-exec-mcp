@@ -212,7 +212,8 @@ make prepare-openssl OPENSSL_JOBS=8
 make TLS=openssl OPENSSL_ROOT="$PWD/build/deps/openssl-3.5.7"
 ```
 
-`prepare-openssl` accepts `OPENSSL_ARCHIVE` for offline use,
+`prepare-openssl` accepts `OPENSSL_SOURCE_CACHE_DIR` to reuse checksum-verified
+source archives across build directories, `OPENSSL_ARCHIVE` for offline use,
 `OPENSSL_CONFIGURE_TARGET` for cross builds, and
 `OPENSSL_CONFIGURE_OPTIONS` for target-specific options. By default it builds
 with `no-shared no-module no-tests`; use

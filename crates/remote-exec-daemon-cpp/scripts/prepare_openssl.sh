@@ -5,7 +5,13 @@ version=${OPENSSL_VERSION:-3.5.7}
 sha256=${OPENSSL_SHA256:-a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8}
 url=${OPENSSL_URL:-https://github.com/openssl/openssl/releases/download/openssl-${version}/openssl-${version}.tar.gz}
 deps_dir=${OPENSSL_DEPS_DIR:-build/deps}
-archive=${OPENSSL_ARCHIVE:-${deps_dir}/downloads/openssl-${version}.tar.gz}
+source_cache_dir=${OPENSSL_SOURCE_CACHE_DIR:-}
+if [ -n "$source_cache_dir" ]; then
+    default_archive=${source_cache_dir}/openssl-${version}.tar.gz
+else
+    default_archive=${deps_dir}/downloads/openssl-${version}.tar.gz
+fi
+archive=${OPENSSL_ARCHIVE:-$default_archive}
 source_dir=${OPENSSL_SOURCE_DIR:-${deps_dir}/src/openssl-${version}}
 install_dir=${OPENSSL_INSTALL_DIR:-${deps_dir}/openssl-${version}}
 configure_target=${OPENSSL_CONFIGURE_TARGET:-}

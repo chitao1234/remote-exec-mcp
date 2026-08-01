@@ -321,6 +321,12 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Cache OpenSSL source archives
+        uses: actions/cache@v4
+        with:
+          path: crates/remote-exec-daemon-cpp/.cache/openssl-sources
+          key: openssl-sources-${{ runner.os }}-${{ hashFiles('crates/remote-exec-daemon-cpp/mk/openssl.mk', 'crates/remote-exec-daemon-cpp/scripts/prepare_openssl.sh') }}
+
       - name: Cache C++ build outputs
         uses: actions/cache@v4
         with:
@@ -352,8 +358,12 @@ jobs:
         env:
           BUILD_DIR: ${{ matrix.build_dir }}
           MAKE_TARGET: ${{ matrix.make_target }}
+          OPENSSL_SOURCE_CACHE_DIR: ${{ github.workspace }}/crates/remote-exec-daemon-cpp/.cache/openssl-sources
         run: |
-          make -k -j"$(nproc)" -C crates/remote-exec-daemon-cpp BUILD_DIR="${BUILD_DIR}" "${MAKE_TARGET}"
+          make -k -j"$(nproc)" -C crates/remote-exec-daemon-cpp \
+            BUILD_DIR="${BUILD_DIR}" \
+            OPENSSL_SOURCE_CACHE_DIR="${OPENSSL_SOURCE_CACHE_DIR}" \
+            "${MAKE_TARGET}"
 
   cpp-msvc:
     name: C++ daemon MSVC (windows-latest)
