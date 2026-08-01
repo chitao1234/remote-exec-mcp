@@ -89,8 +89,10 @@ fn build_daemon_paths(spec: &DevInitSpec, daemon_out_dir: &Path) -> BTreeMap<Str
     spec.daemon_specs
         .iter()
         .map(|daemon| {
-            let target = daemon.target.clone();
-            (target.clone(), named_pair_paths(&target, daemon_out_dir))
+            (
+                daemon.target.clone(),
+                named_pair_paths(&daemon.target, daemon_out_dir),
+            )
         })
         .collect()
 }

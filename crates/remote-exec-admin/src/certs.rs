@@ -20,7 +20,7 @@ fn run_dev_init(args: DevInitArgs) -> anyhow::Result<()> {
     let ca = resolve_dev_init_ca(&args)?;
     let spec = remote_exec_pki::DevInitSpec {
         ca_common_name: "remote-exec-ca".to_string(),
-        broker_common_name: args.broker_common_name.clone(),
+        broker_common_name: args.broker_common_name,
         daemon_specs,
     };
 
