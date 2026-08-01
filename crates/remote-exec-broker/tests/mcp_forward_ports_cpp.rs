@@ -189,7 +189,7 @@ yield_time_write_stdin_input_min_ms = 1\n",
         .await
         .unwrap();
     assert!(first_poll.is_error, "expected pruned session failure");
-    support::assert_correlated_tool_error(
+    support::assert_correlated_direct_tool_error(
         &first_poll.text_output,
         "write_stdin",
         Some("builder-cpp"),

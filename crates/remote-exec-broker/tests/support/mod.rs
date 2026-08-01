@@ -41,6 +41,24 @@ pub fn assert_correlated_tool_error(
     } else {
         format!("remote_{tool}")
     };
+    assert_correlated_tool_error_named(error, &tool, target, expected_suffix);
+}
+
+pub fn assert_correlated_direct_tool_error(
+    error: &str,
+    tool: &str,
+    target: Option<&str>,
+    expected_suffix: &str,
+) {
+    assert_correlated_tool_error_named(error, tool, target, expected_suffix);
+}
+
+fn assert_correlated_tool_error_named(
+    error: &str,
+    tool: &str,
+    target: Option<&str>,
+    expected_suffix: &str,
+) {
     assert!(
         error.starts_with("request_id=req_"),
         "missing request_id prefix in error: {error}"
