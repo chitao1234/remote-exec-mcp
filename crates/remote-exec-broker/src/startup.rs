@@ -273,7 +273,11 @@ impl PeriodicTargetRefreshTask {
 }
 
 async fn periodic_target_refresh_loop(state: BrokerState, cancel: CancellationToken) {
-    let mut interval = tokio::time::interval(state.health_refresh_intervals.shortest());
+    let refresh_interval = state.health_refresh_intervals.shortest();
+    let mut interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + refresh_interval,
+        refresh_interval,
+    );
     loop {
         tokio::select! {
             biased;
