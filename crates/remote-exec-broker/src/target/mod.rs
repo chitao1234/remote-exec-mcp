@@ -3,7 +3,7 @@ mod handle;
 
 pub(crate) use dispatch::TargetBackend;
 pub use handle::{CachedDaemonInfo, TargetHandle};
-pub(crate) use handle::{CachedTargetHealth, RemoteTargetHandle};
+pub(crate) use handle::{CachedTargetHealth, CachedTargetHealthStatus, RemoteTargetHandle};
 
 pub(crate) fn ensure_expected_daemon_name(
     target_name: &str,

@@ -111,7 +111,9 @@ Important invariants:
 - `remote_list_targets` reports configured targets and cached daemon metadata. It may
   perform a short bounded status refresh for targets without currently
   available metadata, but it does not expose stale daemon metadata while a
-  target is unavailable.
+  target is unavailable. Each entry includes `health_status`: `unknown`,
+  `healthy`, `maybe_unhealthy`, or `unhealthy`. The existing `healthy` boolean
+  remains the backward-compatible availability indicator.
 - Public `supports_port_forward` means the target reported forwarding support
   and the broker verified a supported tunnel protocol version.
 - Temporarily unreachable targets can remain configured. Broker startup may
@@ -444,8 +446,10 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 
 - Broker startup probes run concurrently and are bounded by
   `timeouts.startup_probe_ms`.
-- Broker target health refresh runs periodically in the background with
-  separate healthy and unhealthy intervals.
+- Broker target health refresh runs periodically in the background. One failed
+  probe marks a target `maybe_unhealthy`; a second consecutive failure marks it
+  `unhealthy`. Both states use the shorter unhealthy interval, and any successful
+  probe restores `healthy`.
 - Timed-out broker-daemon requests are never replayed.
 - After repeated direct-target timeouts without a successful HTTP response, the
   broker replaces the target's HTTP client pool. Reverse targets additionally

@@ -7,7 +7,7 @@ mod transfer;
 pub use assets::{ApplyPatchInput, ViewImageInput, ViewImageResult};
 pub use exec::{
     CommandToolResult, ExecCommandInput, ListTargetDaemonInfo, ListTargetEntry, ListTargetsInput,
-    ListTargetsResult, WriteStdinInput,
+    ListTargetsResult, TargetHealthStatus, WriteStdinInput,
 };
 pub use file::{EditInput, ReadInput, WriteInput};
 pub use forward_ports::{

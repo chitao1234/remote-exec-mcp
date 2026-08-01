@@ -34,7 +34,9 @@ disable_structured_content = true
 #prepend_tool_names = true
 
 # Optional periodic background refresh for cached remote target health and
-# daemon metadata. Healthy and unhealthy targets use separate intervals.
+# daemon metadata. One failed probe marks a target maybe unhealthy; a second
+# consecutive failure marks it unhealthy. Maybe-unhealthy and unhealthy targets
+# use the shorter unhealthy interval until a probe succeeds.
 # `remote_list_targets` performs a bounded recheck for unavailable or unhealthy remote
 # targets and hides stale daemon metadata while a target remains unhealthy.
 #[health_refresh]

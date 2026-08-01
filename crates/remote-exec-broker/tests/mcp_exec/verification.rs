@@ -56,7 +56,7 @@ async fn daemon_tool_error_triggers_health_recheck() {
 }
 
 #[tokio::test]
-async fn hanging_health_probe_marks_target_unhealthy() {
+async fn consecutive_hanging_health_probes_transition_through_maybe_unhealthy() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon_and_extra_target_config(
         r#"[targets.builder-a.timeouts]
 startup_probe_ms = 50
@@ -64,7 +64,7 @@ startup_probe_ms = 50
         Some(
             r#"[health_refresh]
 healthy_interval_ms = 20
-unhealthy_interval_ms = 20
+unhealthy_interval_ms = 200
 "#,
         ),
     )
@@ -74,6 +74,10 @@ unhealthy_interval_ms = 20
         .call_tool("list_targets", serde_json::json!({}))
         .await;
     assert_eq!(before.structured_content["targets"][0]["healthy"], true);
+    assert_eq!(
+        before.structured_content["targets"][0]["health_status"],
+        "healthy"
+    );
 
     fixture
         .set_health_response(support::stub_daemon::StubHealthResponse::DelayedOk {
@@ -81,20 +85,41 @@ unhealthy_interval_ms = 20
         })
         .await;
 
-    let outcome = support::test_helpers::poll_until_ready(
-        50,
-        Duration::from_millis(20),
+    let maybe_unhealthy = support::test_helpers::poll_until_ready(
+        100,
+        Duration::from_millis(5),
+        || async {
+            let result = fixture
+                .call_tool("list_targets", serde_json::json!({}))
+                .await;
+            result.structured_content["targets"][0]["healthy"] == true
+                && result.structured_content["targets"][0]["health_status"] == "maybe_unhealthy"
+        },
+        || false,
+    )
+    .await;
+    assert_eq!(
+        maybe_unhealthy,
+        support::test_helpers::ReadinessWaitOutcome::Ready
+    );
+
+    let unhealthy = support::test_helpers::poll_until_ready(
+        100,
+        Duration::from_millis(10),
         || async {
             let result = fixture
                 .call_tool("list_targets", serde_json::json!({}))
                 .await;
             result.structured_content["targets"][0]["healthy"] == false
+                && result.structured_content["targets"][0]["health_status"] == "unhealthy"
         },
         || false,
     )
     .await;
-
-    assert_eq!(outcome, support::test_helpers::ReadinessWaitOutcome::Ready);
+    assert_eq!(
+        unhealthy,
+        support::test_helpers::ReadinessWaitOutcome::Ready
+    );
 }
 
 #[tokio::test]

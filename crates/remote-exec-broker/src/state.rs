@@ -74,6 +74,7 @@ pub struct BrokerState {
 pub(crate) struct TargetStatusSnapshot {
     pub(crate) name: String,
     pub(crate) healthy: bool,
+    pub(crate) health_status: Option<crate::target::CachedTargetHealthStatus>,
     pub(crate) daemon_info: Option<CachedDaemonInfo>,
 }
 
@@ -100,10 +101,10 @@ impl TargetHealthRefreshIntervals {
             return true;
         };
 
-        let interval = if health.healthy {
-            self.healthy
-        } else {
-            self.unhealthy
+        let interval = match health.status {
+            crate::target::CachedTargetHealthStatus::Healthy => self.healthy,
+            crate::target::CachedTargetHealthStatus::MaybeUnhealthy
+            | crate::target::CachedTargetHealthStatus::Unhealthy => self.unhealthy,
         };
         now.duration_since(health.last_checked_at)
             .map(|elapsed| elapsed >= interval)
@@ -153,6 +154,7 @@ impl BrokerState {
             snapshots.push(TargetStatusSnapshot {
                 name: name.clone(),
                 healthy: status.healthy,
+                health_status: status.health_status,
                 daemon_info: status.daemon_info,
             });
         }
@@ -633,4 +635,31 @@ impl BrokerState {
 
 pub(crate) fn unknown_process_id_message(session_id: &str) -> String {
     format!("Unknown process id {session_id}")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use super::TargetHealthRefreshIntervals;
+    use crate::target::{CachedTargetHealth, CachedTargetHealthStatus};
+
+    #[test]
+    fn maybe_unhealthy_uses_unhealthy_refresh_interval() {
+        let checked_at = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let now = checked_at + Duration::from_secs(20);
+        let intervals = TargetHealthRefreshIntervals {
+            healthy: Duration::from_secs(60),
+            unhealthy: Duration::from_secs(15),
+        };
+        let health = CachedTargetHealth {
+            status: CachedTargetHealthStatus::MaybeUnhealthy,
+            daemon_version: Some("1.0.0".to_string()),
+            daemon_instance_id: Some("daemon-1".to_string()),
+            last_checked_at: checked_at,
+            last_error: Some("temporary failure".to_string()),
+        };
+
+        assert!(intervals.is_due(Some(&health), now));
+    }
 }

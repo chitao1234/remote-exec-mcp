@@ -23,6 +23,10 @@ does not require repository knowledge.
   them as process IDs or daemon-local state.
 - `remote_list_targets` is broker inventory backed by cached metadata. It performs a
   bounded recheck for unavailable or unhealthy remote targets before returning.
+- `targets[].health_status` is `unknown`, `healthy`, `maybe_unhealthy`, or
+  `unhealthy`. One failed probe changes `healthy` to `maybe_unhealthy`; the next
+  failed probe changes it to `unhealthy`, while any successful probe restores
+  `healthy`.
 - A configured target can have `healthy: false` and `daemon_info: null`; stale
   daemon metadata is hidden while the target remains unhealthy.
 - Connectivity may be direct or daemon-initiated reverse mode. This is
@@ -102,9 +106,13 @@ Input:
 {}
 ```
 
-Use `targets[].healthy` to distinguish healthy targets from unavailable or
-unhealthy ones, `daemon_info.platform` for path choices, `supports_pty` before
-`tty: true`, and `supports_port_forward` before remote forwarding.
+Use `targets[].healthy` for backward-compatible availability checks and
+`targets[].health_status` to distinguish `healthy`, `maybe_unhealthy`,
+`unhealthy`, and not-yet-checked `unknown` targets. A previously verified target
+remains available during `maybe_unhealthy` while the broker schedules the next
+probe using the shorter unhealthy interval. Use `daemon_info.platform` for path
+choices, `supports_pty` before `tty: true`, and `supports_port_forward` before
+remote forwarding.
 `supports_port_forward` is true only when the target reports forwarding support
 and the broker verifies a supported tunnel protocol version.
 

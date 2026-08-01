@@ -126,6 +126,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
                 {
                     "name": DEFAULT_TEST_TARGET,
                     "healthy": true,
+                    "health_status": "healthy",
                     "daemon_info": {
                         "daemon_version": "0.1.0",
                         "hostname": "builder-a-host",
@@ -140,6 +141,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
                 {
                     "name": "builder-b",
                     "healthy": false,
+                    "health_status": "unhealthy",
                     "daemon_info": null
                 }
             ]

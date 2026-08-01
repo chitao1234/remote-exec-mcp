@@ -93,9 +93,19 @@ impl ListTargetDaemonInfo {
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetHealthStatus {
+    Unknown,
+    Healthy,
+    MaybeUnhealthy,
+    Unhealthy,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ListTargetEntry {
     pub name: String,
     pub healthy: bool,
+    pub health_status: TargetHealthStatus,
     pub daemon_info: Option<ListTargetDaemonInfo>,
 }
 

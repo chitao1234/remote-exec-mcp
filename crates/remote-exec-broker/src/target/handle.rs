@@ -43,23 +43,31 @@ impl CachedDaemonInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachedTargetHealth {
-    pub healthy: bool,
+    pub status: CachedTargetHealthStatus,
     pub daemon_version: Option<String>,
     pub daemon_instance_id: Option<String>,
     pub last_checked_at: SystemTime,
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CachedTargetHealthStatus {
+    Healthy,
+    MaybeUnhealthy,
+    Unhealthy,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CachedTargetStatus {
     pub(crate) healthy: bool,
+    pub(crate) health_status: Option<CachedTargetHealthStatus>,
     pub(crate) daemon_info: Option<CachedDaemonInfo>,
 }
 
 impl CachedTargetHealth {
     fn healthy(response: &HealthCheckResponse) -> Self {
         Self {
-            healthy: true,
+            status: CachedTargetHealthStatus::Healthy,
             daemon_version: Some(response.daemon_version.clone()),
             daemon_instance_id: Some(response.daemon_instance_id.clone()),
             last_checked_at: SystemTime::now(),
@@ -67,15 +75,18 @@ impl CachedTargetHealth {
         }
     }
 
-    fn unhealthy(error: &DaemonClientError) -> Self {
-        Self::unhealthy_message(error.to_string())
-    }
-
-    fn unhealthy_message(error: String) -> Self {
+    fn record_failure(previous: Option<&Self>, error: String) -> Self {
+        let status = match previous.map(|health| health.status) {
+            Some(CachedTargetHealthStatus::MaybeUnhealthy)
+            | Some(CachedTargetHealthStatus::Unhealthy) => CachedTargetHealthStatus::Unhealthy,
+            Some(CachedTargetHealthStatus::Healthy) | None => {
+                CachedTargetHealthStatus::MaybeUnhealthy
+            }
+        };
         Self {
-            healthy: false,
-            daemon_version: None,
-            daemon_instance_id: None,
+            status,
+            daemon_version: previous.and_then(|health| health.daemon_version.clone()),
+            daemon_instance_id: previous.and_then(|health| health.daemon_instance_id.clone()),
             last_checked_at: SystemTime::now(),
             last_error: Some(error),
         }
@@ -101,7 +112,9 @@ impl TargetRuntimeSnapshot {
     }
 
     fn health_ok(&self) -> bool {
-        self.health.as_ref().is_some_and(|health| health.healthy)
+        self.health
+            .as_ref()
+            .is_some_and(|health| health.status != CachedTargetHealthStatus::Unhealthy)
     }
 }
 
@@ -147,12 +160,15 @@ impl TargetRuntimeState {
         self.snapshot.daemon_info.clone()
     }
 
-    fn set_unhealthy(&mut self, error: &DaemonClientError) {
-        self.snapshot.health = Some(CachedTargetHealth::unhealthy(error));
+    fn record_health_failure(&mut self, error: &DaemonClientError) {
+        self.record_health_failure_message(error.to_string());
     }
 
-    fn set_unhealthy_message(&mut self, error: String) {
-        self.snapshot.health = Some(CachedTargetHealth::unhealthy_message(error));
+    fn record_health_failure_message(&mut self, error: String) {
+        self.snapshot.health = Some(CachedTargetHealth::record_failure(
+            self.snapshot.health.as_ref(),
+            error,
+        ));
     }
 
     fn set_verified_target_info(&mut self, info: &TargetInfoResponse) {
@@ -186,7 +202,7 @@ impl TargetRuntimeState {
 impl CachedTargetHealth {
     fn from_target_info(info: &TargetInfoResponse) -> Self {
         Self {
-            healthy: true,
+            status: CachedTargetHealthStatus::Healthy,
             daemon_version: Some(info.identity.daemon_version.clone()),
             daemon_instance_id: Some(info.daemon_instance_id.clone()),
             last_checked_at: SystemTime::now(),
@@ -275,6 +291,7 @@ impl TargetHandle {
         let daemon_info = available.then_some(snapshot.daemon_info).flatten();
         CachedTargetStatus {
             healthy: available,
+            health_status: snapshot.health.map(|health| health.status),
             daemon_info,
         }
     }
@@ -455,7 +472,7 @@ impl TargetHandle {
                 Ok(previous_daemon_instance_id)
             }
             Err(err) => {
-                self.runtime.lock().await.set_unhealthy(&err);
+                self.runtime.lock().await.record_health_failure(&err);
                 let error = err.to_string();
                 self.log_availability_transition_since(
                     name,
@@ -477,7 +494,7 @@ impl TargetHandle {
         let (previous_snapshot, current_snapshot) = {
             let mut runtime = self.runtime.lock().await;
             let previous_snapshot = runtime.snapshot();
-            runtime.set_unhealthy_message(error.clone());
+            runtime.record_health_failure_message(error.clone());
             let current_snapshot = runtime.snapshot();
             (previous_snapshot, current_snapshot)
         };
@@ -755,6 +772,62 @@ mod tests {
         assert_eq!(
             TargetAvailabilityTransition::from_snapshots(&unavailable, &unavailable),
             None
+        );
+    }
+
+    #[test]
+    fn first_health_failure_marks_verified_target_maybe_unhealthy() {
+        let info = target_info("daemon-old", "1.0.0");
+        let mut state = TargetRuntimeState::new(
+            Some(super::TargetHandle::cache_from_target_info(&info)),
+            Some(super::CachedTargetHealth::from_target_info(&info)),
+        );
+
+        state.record_health_failure_message("temporary failure".to_string());
+        let snapshot = state.snapshot();
+
+        assert!(snapshot.available());
+        assert_eq!(
+            snapshot.health.as_ref().map(|health| health.status),
+            Some(super::CachedTargetHealthStatus::MaybeUnhealthy)
+        );
+    }
+
+    #[test]
+    fn second_consecutive_health_failure_marks_target_unhealthy() {
+        let info = target_info("daemon-old", "1.0.0");
+        let mut state = TargetRuntimeState::new(
+            Some(super::TargetHandle::cache_from_target_info(&info)),
+            Some(super::CachedTargetHealth::from_target_info(&info)),
+        );
+
+        state.record_health_failure_message("first failure".to_string());
+        state.record_health_failure_message("second failure".to_string());
+        let snapshot = state.snapshot();
+
+        assert!(!snapshot.available());
+        assert_eq!(
+            snapshot.health.as_ref().map(|health| health.status),
+            Some(super::CachedTargetHealthStatus::Unhealthy)
+        );
+    }
+
+    #[test]
+    fn successful_health_check_clears_maybe_unhealthy_state() {
+        let info = target_info("daemon-old", "1.0.0");
+        let mut state = TargetRuntimeState::new(
+            Some(super::TargetHandle::cache_from_target_info(&info)),
+            Some(super::CachedTargetHealth::from_target_info(&info)),
+        );
+
+        state.record_health_failure_message("temporary failure".to_string());
+        state.update_healthy(&health("daemon-old", "1.0.0"));
+        let snapshot = state.snapshot();
+
+        assert!(snapshot.available());
+        assert_eq!(
+            snapshot.health.as_ref().map(|health| health.status),
+            Some(super::CachedTargetHealthStatus::Healthy)
         );
     }
 
