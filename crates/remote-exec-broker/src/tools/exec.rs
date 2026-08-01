@@ -26,7 +26,7 @@ pub async fn exec_command(
     state: &crate::BrokerState,
     input: ExecCommandInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    crate::request_context::set_current_target(input.target.clone());
+    crate::request_context::set_current_target(input.target.as_str());
     let cmd_preview = remote_exec_util::preview_text(&input.cmd, 120);
     tracing::info!(
         tool = "exec_command",
@@ -87,7 +87,7 @@ pub async fn write_stdin(
     let session_id = input.session_id.clone();
     let requested_target = input.target.clone();
     if let Some(target) = &requested_target {
-        crate::request_context::set_current_target(target.clone());
+        crate::request_context::set_current_target(target.as_str());
     }
     let chars_len = input.chars.as_ref().map_or(0, |chars| chars.len());
     tracing::info!(

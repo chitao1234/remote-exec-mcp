@@ -9,7 +9,7 @@ pub async fn view_image(
     state: &crate::BrokerState,
     input: ViewImageInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    crate::request_context::set_current_target(input.target.clone());
+    crate::request_context::set_current_target(input.target.as_str());
     let path = input.path.clone();
     tracing::info!(
         tool = "view_image",

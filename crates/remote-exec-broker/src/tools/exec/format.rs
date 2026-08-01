@@ -62,10 +62,7 @@ fn format_exec_text(
 
     format!(
         "{command}Chunk ID: {}\nWall time: {:.3} seconds\n{status}{original}\nOutput:\n{}",
-        response
-            .chunk_id
-            .clone()
-            .unwrap_or_else(|| "n/a".to_string()),
+        response.chunk_id.as_deref().unwrap_or("n/a"),
         response.wall_time_seconds,
         response.output
     )

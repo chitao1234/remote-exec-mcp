@@ -40,7 +40,7 @@ pub async fn apply_patch(
     state: &crate::BrokerState,
     input: ApplyPatchInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    crate::request_context::set_current_target(input.target.clone());
+    crate::request_context::set_current_target(input.target.as_str());
     let patch_len = input.input.len();
     tracing::info!(
         tool = "apply_patch",

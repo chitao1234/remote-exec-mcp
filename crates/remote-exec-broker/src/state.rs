@@ -474,7 +474,7 @@ impl BrokerState {
             .get(public_session_id)
             .await
             .with_context(|| unknown_process_id_message(public_session_id))?;
-        crate::request_context::set_current_target(record.target.clone());
+        crate::request_context::set_current_target(record.target.as_str());
 
         if let Some(target) = requested_target {
             anyhow::ensure!(

@@ -7,7 +7,7 @@ use remote_exec_proto::rpc::{
 use crate::mcp_server::ToolCallOutput;
 
 pub async fn read(state: &crate::BrokerState, input: ReadInput) -> anyhow::Result<ToolCallOutput> {
-    crate::request_context::set_current_target(input.target.clone());
+    crate::request_context::set_current_target(input.target.as_str());
     let limit = input
         .limit
         .unwrap_or(state.tools.file.default_read_limit_lines);
@@ -47,7 +47,7 @@ pub async fn write(
     state: &crate::BrokerState,
     input: WriteInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    crate::request_context::set_current_target(input.target.clone());
+    crate::request_context::set_current_target(input.target.as_str());
     tracing::info!(
         tool = "write",
         target = %input.target,
@@ -79,7 +79,7 @@ pub async fn write(
 }
 
 pub async fn edit(state: &crate::BrokerState, input: EditInput) -> anyhow::Result<ToolCallOutput> {
-    crate::request_context::set_current_target(input.target.clone());
+    crate::request_context::set_current_target(input.target.as_str());
     tracing::info!(
         tool = "edit",
         target = %input.target,
