@@ -41,11 +41,11 @@ typedef UINT(WINAPI* GetConsoleOutputCodePageFn)();
 
 UINT active_console_output_code_page() {
     HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
-    if (kernel32 == NULL) {
+    if (kernel32 == nullptr) {
         return 0U;
     }
     FARPROC proc = GetProcAddress(kernel32, "GetConsoleOutputCP");
-    if (proc == NULL) {
+    if (proc == nullptr) {
         return 0U;
     }
     GetConsoleOutputCodePageFn get_console_output_code_page =
