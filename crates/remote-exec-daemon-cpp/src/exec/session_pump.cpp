@@ -138,10 +138,10 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
         }
 
         BasicLockGuard lock(session->mutex_);
+        session->output_.decode_carry = std::move(carry);
         if (session->closing) {
             return;
         }
-        session->output_.decode_carry = std::move(carry);
         append_session_output_locked(session.get(), chunk);
         if (eof) {
             finish_session_output_locked(session.get(), SessionOutputDrainStopReason::OutputEof);

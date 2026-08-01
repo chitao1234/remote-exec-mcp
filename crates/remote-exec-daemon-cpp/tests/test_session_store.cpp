@@ -28,6 +28,7 @@
 #endif
 #include "../src/exec/session_pump_internal.h"
 #include "exec/process_session.h"
+#include "exec/session_pump.h"
 #include "exec/session_store.h"
 #include "test_filesystem.h"
 #include "test_pty_helpers.h"
@@ -81,6 +82,48 @@ public:
 private:
     bool descendant_cleanup_supported_;
     int terminate_descendants_calls_;
+};
+
+class BlockingCarryProcessSession : public ProcessSession {
+public:
+    BlockingCarryProcessSession() : read_started_(false), released_(false) {}
+
+    void write_stdin(const std::string& chars) override { (void)chars; }
+
+    void resize_pty(unsigned short rows, unsigned short cols) override {
+        (void)rows;
+        (void)cols;
+    }
+
+    std::string read_output(bool block, bool* eof, std::string* carry) override {
+        (void)block;
+        (void)carry;
+        read_started_.store(true);
+        while (!released_.load()) {
+            platform::sleep_ms(10UL);
+        }
+        *eof = false;
+        return std::string();
+    }
+
+    std::string flush_carry(std::string* carry) override {
+        std::string output;
+        output.swap(*carry);
+        return output;
+    }
+
+    bool has_exited(int* exit_code) override {
+        *exit_code = 0;
+        return false;
+    }
+
+    void terminate() override { released_.store(true); }
+
+    bool read_started() const { return read_started_.load(); }
+
+private:
+    std::atomic<bool> read_started_;
+    std::atomic<bool> released_;
 };
 
 static SessionOutputDrainPolicy test_drain_policy(
@@ -499,6 +542,32 @@ static bool wait_until_true(const std::atomic<bool>& value, unsigned long timeou
         platform::sleep_ms(10UL);
     }
     return value.load();
+}
+
+static void assert_output_pump_restores_decode_carry_when_closing() {
+    std::shared_ptr<LiveSession> session(new LiveSession());
+    BlockingCarryProcessSession* process = new BlockingCarryProcessSession();
+    session->process.reset(process);
+    session->output_.decode_carry = "partial";
+
+    start_session_pump(session);
+    const std::uint64_t started = platform::monotonic_ms();
+    while (!process->read_started() && platform::monotonic_ms() - started < 2000UL) {
+        platform::sleep_ms(10UL);
+    }
+    TEST_ASSERT(process->read_started());
+
+    {
+        BasicLockGuard lock(session->mutex_);
+        session->closing = true;
+        session->retired = true;
+        session->cond_.broadcast();
+    }
+    process->terminate();
+    join_session_pump(session.get());
+
+    BasicLockGuard lock(session->mutex_);
+    TEST_ASSERT(session->output_.decode_carry == "partial");
 }
 
 static std::string append_running_session_output_until_pty_size(
@@ -2353,6 +2422,7 @@ int main(int argc, char** argv) {
     assert_win32_process_tree_terminates_descendants(root);
 #endif
     assert_explicit_drain_stop_reasons();
+    assert_output_pump_restores_decode_carry_when_closing();
     assert_completed_command_output(store, root, shell, yield_time);
     assert_token_limiting(store, root, shell, yield_time);
 #ifdef _WIN32
