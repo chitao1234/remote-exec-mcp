@@ -96,10 +96,9 @@ pub async fn exec_write_local(
         .config
         .yield_time
         .resolve_ms(write_yield_time_operation(&req.chars), req.yield_time_ms);
-    let output = poll_until(&mut session, yield_time_ms)
+    let mut output = poll_until(&mut session, yield_time_ms)
         .await
         .map_err(internal_error)?;
-    let mut output = output;
     if let Some(response) = completed_response_if_exited(
         state.as_ref(),
         &mut session,
@@ -141,7 +140,7 @@ async fn prepare_exec_write_session(
     state: &Arc<AppState>,
     req: &ExecWriteRequest,
 ) -> Result<SessionLease, HostRpcError> {
-    let session = match state
+    let mut session = match state
         .sessions
         .lock_with_timeout(&req.daemon_session_id, EXEC_WRITE_SESSION_LOCK_TIMEOUT)
         .await
@@ -164,7 +163,6 @@ async fn prepare_exec_write_session(
             ));
         }
     };
-    let mut session = session;
 
     if let Some(size) = req.pty_size {
         if size.rows == 0 || size.cols == 0 {
@@ -299,7 +297,7 @@ async fn store_running_session(
         &insert_outcome.lease,
         output,
         max_output_tokens,
-        warnings.clone(),
+        warnings,
     );
     Ok(ExecStartResponse {
         daemon_session_id,
