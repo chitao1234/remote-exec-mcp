@@ -19,7 +19,7 @@ HttpResponse handle_exec_start(const ExecRouteContext& context, const HttpReques
             LOG_INFO,
             "server",
             "exec/start target=`" + context.target + "` cmd_preview=`"
-                + preview_text(parsed.cmd, 120) + "`"
+                + preview_text(parsed.cmd, LOG_PREVIEW_LIMIT) + "`"
         );
         Json exec_response = exec_session_result_json(exec_result, parsed.max_output_tokens);
         exec_response["daemon_instance_id"] = context.daemon_instance_id;

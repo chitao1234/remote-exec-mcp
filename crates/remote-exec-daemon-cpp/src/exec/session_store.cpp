@@ -494,7 +494,7 @@ ExecSessionResult SessionStore::start_command(
 
     {
         LogMessageBuilder message("start_command");
-        message.quoted_field("cmd_preview", preview_text(request.cmd, 120))
+        message.quoted_field("cmd_preview", preview_text(request.cmd, LOG_PREVIEW_LIMIT))
             .quoted_field("workdir", request.workdir)
             .quoted_field("shell", request.shell)
             .bool_field("login", request.login_requested)

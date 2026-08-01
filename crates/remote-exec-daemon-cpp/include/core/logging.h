@@ -13,6 +13,9 @@ enum LogLevel {
     LOG_OFF = 5,
 };
 
+// Maximum characters shown when truncating a value for a log message.
+static const std::size_t LOG_PREVIEW_LIMIT = 120U;
+
 void init_logging();
 bool log_enabled(LogLevel level);
 void log_message(LogLevel level, const std::string& component, const std::string& message);
