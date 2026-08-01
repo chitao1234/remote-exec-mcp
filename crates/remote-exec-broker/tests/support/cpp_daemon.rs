@@ -119,7 +119,11 @@ impl CppDaemonBrokerFixture {
             true,
         )
         .await;
-        let proxy = TunnelDropProxy::spawn(backend_addr, certs.is_some()).await;
+        #[cfg(feature = "broker-tls")]
+        let raw_stream = certs.is_some();
+        #[cfg(not(feature = "broker-tls"))]
+        let raw_stream = false;
+        let proxy = TunnelDropProxy::spawn(backend_addr, raw_stream).await;
         let daemon_addr = proxy.listen_addr;
 
         #[cfg(feature = "broker-tls")]

@@ -5,7 +5,7 @@ mod support;
 
 use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
-#[cfg(feature = "broker-tls")]
+#[cfg(all(feature = "broker-tls", not(windows)))]
 use remote_exec_proto::public::ExecCommandInput;
 
 #[tokio::test]
@@ -99,7 +99,7 @@ async fn broker_rejects_mismatched_pinned_server_certificate() {
     assert!(error.contains("pinned server certificate mismatch"));
 }
 
-#[cfg(feature = "broker-tls")]
+#[cfg(all(feature = "broker-tls", not(windows)))]
 #[tokio::test]
 async fn rustls_broker_executes_command_through_cpp_openssl_tls_daemon() {
     let Some(fixture) = support::cpp_daemon::CppDaemonBrokerFixture::spawn_tls().await else {
