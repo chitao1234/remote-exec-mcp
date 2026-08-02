@@ -32,6 +32,15 @@ pub struct PortTunnel {
     max_queued_bytes: usize,
 }
 
+impl Drop for PortTunnel {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+        abort_tunnel_task(self.reader_task.get_mut());
+        abort_tunnel_task(self.writer_task.get_mut());
+        abort_tunnel_task(self.heartbeat_task.get_mut());
+    }
+}
+
 struct QueuedFrame {
     frame: Frame,
     charge: usize,
@@ -506,6 +515,7 @@ mod tests {
         Frame, FrameType, TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED,
         TunnelErrorMeta as ProtoTunnelErrorMeta, TunnelForwardProtocol, TunnelOpenMeta, TunnelRole,
     };
+    use tokio::io::AsyncReadExt;
 
     use crate::port_tunnel_io::{read_frame, write_frame};
 
@@ -538,6 +548,40 @@ mod tests {
             .wait_closed(std::time::Duration::from_secs(1))
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn dropping_port_tunnel_closes_underlying_stream() {
+        let (broker_side, mut daemon_side) = tokio::io::duplex(4096);
+        let tunnel = PortTunnel::from_stream(broker_side).unwrap();
+
+        drop(tunnel);
+
+        let mut buf = [0u8; 1];
+        let read = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            daemon_side.read(&mut buf),
+        )
+        .await
+        .expect("dropped tunnel should close the stream promptly")
+        .unwrap();
+        assert_eq!(read, 0);
+    }
+
+    #[tokio::test]
+    async fn dropping_port_tunnel_releases_local_connection_capacity() {
+        let state = test_port_tunnel_state(remote_exec_host::HostPortForwardLimits {
+            max_tunnel_connections: 1,
+            ..remote_exec_host::HostPortForwardLimits::default()
+        });
+        let first = open_ready_local_connect_tunnel(state.clone())
+            .await
+            .unwrap();
+
+        drop(first);
+
+        let second = retry_open_ready_local_connect_tunnel(state).await;
+        second.abort().await;
     }
 
     #[test]
@@ -826,5 +870,82 @@ mod tests {
         if let Err(err) = writer_join {
             assert!(err.is_cancelled(), "daemon writer join failed: {err}");
         }
+    }
+
+    async fn retry_open_ready_local_connect_tunnel(
+        state: std::sync::Arc<remote_exec_host::HostRuntimeState>,
+    ) -> PortTunnel {
+        let mut last_error = None;
+        for _ in 0..20 {
+            match open_ready_local_connect_tunnel(state.clone()).await {
+                Ok(tunnel) => return tunnel,
+                Err(err) => {
+                    last_error = Some(format!("{err:#}"));
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            }
+        }
+        panic!(
+            "dropped tunnel did not release connection capacity; last_error={}",
+            last_error.unwrap_or_else(|| "none".to_string())
+        );
+    }
+
+    async fn open_ready_local_connect_tunnel(
+        state: std::sync::Arc<remote_exec_host::HostRuntimeState>,
+    ) -> anyhow::Result<PortTunnel> {
+        let tunnel = PortTunnel::local(state, PortTunnel::DEFAULT_MAX_QUEUED_BYTES).await?;
+        tunnel
+            .send(Frame {
+                frame_type: FrameType::TunnelOpen,
+                flags: 0,
+                stream_id: 0,
+                meta: serde_json::to_vec(&TunnelOpenMeta {
+                    forward_id: ForwardId::new("fwd_drop_test"),
+                    role: TunnelRole::Connect,
+                    side: "local".to_string(),
+                    generation: 1,
+                    protocol: TunnelForwardProtocol::Tcp,
+                    resume_session_id: None,
+                })?,
+                data: Vec::new(),
+            })
+            .await?;
+        let frame = tunnel.recv().await?;
+        anyhow::ensure!(
+            frame.frame_type == FrameType::TunnelReady,
+            "expected TunnelReady, got {:?}",
+            frame.frame_type
+        );
+        Ok(tunnel)
+    }
+
+    fn test_port_tunnel_state(
+        port_forward_limits: remote_exec_host::HostPortForwardLimits,
+    ) -> std::sync::Arc<remote_exec_host::HostRuntimeState> {
+        let workdir = std::env::temp_dir().join(format!(
+            "remote-exec-broker-port-tunnel-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&workdir).unwrap();
+        std::sync::Arc::new(
+            remote_exec_host::build_runtime_state(remote_exec_host::HostRuntimeConfig {
+                target: "local-test".to_string(),
+                default_workdir: workdir,
+                windows_posix_root: None,
+                sandbox: None,
+                enable_transfer_compression: false,
+                transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
+                max_open_sessions: remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS,
+                allow_login_shell: false,
+                pty: remote_exec_host::PtyMode::None,
+                default_shell: None,
+                yield_time: remote_exec_host::YieldTimeConfig::default(),
+                port_forward_limits,
+                experimental_apply_patch_target_encoding_autodetect: false,
+                process_environment: remote_exec_host::ProcessEnvironment::capture_current(),
+            })
+            .unwrap(),
+        )
     }
 }

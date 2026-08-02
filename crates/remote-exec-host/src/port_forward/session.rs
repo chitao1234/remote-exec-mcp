@@ -227,7 +227,15 @@ pub(super) async fn close_listen_session(
     session: Arc<SessionState>,
     mode: SessionCloseMode,
 ) {
-    if let Some(attachment) = session.attachment.lock().await.take() {
+    let attachment = {
+        let mut attachment = session.attachment.lock().await;
+        let tunnel_generation = tunnel.last_generation.load(Ordering::Acquire);
+        if tunnel_generation != 0 && session.generation() != tunnel_generation {
+            return;
+        }
+        attachment.take()
+    };
+    if let Some(attachment) = attachment {
         attachment.cancel.cancel();
         for (_, mut stream) in attachment.tcp_streams.lock().await.drain() {
             if let Some(cancel) = stream.cancel.take() {

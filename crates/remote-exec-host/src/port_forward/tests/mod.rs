@@ -11,7 +11,9 @@ use remote_exec_proto::port_tunnel::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
+use super::session::{SessionState, attach_session_to_tunnel, close_listen_session};
 use super::tcp::{tunnel_close_stream, tunnel_tcp_eof};
+use super::tunnel::new_session_for_test;
 use super::tunnel_io::{read_frame, write_frame, write_preface};
 use super::*;
 use crate::{
@@ -949,6 +951,46 @@ async fn reattached_session_is_not_removed_by_stale_expiry() {
 }
 
 #[tokio::test]
+async fn stale_listen_tunnel_close_does_not_detach_reattached_session() {
+    let state = test_state();
+    let session = new_session_for_test(&state);
+    let old_tunnel = listen_tunnel_for_session(&state, session.clone(), 1);
+    session.set_generation(1);
+    attach_session_to_tunnel(&session, &old_tunnel)
+        .await
+        .unwrap();
+    let old_attachment = session.current_attachment().await.expect("old attachment");
+
+    let new_tunnel = listen_tunnel_for_session(&state, session.clone(), 2);
+    session.set_generation(2);
+    attach_session_to_tunnel(&session, &new_tunnel)
+        .await
+        .unwrap();
+    let new_attachment = session.current_attachment().await.expect("new attachment");
+
+    assert!(old_attachment.cancel.is_cancelled());
+    close_listen_session(
+        &old_tunnel,
+        session.clone(),
+        super::error::SessionCloseMode::RetryableDetach,
+    )
+    .await;
+
+    assert!(
+        !new_attachment.cancel.is_cancelled(),
+        "stale close must not cancel the current attachment"
+    );
+    assert!(
+        session.current_attachment().await.is_some(),
+        "stale close must leave the current attachment in place"
+    );
+    assert!(
+        session.resume_deadline.lock().await.is_none(),
+        "stale close must not schedule detached-session expiry"
+    );
+}
+
+#[tokio::test]
 async fn retained_udp_queued_byte_pressure_reports_drop() {
     let state = test_state_with_limits(crate::HostPortForwardLimits {
         max_tunnel_queued_bytes: 128,
@@ -1040,6 +1082,31 @@ fn test_state_with_limits(port_forward_limits: crate::HostPortForwardLimits) -> 
         })
         .unwrap(),
     )
+}
+
+fn listen_tunnel_for_session(
+    state: &Arc<AppState>,
+    session: Arc<SessionState>,
+    generation: u64,
+) -> Arc<TunnelState> {
+    let (tx, _rx) = tokio::sync::mpsc::channel::<QueuedFrame>(8);
+    Arc::new(TunnelState {
+        state: state.clone(),
+        cancel: state.shutdown.child_token(),
+        tx: TunnelSender {
+            tx,
+            limiter: state.port_forward_limiter.clone(),
+        },
+        last_generation: AtomicU64::new(generation),
+        active: tokio::sync::Mutex::new(ActiveTunnelState::Listen {
+            protocol: TunnelForwardProtocol::Tcp,
+            session,
+        }),
+        _connection_permit: state
+            .port_forward_limiter
+            .try_acquire_tunnel_connection()
+            .unwrap(),
+    })
 }
 
 async fn start_tunnel(state: Arc<AppState>) -> DuplexStream {
