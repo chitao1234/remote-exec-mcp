@@ -178,7 +178,7 @@ async fn add_file(
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    tokio::fs::write(path, content).await?;
+    atomic_replace(path.to_path_buf(), content).await?;
     Ok(format!("A {summary_path}"))
 }
 

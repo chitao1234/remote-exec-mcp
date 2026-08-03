@@ -211,8 +211,8 @@ Guidance:
   patch syntax makes no changes.
 - Valid actions execute in order and are non-transactional across files: a later
   filesystem, sandbox, decode, or hunk-match failure can leave earlier actions
-  applied. A normal in-place `*** Update File` action atomically replaces its
-  target after all of its hunks apply successfully.
+  applied. `*** Add File` and normal in-place `*** Update File` actions
+  atomically replace their targets after their content is prepared successfully.
 - Successful calls return text output only.
 
 ### Hidden `remote_read`, `remote_write`, `remote_edit`
