@@ -24,6 +24,7 @@ fn prints_help_from_file() {
     std::fs::write(&help_path, "Custom help text\n").unwrap();
 
     let output = apply_patch()
+        .arg("--help")
         .arg("--help-file")
         .arg(help_path)
         .output()
@@ -38,12 +39,15 @@ fn prints_help_from_file() {
 }
 
 #[test]
-fn applies_patch_from_standard_input() {
+fn help_file_without_help_is_ignored() {
     let tempdir = tempfile::tempdir().unwrap();
+    let missing_help_path = tempdir.path().join("missing-help.txt");
     let patch = "*** Begin Patch\n*** Add File: created.txt\n+hello\n*** End Patch\n";
 
     let output = apply_patch()
         .current_dir(tempdir.path())
+        .arg("--help-file")
+        .arg(missing_help_path)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .spawn()

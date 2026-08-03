@@ -11,8 +11,9 @@ does not require repository knowledge.
 For a patch on the machine running this command rather than a configured
 target, build and run the standalone Rust executable with
 `cargo run -p remote-exec-host --bin apply_patch`. It reads the patch from
-standard input. `apply_patch --help` prints built-in usage; `apply_patch
---help-file PATH` prints help text from `PATH` instead.
+standard input. `apply_patch --help` prints built-in usage; `apply_patch --help
+--help-file PATH` prints help text from `PATH` instead. Without `--help`,
+`--help-file PATH` is ignored.
 
 ## Mental Model
 

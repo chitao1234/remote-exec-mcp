@@ -285,8 +285,9 @@ Use `config/daemon-cpp.example.ini` as the starting config. The configured
 
 Every GNU Windows and MSVC daemon build also emits an `apply_patch-<variant>.exe`
 alongside its daemon binary. The standalone tool reads a Codex-style patch from
-standard input. `--help` prints built-in usage; `--help-file PATH` prints help
-text from `PATH` instead.
+standard input. `--help` prints built-in usage; `--help --help-file PATH`
+prints help text from `PATH` instead. Without `--help`, `--help-file PATH` is
+ignored.
 
 Example:
 

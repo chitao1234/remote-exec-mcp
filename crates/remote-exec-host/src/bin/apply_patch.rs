@@ -19,7 +19,7 @@ Usage: apply_patch [OPTIONS]
 
 Options:
   -h, --help              Print this help text
-      --help-file <PATH>  Print help text from PATH instead
+      --help-file <PATH>  With --help, print help text from PATH instead
 ";
 
 #[tokio::main]
@@ -68,20 +68,43 @@ fn parse_help_request(args: &[OsString]) -> anyhow::Result<Option<Option<PathBuf
     match args {
         [] => Ok(None),
         [arg] if arg == "--help" || arg == "-h" => Ok(Some(None)),
-        [arg, path] if arg == "--help-file" => Ok(Some(Some(PathBuf::from(path)))),
-        [arg] if arg.to_string_lossy().starts_with("--help-file=") => {
-            let value = arg.to_string_lossy();
-            let Some(path) = value.strip_prefix("--help-file=") else {
-                unreachable!("prefix was checked above");
-            };
-            if path.is_empty() {
-                anyhow::bail!("--help-file requires a path");
-            }
-            Ok(Some(Some(PathBuf::from(path))))
+        [help, flag, path]
+            if is_help_argument(help) && flag == "--help-file"
+                || is_help_argument(path) && help == "--help-file" =>
+        {
+            let help_path = if is_help_argument(help) { path } else { flag };
+            Ok(Some(Some(PathBuf::from(help_path))))
         }
+        [help, flag] if is_help_argument(help) && is_help_file_argument(flag) => {
+            Ok(Some(Some(inline_help_file_path(flag)?)))
+        }
+        [flag, help] if is_help_file_argument(flag) && is_help_argument(help) => {
+            Ok(Some(Some(inline_help_file_path(flag)?)))
+        }
+        [flag, _path] if flag == "--help-file" => Ok(None),
+        [flag] if is_help_file_argument(flag) => Ok(None),
         [arg] if arg == "--help-file" => anyhow::bail!("--help-file requires a path"),
         _ => anyhow::bail!("unexpected argument; run `apply_patch --help` for usage"),
     }
+}
+
+fn is_help_argument(arg: &OsString) -> bool {
+    arg == "--help" || arg == "-h"
+}
+
+fn is_help_file_argument(arg: &OsString) -> bool {
+    arg.to_string_lossy().starts_with("--help-file=")
+}
+
+fn inline_help_file_path(arg: &OsString) -> anyhow::Result<PathBuf> {
+    let value = arg.to_string_lossy();
+    let Some(path) = value.strip_prefix("--help-file=") else {
+        unreachable!("prefix was checked before parsing the path");
+    };
+    if path.is_empty() {
+        anyhow::bail!("--help-file requires a path");
+    }
+    Ok(PathBuf::from(path))
 }
 
 fn local_config(default_workdir: PathBuf) -> HostRuntimeConfig {
