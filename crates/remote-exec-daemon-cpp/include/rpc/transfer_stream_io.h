@@ -59,8 +59,12 @@ public:
     void send_error_payload(const std::string& payload);
 
 private:
+    void flush_pending();
+    void write_data_frame(const char* data, std::size_t size);
+
     TransferStreamChunkWriter* chunks_;
     std::uint64_t archive_bytes_;
+    std::string pending_;
 };
 
 std::string framed_transfer_body(const std::string& archive);

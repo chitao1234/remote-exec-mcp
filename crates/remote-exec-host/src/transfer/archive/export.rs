@@ -6,7 +6,7 @@ use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicU64, Ordering},
 };
 
@@ -107,15 +107,20 @@ pub async fn export_path_to_byte_stream(
     tokio::task::spawn_blocking(move || {
         let archive_bytes = Arc::new(AtomicU64::new(0));
         let writer = ChannelArchiveWriter {
-            sender: sender.clone(),
-            archive_bytes: Arc::clone(&archive_bytes),
+            state: Arc::new(Mutex::new(ChannelArchiveWriterState {
+                sender: sender.clone(),
+                archive_bytes: Arc::clone(&archive_bytes),
+                pending: Vec::with_capacity(STREAM_BUFFER_SIZE),
+            })),
         };
         let terminal = match single::write_prepared_export_to_writer_sync(
             prepared,
-            writer,
+            writer.clone(),
             stream_compression,
             stream_symlink_mode,
-        ) {
+        )
+        .and_then(|_| writer.finish())
+        {
             Ok(_) => ExportArchiveStreamItem::Complete {
                 archive_bytes: archive_bytes.load(Ordering::Relaxed),
             },
@@ -149,30 +154,83 @@ pub async fn bundle_archives_to_file(
     Ok(())
 }
 
+#[derive(Clone)]
 struct ChannelArchiveWriter {
+    state: Arc<Mutex<ChannelArchiveWriterState>>,
+}
+
+struct ChannelArchiveWriterState {
     sender: mpsc::Sender<ExportArchiveStreamItem>,
     archive_bytes: Arc<AtomicU64>,
+    pending: Vec<u8>,
+}
+
+impl ChannelArchiveWriter {
+    fn finish(&self) -> Result<(), TransferError> {
+        self.flush_pending()
+            .map_err(|err| TransferError::internal(err.to_string()))
+    }
+
+    fn flush_pending(&self) -> io::Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| io::Error::other("transfer stream writer lock poisoned"))?;
+        if state.pending.is_empty() {
+            return Ok(());
+        }
+
+        let bytes = Bytes::from(std::mem::take(&mut state.pending));
+        send_archive_chunk(&mut state, bytes)
+    }
 }
 
 impl Write for ChannelArchiveWriter {
     fn write(&mut self, mut buf: &[u8]) -> io::Result<usize> {
         let total = buf.len();
-        while !buf.is_empty() {
-            let chunk_len = buf.len().min(STREAM_BUFFER_SIZE);
-            let chunk = Bytes::copy_from_slice(&buf[..chunk_len]);
-            self.sender
-                .blocking_send(ExportArchiveStreamItem::Data(chunk))
-                .map_err(|_| {
-                    io::Error::new(io::ErrorKind::BrokenPipe, "transfer stream receiver closed")
-                })?;
-            self.archive_bytes
-                .fetch_add(chunk_len as u64, Ordering::Relaxed);
-            buf = &buf[chunk_len..];
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| io::Error::other("transfer stream writer lock poisoned"))?;
+
+        if !state.pending.is_empty() {
+            let needed = STREAM_BUFFER_SIZE - state.pending.len();
+            let count = needed.min(buf.len());
+            state.pending.extend_from_slice(&buf[..count]);
+            buf = &buf[count..];
+            if state.pending.len() == STREAM_BUFFER_SIZE {
+                let bytes = Bytes::from(std::mem::take(&mut state.pending));
+                send_archive_chunk(&mut state, bytes)?;
+            }
+        }
+
+        while buf.len() >= STREAM_BUFFER_SIZE {
+            let (chunk, remainder) = buf.split_at(STREAM_BUFFER_SIZE);
+            send_archive_chunk(&mut state, Bytes::copy_from_slice(chunk))?;
+            buf = remainder;
+        }
+
+        if !buf.is_empty() {
+            state.pending.extend_from_slice(buf);
         }
         Ok(total)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+        self.flush_pending()
     }
+}
+
+fn send_archive_chunk(state: &mut ChannelArchiveWriterState, bytes: Bytes) -> io::Result<()> {
+    let chunk_len = bytes.len();
+    state
+        .sender
+        .blocking_send(ExportArchiveStreamItem::Data(bytes))
+        .map_err(|_| {
+            io::Error::new(io::ErrorKind::BrokenPipe, "transfer stream receiver closed")
+        })?;
+    state
+        .archive_bytes
+        .fetch_add(chunk_len as u64, Ordering::Relaxed);
+    Ok(())
 }

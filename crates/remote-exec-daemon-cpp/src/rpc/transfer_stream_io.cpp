@@ -163,7 +163,7 @@ std::size_t StringTransferStreamByteReader::read(char* data, std::size_t size) {
 
 ChunkedTransferStreamArchiveSink::ChunkedTransferStreamArchiveSink(TransferStreamChunkWriter* chunks
 )
-    : chunks_(chunks), archive_bytes_(0U) {
+    : chunks_(chunks), archive_bytes_(0U), pending_() {
 }
 
 void ChunkedTransferStreamArchiveSink::send_preface() {
@@ -174,26 +174,51 @@ void ChunkedTransferStreamArchiveSink::send_preface() {
 }
 
 void ChunkedTransferStreamArchiveSink::write(const char* data, std::size_t size) {
-    std::size_t offset = 0U;
-    while (offset < size) {
-        const std::size_t chunk_size = std::min<std::size_t>(
-            server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES,
-            size - offset
-        );
-        chunks_->write_chunk(transfer_stream::data_frame(data + offset, chunk_size));
-        archive_bytes_ += static_cast<std::uint64_t>(chunk_size);
-        offset += chunk_size;
+    const std::size_t frame_size = server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES;
+    if (!pending_.empty()) {
+        const std::size_t needed = frame_size - pending_.size();
+        const std::size_t count = std::min<std::size_t>(needed, size);
+        pending_.append(data, count);
+        data += count;
+        size -= count;
+        if (pending_.size() == frame_size) {
+            flush_pending();
+        }
+    }
+
+    while (size >= frame_size) {
+        write_data_frame(data, frame_size);
+        data += frame_size;
+        size -= frame_size;
+    }
+
+    if (size > 0U) {
+        pending_.append(data, size);
     }
 }
 
 void ChunkedTransferStreamArchiveSink::send_complete() {
+    flush_pending();
     chunks_->write_chunk(transfer_stream::complete_frame(archive_bytes_));
     chunks_->finish();
 }
 
 void ChunkedTransferStreamArchiveSink::send_error_payload(const std::string& payload) {
+    flush_pending();
     chunks_->write_chunk(transfer_stream::error_frame(payload));
     chunks_->finish();
+}
+
+void ChunkedTransferStreamArchiveSink::flush_pending() {
+    if (!pending_.empty()) {
+        write_data_frame(pending_.data(), pending_.size());
+        pending_.clear();
+    }
+}
+
+void ChunkedTransferStreamArchiveSink::write_data_frame(const char* data, std::size_t size) {
+    chunks_->write_chunk(transfer_stream::data_frame(data, size));
+    archive_bytes_ += static_cast<std::uint64_t>(size);
 }
 
 std::string framed_transfer_body(const std::string& archive) {
