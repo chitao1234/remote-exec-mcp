@@ -397,6 +397,8 @@ Default-hidden file tools:
 - supports `exclude` glob patterns relative to each source root
 - skips unsupported special files inside directory trees with warnings
 - does not expose a public compression option; compression is broker-internal
+- uses Zstandard for eligible remote transfers, but skips it when every source
+  filename has a known already-compressed/container extension such as `.zip` or `.mp4`
 - is not transactional; failed transfers can leave partial destination changes
 
 `remote_forward_ports`:

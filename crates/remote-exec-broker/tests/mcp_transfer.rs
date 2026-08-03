@@ -870,6 +870,33 @@ async fn transfer_files_auto_negotiates_zstd_when_supported() {
 }
 
 #[tokio::test]
+async fn transfer_files_skips_zstd_for_known_compressed_source_names() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let source = fixture._tempdir.path().join("source.zip");
+    std::fs::write(&source, "already compressed bytes\n").unwrap();
+
+    transfer_single_source(
+        &fixture,
+        "local",
+        source.display(),
+        DEFAULT_TEST_TARGET,
+        "/tmp/dest.zip",
+        Some("fail"),
+        true,
+    )
+    .await;
+
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import");
+    assert_eq!(capture.compression, "none");
+    let (path, body) = read_single_file_archive(&capture.body);
+    assert_eq!(path, SINGLE_FILE_ENTRY);
+    assert_eq!(body, b"already compressed bytes\n");
+}
+
+#[tokio::test]
 async fn transfer_files_falls_back_to_none_when_target_does_not_support_compression() {
     let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
     let source = fixture._tempdir.path().join("source.txt");

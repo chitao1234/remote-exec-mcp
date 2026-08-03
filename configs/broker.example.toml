@@ -19,8 +19,9 @@
 # resources are reclaimed when their internal HTTP/1.1 Upgrade tunnels close or
 # their reconnect grace window expires.
 
-# Optional. When false, the broker rejects `remote_transfer_files` requests that set
-# `compression = "zstd"` and keeps all transfer payloads uncompressed.
+# Optional. When false, the broker keeps all transfer payloads uncompressed.
+# When enabled, the broker uses Zstandard for remote transfers unless every source
+# filename has a known already-compressed/container extension such as `.zip` or `.mp4`.
 #enable_transfer_compression = true
 
 # Optional. Defaults to false. This example intentionally sets it to true to

@@ -14,6 +14,12 @@ use crate::local::BrokerHostOrTarget;
 
 use super::backend::{TransferBackend, backend_for_endpoint};
 
+const ALREADY_COMPRESSED_FILE_EXTENSIONS: &[&str] = &[
+    "7z", "apk", "avif", "bz2", "docx", "gif", "gz", "heic", "heif", "ipa", "jar", "jpeg", "jpg",
+    "mkv", "mov", "mp3", "mp4", "mpeg", "mpg", "odt", "ods", "odp", "pdf", "png", "pptx", "rar",
+    "tgz", "webm", "webp", "whl", "xlsx", "xz", "zip", "zst",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct TransferPlanningContext {
     targets: BTreeMap<String, EndpointTargetContext>,
@@ -382,10 +388,31 @@ pub(super) fn negotiate_transfer_compression(
     }
 
     if has_remote_endpoint {
-        Ok(TransferCompression::Zstd)
+        if sources_are_likely_already_compressed(sources) {
+            Ok(TransferCompression::None)
+        } else {
+            Ok(TransferCompression::Zstd)
+        }
     } else {
         Ok(TransferCompression::None)
     }
+}
+
+fn sources_are_likely_already_compressed(sources: &[TransferEndpoint]) -> bool {
+    !sources.is_empty() && sources.iter().all(source_path_looks_already_compressed)
+}
+
+fn source_path_looks_already_compressed(source: &TransferEndpoint) -> bool {
+    let Some(file_name) = source.path.rsplit(['/', '\\']).next() else {
+        return false;
+    };
+    let Some((_, extension)) = file_name.rsplit_once('.') else {
+        return false;
+    };
+
+    ALREADY_COMPRESSED_FILE_EXTENSIONS
+        .iter()
+        .any(|candidate| extension.eq_ignore_ascii_case(candidate))
 }
 
 impl EndpointTargetContext {
@@ -447,5 +474,49 @@ impl EndpointTargetContext {
                 ..
             } => Some(*supports_transfer_compression),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source(path: &str) -> TransferEndpoint {
+        TransferEndpoint {
+            target: "local".to_string(),
+            path: path.to_string(),
+        }
+    }
+
+    #[test]
+    fn identifies_known_already_compressed_file_extensions() {
+        assert!(source_path_looks_already_compressed(&source(
+            "/tmp/release.WHL"
+        )));
+        assert!(source_path_looks_already_compressed(&source(
+            r"C:\\artifacts\\bundle.tar.zst"
+        )));
+    }
+
+    #[test]
+    fn leaves_directories_and_plain_files_eligible_for_compression() {
+        assert!(!source_path_looks_already_compressed(&source(
+            "/tmp/source"
+        )));
+        assert!(!source_path_looks_already_compressed(&source(
+            "/tmp/source.txt"
+        )));
+    }
+
+    #[test]
+    fn requires_every_source_to_look_already_compressed() {
+        assert!(sources_are_likely_already_compressed(&[
+            source("/tmp/video.mp4"),
+            source("/tmp/archive.zip"),
+        ]));
+        assert!(!sources_are_likely_already_compressed(&[
+            source("/tmp/video.mp4"),
+            source("/tmp/readme.txt"),
+        ]));
     }
 }
