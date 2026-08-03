@@ -576,6 +576,7 @@ async fn patch_apply(
         output: "Success. Updated the following files:\nA hello.txt\n".to_string(),
         daemon_instance_id: Some(daemon_instance_id),
         updated_paths: vec!["A hello.txt".to_string()],
+        environment_id: None,
     }))
 }
 

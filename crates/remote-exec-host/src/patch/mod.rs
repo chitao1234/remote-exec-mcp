@@ -29,9 +29,9 @@ pub async fn apply_patch_local(
     let resolved_cwd = crate::exec::resolve_workdir_for_operation(&state, req.workdir.as_deref())
         .map_err(crate::exec::internal_error)?;
     let cwd = resolved_cwd.into_path_buf();
-    let actions = parser::parse_patch(&req.patch)
+    let parsed = parser::parse_patch(&req.patch)
         .map_err(|err| logged_bad_request(RpcErrorCode::PatchFailed, err.to_string()))?;
-    let planned = preflight::plan_actions(&state, &cwd, actions)
+    let planned = preflight::plan_actions(&state, &cwd, parsed.actions)
         .await
         .map_err(HostRpcError::from)?;
     let summary = execute_actions(planned).await.map_err(HostRpcError::from)?;
@@ -48,6 +48,7 @@ pub async fn apply_patch_local(
         ),
         daemon_instance_id: Some(state.daemon_instance_id.clone()),
         updated_paths: summary,
+        environment_id: parsed.environment_id,
     })
 }
 

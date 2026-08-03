@@ -48,6 +48,11 @@ struct PatchAction {
     std::vector<UpdateChunk> chunks;
 };
 
+struct ParsedPatch {
+    std::vector<PatchAction> actions;
+    std::string environment_id;
+};
+
 struct PlannedFile {
     std::string text;
 };
@@ -491,7 +496,7 @@ static void parse_update_chunk_line(const std::string& line, UpdateChunk* chunk)
     throw std::runtime_error("invalid update hunk line");
 }
 
-std::vector<PatchAction> parse_patch(const std::string& patch_text) {
+ParsedPatch parse_patch(const std::string& patch_text) {
     const std::vector<std::string> lines = split_patch_lines(patch_text);
     if (lines.empty() || trim_patch_whitespace(lines.front()) != "*** Begin Patch") {
         throw std::runtime_error("invalid patch header");
@@ -502,6 +507,18 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
 
     std::vector<PatchAction> actions;
     std::size_t index = 1;
+    std::string environment_id;
+    const std::string environment_marker = "*** Environment ID:";
+    if (index + 1 < lines.size()) {
+        const std::string line = trim_patch_whitespace(lines[index]);
+        if (starts_with(line, environment_marker.c_str())) {
+            environment_id = trim_patch_whitespace(line.substr(environment_marker.size()));
+            if (environment_id.empty()) {
+                throw std::runtime_error("patch environment ID cannot be empty");
+            }
+            ++index;
+        }
+    }
     while (index + 1 < lines.size()) {
         const std::string line = trim_patch_whitespace(lines[index]);
         if (starts_with(line, "*** Add File: ")) {
@@ -591,7 +608,7 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
         throw std::runtime_error("unsupported patch line");
     }
 
-    return actions;
+    return ParsedPatch{actions, environment_id};
 }
 
 static std::size_t find_sequence(
@@ -999,8 +1016,8 @@ PatchApplyResult apply_patch(
     const std::string& patch_text,
     const PatchPathAuthorizer& authorizer
 ) {
-    const std::vector<PatchAction> actions = parse_patch(patch_text);
-    const std::vector<PlannedAction> planned = plan_patch_actions(root, actions, authorizer);
+    const ParsedPatch parsed = parse_patch(patch_text);
+    const std::vector<PlannedAction> planned = plan_patch_actions(root, parsed.actions, authorizer);
     const std::vector<std::string> summary = execute_planned_actions(planned);
 
     std::ostringstream out;
@@ -1008,5 +1025,5 @@ PatchApplyResult apply_patch(
     for (std::size_t i = 0; i < summary.size(); ++i) {
         out << summary[i] << '\n';
     }
-    return PatchApplyResult{out.str(), summary};
+    return PatchApplyResult{out.str(), summary, parsed.environment_id};
 }

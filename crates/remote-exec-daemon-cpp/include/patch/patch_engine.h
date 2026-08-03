@@ -7,6 +7,7 @@
 struct PatchApplyResult {
     std::string output;
     std::vector<std::string> updated_paths;
+    std::string environment_id;
 };
 
 typedef std::function<void(const std::string&)> PatchPathAuthorizer;

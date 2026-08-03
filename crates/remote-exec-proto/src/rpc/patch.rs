@@ -14,6 +14,8 @@ pub struct PatchApplyResponse {
     pub daemon_instance_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub updated_paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -41,6 +43,7 @@ mod tests {
             output: "Success.\n".to_string(),
             daemon_instance_id: None,
             updated_paths: Vec::new(),
+            environment_id: None,
         };
 
         assert_eq!(
@@ -61,5 +64,24 @@ mod tests {
         assert_eq!(response.output, "Success.\n");
         assert_eq!(response.daemon_instance_id, None);
         assert!(response.updated_paths.is_empty());
+        assert_eq!(response.environment_id, None);
+    }
+
+    #[test]
+    fn patch_apply_response_serializes_environment_id() {
+        let response = PatchApplyResponse {
+            output: "Success.\n".to_string(),
+            daemon_instance_id: None,
+            updated_paths: Vec::new(),
+            environment_id: Some("builder-a".to_string()),
+        };
+
+        assert_eq!(
+            serde_json::to_value(&response).unwrap(),
+            serde_json::json!({
+                "output": "Success.\n",
+                "environment_id": "builder-a",
+            })
+        );
     }
 }

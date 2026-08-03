@@ -170,6 +170,21 @@ int main() {
     const std::string empty_patch = "*** Begin Patch\n*** End Patch\n";
     PatchApplyResult empty_result = apply_patch(root.string(), empty_patch);
     TEST_ASSERT(empty_result.updated_paths.empty());
+    TEST_ASSERT(empty_result.environment_id.empty());
+
+    const std::string environment_id_patch = "*** Begin Patch\n"
+                                             "*** Environment ID: another-environment\n"
+                                             "*** Add File: environment-id.txt\n"
+                                             "+created\n"
+                                             "*** End Patch\n";
+    PatchApplyResult environment_id_result = apply_patch(root.string(), environment_id_patch);
+    TEST_ASSERT(environment_id_result.environment_id == "another-environment");
+    TEST_ASSERT(read_text(root / "environment-id.txt") == "created\n");
+
+    const std::string empty_environment_id_patch = "*** Begin Patch\n"
+                                                   "*** Environment ID: \n"
+                                                   "*** End Patch\n";
+    expect_patch_failure(root, empty_environment_id_patch);
 
     write_text(root / "blank-context.txt", "before\n\nafter\n");
     const std::string blank_context_patch = "*** Begin Patch\n"

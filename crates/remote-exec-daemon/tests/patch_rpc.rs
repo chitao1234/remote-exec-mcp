@@ -142,6 +142,39 @@ async fn apply_patch_accepts_codex_parser_tolerances() {
 }
 
 #[tokio::test]
+async fn apply_patch_exposes_environment_id_without_routing() {
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Environment ID: another-environment\n",
+                    "*** Add File: environment-id.txt\n",
+                    "+created\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(
+        response.environment_id.as_deref(),
+        Some("another-environment")
+    );
+    assert_eq!(response.updated_paths, vec!["A environment-id.txt"]);
+    assert_eq!(
+        tokio::fs::read_to_string(fixture.workdir.join("environment-id.txt"))
+            .await
+            .unwrap(),
+        "created\n"
+    );
+}
+
+#[tokio::test]
 async fn update_file_preserves_crlf_line_endings() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("crlf.txt");

@@ -24,6 +24,12 @@ pub struct UpdateChunk {
     pub is_end_of_file: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedPatch {
+    pub actions: Vec<PatchAction>,
+    pub environment_id: Option<String>,
+}
+
 fn trim_patch_whitespace(line: &str) -> &str {
     line.trim()
 }
@@ -74,13 +80,14 @@ fn parse_update_chunk_line(
     Ok(())
 }
 
-pub fn parse_patch(input: &str) -> anyhow::Result<Vec<PatchAction>> {
+pub fn parse_patch(input: &str) -> anyhow::Result<ParsedPatch> {
     PatchParser::new(input)?.parse_actions()
 }
 
 struct PatchParser<'a> {
     lines: Vec<&'a str>,
     index: usize,
+    environment_id: Option<String>,
 }
 
 impl<'a> PatchParser<'a> {
@@ -95,16 +102,42 @@ impl<'a> PatchParser<'a> {
             "invalid patch footer"
         );
 
-        Ok(Self { lines, index: 1 })
+        Ok(Self {
+            lines,
+            index: 1,
+            environment_id: None,
+        })
     }
 
-    fn parse_actions(&mut self) -> anyhow::Result<Vec<PatchAction>> {
+    fn parse_actions(&mut self) -> anyhow::Result<ParsedPatch> {
+        self.parse_environment_id()?;
         let mut actions = Vec::new();
         while !self.at_body_end() {
             actions.push(self.parse_action()?);
         }
 
-        Ok(actions)
+        Ok(ParsedPatch {
+            actions,
+            environment_id: self.environment_id.take(),
+        })
+    }
+
+    fn parse_environment_id(&mut self) -> anyhow::Result<()> {
+        if self.at_body_end() {
+            return Ok(());
+        }
+
+        let Some(environment_id) = strip_control_prefix(self.current(), "*** Environment ID:")
+        else {
+            return Ok(());
+        };
+        anyhow::ensure!(
+            !environment_id.is_empty(),
+            "patch environment ID cannot be empty"
+        );
+        self.environment_id = Some(environment_id.to_string());
+        self.advance();
+        Ok(())
     }
 
     fn parse_action(&mut self) -> anyhow::Result<PatchAction> {
@@ -263,7 +296,7 @@ impl<'a> PatchParser<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PatchAction, UpdateChunk, parse_patch};
+    use super::{ParsedPatch, PatchAction, UpdateChunk, parse_patch};
 
     #[test]
     fn parses_control_lines_with_horizontal_whitespace() {
@@ -279,7 +312,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_patch(patch).unwrap(),
+            parse_patch(patch).unwrap().actions,
             vec![PatchAction::Update {
                 path: "old.txt".into(),
                 move_to: Some("new.txt".into()),
@@ -304,7 +337,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_patch(patch).unwrap(),
+            parse_patch(patch).unwrap().actions,
             vec![PatchAction::Update {
                 path: "demo.txt".into(),
                 move_to: None,
@@ -338,7 +371,7 @@ mod tests {
     fn accepts_empty_patch_envelope() {
         let patch = "*** Begin Patch\n*** End Patch\n";
 
-        assert_eq!(parse_patch(patch).unwrap(), Vec::new());
+        assert_eq!(parse_patch(patch).unwrap().actions, Vec::new());
     }
 
     #[test]
@@ -354,7 +387,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_patch(patch).unwrap(),
+            parse_patch(patch).unwrap().actions,
             vec![PatchAction::Update {
                 path: "demo.txt".into(),
                 move_to: None,
@@ -384,7 +417,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_patch(patch).unwrap(),
+            parse_patch(patch).unwrap().actions,
             vec![PatchAction::Update {
                 path: "demo.txt".into(),
                 move_to: None,
@@ -416,11 +449,48 @@ mod tests {
         );
 
         assert_eq!(
-            parse_patch(patch).unwrap(),
+            parse_patch(patch).unwrap().actions,
             vec![PatchAction::Add {
                 path: "demo.txt".into(),
                 lines: vec!["demo".to_string()],
             }]
+        );
+    }
+
+    #[test]
+    fn parses_environment_id_without_affecting_actions() {
+        let patch = concat!(
+            "*** Begin Patch\n",
+            "*** Environment ID: builder-a\n",
+            "*** Add File: demo.txt\n",
+            "+demo\n",
+            "*** End Patch\n",
+        );
+
+        assert_eq!(
+            parse_patch(patch).unwrap(),
+            ParsedPatch {
+                actions: vec![PatchAction::Add {
+                    path: "demo.txt".into(),
+                    lines: vec!["demo".to_string()],
+                }],
+                environment_id: Some("builder-a".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_empty_environment_id() {
+        let patch = concat!(
+            "*** Begin Patch\n",
+            "*** Environment ID: \n",
+            "*** End Patch\n",
+        );
+
+        let err = parse_patch(patch).unwrap_err();
+        assert!(
+            err.to_string().contains("environment ID cannot be empty"),
+            "{err}"
         );
     }
 }

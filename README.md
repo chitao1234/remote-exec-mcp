@@ -350,6 +350,8 @@ port forwards require a long-running broker, so prefer `--broker-url` for
 - accepts Codex parser tolerances for empty envelopes, blank update context,
   blank separators after `*** End of File`, and Unicode whitespace around
   patch control lines
+- accepts `*** Environment ID: <id>` as metadata returned by the daemon; it
+  never overrides the explicitly selected `target`
 - preflights deterministic failures such as sandbox denial, missing files,
   non-file targets, decode failures, and unmatched hunks before writing
 - remains non-transactional for runtime races and write/remove failures after

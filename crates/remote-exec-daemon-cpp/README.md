@@ -21,7 +21,7 @@ not the live contract.
 | Authentication | Mutual TLS with optional certificate pinning, plus optional HTTP bearer auth. Bearer auth alone does not encrypt plain HTTP. |
 | Exec | POSIX and Windows shell execution, live sessions, and stdin polling/writes. |
 | PTY | POSIX PTY when available. GNU/MSVC Windows PTY depends on vendored `winpty`; Wine disables PTY capability reporting for GNU builds. |
-| Patch | Codex-style `apply_patch` with the project-wide preflighted/non-transactional contract. |
+| Patch | Codex-style `apply_patch` with the project-wide preflighted/non-transactional contract. `*** Environment ID: <id>` is retained as response metadata and never changes the selected target. |
 | Images | PNG, JPEG, and WebP passthrough without resizing. |
 | Transfers | Regular files, directory trees, and broker-built multi-source bundles. No transfer compression. |
 | Port forwarding | v4 TCP/UDP tunnel support with daemon-local worker, socket, queue, and reconnect limits. |

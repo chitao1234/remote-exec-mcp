@@ -201,14 +201,15 @@ HttpResponse handle_patch_apply(const PatchRouteContext& context, const HttpRequ
         LogMessageBuilder summary("patch/apply");
         summary.field("patch_len", patch_text.size());
         log_message(LOG_INFO, "server", summary.str());
-        write_json(
-            response,
-            Json{
-                {"output", result.output},
-                {"daemon_instance_id", context.daemon_instance_id},
-                {"updated_paths", result.updated_paths},
-            }
-        );
+        Json response_body{
+            {"output", result.output},
+            {"daemon_instance_id", context.daemon_instance_id},
+            {"updated_paths", result.updated_paths},
+        };
+        if (!result.environment_id.empty()) {
+            response_body["environment_id"] = result.environment_id;
+        }
+        write_json(response, response_body);
     });
 }
 

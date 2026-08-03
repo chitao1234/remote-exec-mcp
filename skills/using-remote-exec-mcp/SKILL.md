@@ -199,6 +199,8 @@ Guidance:
 - Existing `LF` versus `CRLF` style is preserved for updated files.
 - Empty patch envelopes, blank update context lines, blank separators after
   `*** End of File`, and Unicode whitespace around patch control lines are accepted.
+- `*** Environment ID: <id>` is accepted and retained in daemon response metadata;
+  it does not override the explicit `target` argument.
 - `remote_apply_patch` preflights deterministic failures before writing, including
   missing files, non-file targets, sandbox denial, decode failures, and
   unmatched hunks.
