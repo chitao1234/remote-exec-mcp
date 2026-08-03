@@ -43,6 +43,105 @@ async fn add_file_overwrites_existing_content() {
 }
 
 #[tokio::test]
+async fn apply_patch_accepts_codex_parser_tolerances() {
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+
+    let empty_response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: "*** Begin Patch\n*** End Patch\n".to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+    assert_eq!(empty_response.updated_paths, Vec::<String>::new());
+
+    let blank_context_path = fixture.workdir.join("blank-context.txt");
+    tokio::fs::write(&blank_context_path, "before\n\nafter\n")
+        .await
+        .unwrap();
+    fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: blank-context.txt\n",
+                    " before\n",
+                    "\n",
+                    "-after\n",
+                    "+changed\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+    assert_eq!(
+        tokio::fs::read_to_string(blank_context_path).await.unwrap(),
+        "before\n\nchanged\n"
+    );
+
+    let eof_separator_path = fixture.workdir.join("eof-separator.txt");
+    tokio::fs::write(&eof_separator_path, "old\n")
+        .await
+        .unwrap();
+    fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: eof-separator.txt\n",
+                    "@@\n",
+                    " old\n",
+                    "+after\n",
+                    "*** End of File\n",
+                    "\n",
+                    "@@\n",
+                    "+final\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+    assert_eq!(
+        tokio::fs::read_to_string(eof_separator_path).await.unwrap(),
+        "old\nafter\nfinal\n"
+    );
+
+    let unicode_whitespace_response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "\u{00a0}*** Begin Patch\u{3000}\n",
+                    "\u{2003}*** Add File: unicode-whitespace.txt\u{2002}\n",
+                    "+created\n",
+                    "\u{202f}*** End Patch\u{1680}\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+    assert_eq!(
+        unicode_whitespace_response.updated_paths,
+        vec!["A unicode-whitespace.txt"]
+    );
+    assert_eq!(
+        tokio::fs::read_to_string(fixture.workdir.join("unicode-whitespace.txt"))
+            .await
+            .unwrap(),
+        "created\n"
+    );
+}
+
+#[tokio::test]
 async fn update_file_preserves_crlf_line_endings() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("crlf.txt");

@@ -24,26 +24,22 @@ pub struct UpdateChunk {
     pub is_end_of_file: bool,
 }
 
-fn is_horizontal_whitespace(ch: char) -> bool {
-    ch == ' ' || ch == '\t'
-}
-
-fn trim_horizontal(line: &str) -> &str {
-    line.trim_matches(is_horizontal_whitespace)
+fn trim_patch_whitespace(line: &str) -> &str {
+    line.trim()
 }
 
 fn strip_control_prefix<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
-    trim_horizontal(line)
+    trim_patch_whitespace(line)
         .strip_prefix(prefix)
-        .map(|rest| rest.trim_matches(is_horizontal_whitespace))
+        .map(str::trim)
 }
 
 fn is_structural_control_line(line: &str) -> bool {
-    trim_horizontal(line).starts_with("*** ")
+    trim_patch_whitespace(line).starts_with("*** ")
 }
 
 fn parse_hunk_header(line: &str) -> anyhow::Result<Option<String>> {
-    let line = trim_horizontal(line);
+    let line = trim_patch_whitespace(line);
     if line == "@@" {
         return Ok(None);
     }
@@ -61,6 +57,10 @@ fn parse_update_chunk_line(
     new_lines: &mut Vec<String>,
 ) -> anyhow::Result<()> {
     match line.chars().next() {
+        None => {
+            old_lines.push(String::new());
+            new_lines.push(String::new());
+        }
         Some(' ') => {
             let value = line[1..].to_string();
             old_lines.push(value.clone());
@@ -87,11 +87,11 @@ impl<'a> PatchParser<'a> {
     fn new(input: &'a str) -> anyhow::Result<Self> {
         let lines: Vec<&str> = input.lines().collect();
         anyhow::ensure!(
-            lines.first().copied().map(trim_horizontal) == Some("*** Begin Patch"),
+            lines.first().copied().map(trim_patch_whitespace) == Some("*** Begin Patch"),
             "invalid patch header"
         );
         anyhow::ensure!(
-            lines.last().copied().map(trim_horizontal) == Some("*** End Patch"),
+            lines.last().copied().map(trim_patch_whitespace) == Some("*** End Patch"),
             "invalid patch footer"
         );
 
@@ -104,7 +104,6 @@ impl<'a> PatchParser<'a> {
             actions.push(self.parse_action()?);
         }
 
-        anyhow::ensure!(!actions.is_empty(), "empty patch");
         Ok(actions)
     }
 
@@ -122,7 +121,7 @@ impl<'a> PatchParser<'a> {
             return self.parse_update_file(path.into());
         }
 
-        anyhow::bail!("unsupported patch line `{}`", trim_horizontal(line));
+        anyhow::bail!("unsupported patch line `{}`", trim_patch_whitespace(line));
     }
 
     fn parse_add_file(&mut self, path: PathBuf) -> anyhow::Result<PatchAction> {
@@ -150,7 +149,12 @@ impl<'a> PatchParser<'a> {
         let move_to = self.parse_move_to();
         let mut hunks = Vec::new();
         while !self.at_body_end() && !is_structural_control_line(self.current()) {
-            hunks.push(self.parse_update_chunk(&path, hunks.is_empty())?);
+            let chunk = self.parse_update_chunk(&path, hunks.is_empty())?;
+            let is_end_of_file = chunk.is_end_of_file;
+            hunks.push(chunk);
+            if is_end_of_file {
+                self.consume_blank_lines_after_end_of_file();
+            }
         }
         anyhow::ensure!(
             !hunks.is_empty(),
@@ -206,7 +210,7 @@ impl<'a> PatchParser<'a> {
 
     fn parse_update_chunk_header(&mut self, is_first_hunk: bool) -> anyhow::Result<Option<String>> {
         let line = self.current();
-        if trim_horizontal(line).starts_with("@@") {
+        if trim_patch_whitespace(line).starts_with("@@") {
             let header = parse_hunk_header(line)?;
             self.advance();
             return Ok(header);
@@ -216,18 +220,27 @@ impl<'a> PatchParser<'a> {
             return Ok(None);
         }
 
-        anyhow::bail!("invalid update hunk header `{}`", trim_horizontal(line));
+        anyhow::bail!(
+            "invalid update hunk header `{}`",
+            trim_patch_whitespace(line)
+        );
     }
 
     fn current_line_is_update_chunk_body(&self) -> bool {
         !self.at_body_end()
-            && !trim_horizontal(self.current()).starts_with("@@")
-            && trim_horizontal(self.current()) != "*** End of File"
+            && !trim_patch_whitespace(self.current()).starts_with("@@")
+            && trim_patch_whitespace(self.current()) != "*** End of File"
             && !is_structural_control_line(self.current())
     }
 
+    fn consume_blank_lines_after_end_of_file(&mut self) {
+        while !self.at_body_end() && trim_patch_whitespace(self.current()).is_empty() {
+            self.advance();
+        }
+    }
+
     fn consume_end_of_file_marker(&mut self) -> bool {
-        if !self.at_body_end() && trim_horizontal(self.current()) == "*** End of File" {
+        if !self.at_body_end() && trim_patch_whitespace(self.current()) == "*** End of File" {
             self.advance();
             true
         } else {
@@ -318,6 +331,96 @@ mod tests {
             err.to_string()
                 .contains("update file hunk for path `demo.txt` is empty"),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn accepts_empty_patch_envelope() {
+        let patch = "*** Begin Patch\n*** End Patch\n";
+
+        assert_eq!(parse_patch(patch).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn parses_blank_context_line_in_update_hunk() {
+        let patch = concat!(
+            "*** Begin Patch\n",
+            "*** Update File: demo.txt\n",
+            " before\n",
+            "\n",
+            "-after\n",
+            "+changed\n",
+            "*** End Patch\n",
+        );
+
+        assert_eq!(
+            parse_patch(patch).unwrap(),
+            vec![PatchAction::Update {
+                path: "demo.txt".into(),
+                move_to: None,
+                hunks: vec![UpdateChunk {
+                    change_context: None,
+                    old_lines: vec!["before".to_string(), String::new(), "after".to_string(),],
+                    new_lines: vec!["before".to_string(), String::new(), "changed".to_string(),],
+                    is_end_of_file: false,
+                }],
+            }]
+        );
+    }
+
+    #[test]
+    fn accepts_blank_separator_after_end_of_file() {
+        let patch = concat!(
+            "*** Begin Patch\n",
+            "*** Update File: demo.txt\n",
+            "@@\n",
+            " old\n",
+            "+after\n",
+            "*** End of File\n",
+            "\n",
+            "@@\n",
+            "+final\n",
+            "*** End Patch\n",
+        );
+
+        assert_eq!(
+            parse_patch(patch).unwrap(),
+            vec![PatchAction::Update {
+                path: "demo.txt".into(),
+                move_to: None,
+                hunks: vec![
+                    UpdateChunk {
+                        change_context: None,
+                        old_lines: vec!["old".to_string()],
+                        new_lines: vec!["old".to_string(), "after".to_string()],
+                        is_end_of_file: true,
+                    },
+                    UpdateChunk {
+                        change_context: None,
+                        old_lines: Vec::new(),
+                        new_lines: vec!["final".to_string()],
+                        is_end_of_file: false,
+                    },
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_control_lines_with_unicode_whitespace() {
+        let patch = concat!(
+            "\u{00a0}*** Begin Patch\u{3000}\n",
+            "\u{2003}*** Add File: demo.txt\u{2002}\n",
+            "+demo\n",
+            "\u{202f}*** End Patch\u{1680}\n",
+        );
+
+        assert_eq!(
+            parse_patch(patch).unwrap(),
+            vec![PatchAction::Add {
+                path: "demo.txt".into(),
+                lines: vec!["demo".to_string()],
+            }]
         );
     }
 }

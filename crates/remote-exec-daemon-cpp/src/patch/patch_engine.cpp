@@ -2,6 +2,7 @@
 #include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <functional>
 #include <sstream>
@@ -360,12 +361,98 @@ static bool starts_with(const std::string& line, const char* prefix) {
     return line.rfind(prefix, 0) == 0;
 }
 
+static bool decode_utf8_code_point(
+    const std::string& value,
+    std::size_t offset,
+    std::uint32_t* code_point,
+    std::size_t* width
+) {
+    const unsigned char first = static_cast<unsigned char>(value[offset]);
+    if (first < 0x80U) {
+        *code_point = first;
+        *width = 1;
+        return true;
+    }
+
+    std::size_t expected_width = 0;
+    std::uint32_t decoded = 0;
+    if (first >= 0xC2U && first <= 0xDFU) {
+        expected_width = 2;
+        decoded = first & 0x1FU;
+    } else if (first >= 0xE0U && first <= 0xEFU) {
+        expected_width = 3;
+        decoded = first & 0x0FU;
+    } else if (first >= 0xF0U && first <= 0xF4U) {
+        expected_width = 4;
+        decoded = first & 0x07U;
+    } else {
+        return false;
+    }
+    if (offset + expected_width > value.size()) {
+        return false;
+    }
+
+    for (std::size_t index = 1; index < expected_width; ++index) {
+        const unsigned char next = static_cast<unsigned char>(value[offset + index]);
+        if ((next & 0xC0U) != 0x80U) {
+            return false;
+        }
+        decoded = (decoded << 6U) | (next & 0x3FU);
+    }
+
+    if ((expected_width == 3 && decoded < 0x800U) || (expected_width == 4 && decoded < 0x10000U)
+        || (decoded >= 0xD800U && decoded <= 0xDFFFU)) {
+        return false;
+    }
+
+    *code_point = decoded;
+    *width = expected_width;
+    return true;
+}
+
+static bool is_unicode_whitespace(std::uint32_t code_point) {
+    return (code_point >= 0x09U && code_point <= 0x0DU) || code_point == 0x20U
+           || code_point == 0x85U || code_point == 0xA0U || code_point == 0x1680U
+           || (code_point >= 0x2000U && code_point <= 0x200AU) || code_point == 0x2028U
+           || code_point == 0x2029U || code_point == 0x202FU || code_point == 0x205FU
+           || code_point == 0x3000U;
+}
+
+static std::string trim_patch_whitespace(const std::string& value) {
+    std::size_t offset = 0;
+    while (offset < value.size()) {
+        std::uint32_t code_point = 0;
+        std::size_t width = 0;
+        if (!decode_utf8_code_point(value, offset, &code_point, &width)
+            || !is_unicode_whitespace(code_point)) {
+            break;
+        }
+        offset += width;
+    }
+
+    const std::size_t start = offset;
+    std::size_t end = start;
+    while (offset < value.size()) {
+        std::uint32_t code_point = 0;
+        std::size_t width = 0;
+        if (!decode_utf8_code_point(value, offset, &code_point, &width)) {
+            width = 1;
+            code_point = 0;
+        }
+        offset += width;
+        if (!is_unicode_whitespace(code_point)) {
+            end = offset;
+        }
+    }
+    return value.substr(start, end - start);
+}
+
 static bool is_structural_line(const std::string& line) {
-    return starts_with(line, "*** ");
+    return starts_with(trim_patch_whitespace(line), "*** ");
 }
 
 static bool is_update_data_line(const std::string& line) {
-    return !line.empty() && (line[0] == ' ' || line[0] == '+' || line[0] == '-');
+    return line.empty() || line[0] == ' ' || line[0] == '+' || line[0] == '-';
 }
 
 std::vector<std::string> split_patch_lines(const std::string& patch_text) {
@@ -382,6 +469,11 @@ std::vector<std::string> split_patch_lines(const std::string& patch_text) {
 }
 
 static void parse_update_chunk_line(const std::string& line, UpdateChunk* chunk) {
+    if (line.empty()) {
+        chunk->old_lines.push_back(std::string());
+        chunk->new_lines.push_back(std::string());
+        return;
+    }
     const std::string value = line.substr(1);
     if (line[0] == ' ') {
         chunk->old_lines.push_back(value);
@@ -401,17 +493,17 @@ static void parse_update_chunk_line(const std::string& line, UpdateChunk* chunk)
 
 std::vector<PatchAction> parse_patch(const std::string& patch_text) {
     const std::vector<std::string> lines = split_patch_lines(patch_text);
-    if (lines.empty() || lines.front() != "*** Begin Patch") {
+    if (lines.empty() || trim_patch_whitespace(lines.front()) != "*** Begin Patch") {
         throw std::runtime_error("invalid patch header");
     }
-    if (lines.size() < 2 || lines.back() != "*** End Patch") {
+    if (lines.size() < 2 || trim_patch_whitespace(lines.back()) != "*** End Patch") {
         throw std::runtime_error("invalid patch footer");
     }
 
     std::vector<PatchAction> actions;
     std::size_t index = 1;
     while (index + 1 < lines.size()) {
-        const std::string& line = lines[index];
+        const std::string line = trim_patch_whitespace(lines[index]);
         if (starts_with(line, "*** Add File: ")) {
             PatchAction action;
             action.kind = PatchKind::Add;
@@ -443,8 +535,10 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
             action.path = normalize_patch_path(line.substr(17));
             ++index;
 
-            if (index + 1 < lines.size() && starts_with(lines[index], "*** Move to: ")) {
-                action.move_to = normalize_patch_path(lines[index].substr(13));
+            if (index + 1 < lines.size()
+                && starts_with(trim_patch_whitespace(lines[index]), "*** Move to: ")) {
+                action.move_to =
+                    normalize_patch_path(trim_patch_whitespace(lines[index]).substr(13));
                 ++index;
             }
 
@@ -453,12 +547,13 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
                 chunk.has_change_context = false;
                 chunk.is_end_of_file = false;
 
-                if (starts_with(lines[index], "@@")) {
-                    if (lines[index] == "@@") {
+                const std::string control_line = trim_patch_whitespace(lines[index]);
+                if (starts_with(control_line, "@@")) {
+                    if (control_line == "@@") {
                         chunk.has_change_context = false;
-                    } else if (starts_with(lines[index], "@@ ")) {
+                    } else if (starts_with(control_line, "@@ ")) {
                         chunk.has_change_context = true;
-                        chunk.change_context = lines[index].substr(3);
+                        chunk.change_context = control_line.substr(3);
                     } else {
                         throw std::runtime_error("invalid update hunk header");
                     }
@@ -471,9 +566,14 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
                     parse_update_chunk_line(lines[index], &chunk);
                     ++index;
                 }
-                if (index + 1 < lines.size() && lines[index] == "*** End of File") {
+                if (index + 1 < lines.size()
+                    && trim_patch_whitespace(lines[index]) == "*** End of File") {
                     chunk.is_end_of_file = true;
                     ++index;
+                    while (index + 1 < lines.size() && trim_patch_whitespace(lines[index]).empty()
+                    ) {
+                        ++index;
+                    }
                 }
                 if (chunk.old_lines.empty() && chunk.new_lines.empty()) {
                     throw std::runtime_error("update hunk with no changes");
@@ -491,9 +591,6 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
         throw std::runtime_error("unsupported patch line");
     }
 
-    if (actions.empty()) {
-        throw std::runtime_error("patch contained no actions");
-    }
     return actions;
 }
 

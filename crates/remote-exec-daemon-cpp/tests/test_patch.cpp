@@ -167,6 +167,51 @@ int main() {
     TEST_ASSERT(crlf_result.output.find("M crlf.txt") != std::string::npos);
     TEST_ASSERT(read_text(root / "crlf.txt") == "hello xp\r\nworld\r\n");
 
+    const std::string empty_patch = "*** Begin Patch\n*** End Patch\n";
+    PatchApplyResult empty_result = apply_patch(root.string(), empty_patch);
+    TEST_ASSERT(empty_result.updated_paths.empty());
+
+    write_text(root / "blank-context.txt", "before\n\nafter\n");
+    const std::string blank_context_patch = "*** Begin Patch\n"
+                                            "*** Update File: blank-context.txt\n"
+                                            " before\n"
+                                            "\n"
+                                            "-after\n"
+                                            "+changed\n"
+                                            "*** End Patch\n";
+
+    PatchApplyResult blank_context_result = apply_patch(root.string(), blank_context_patch);
+    TEST_ASSERT(blank_context_result.output.find("M blank-context.txt") != std::string::npos);
+    TEST_ASSERT(read_text(root / "blank-context.txt") == "before\n\nchanged\n");
+
+    write_text(root / "eof-separator.txt", "old\n");
+    const std::string eof_separator_patch = "*** Begin Patch\n"
+                                            "*** Update File: eof-separator.txt\n"
+                                            "@@\n"
+                                            " old\n"
+                                            "+after\n"
+                                            "*** End of File\n"
+                                            "\n"
+                                            "@@\n"
+                                            "+final\n"
+                                            "*** End Patch\n";
+
+    PatchApplyResult eof_separator_result = apply_patch(root.string(), eof_separator_patch);
+    TEST_ASSERT(eof_separator_result.output.find("M eof-separator.txt") != std::string::npos);
+    TEST_ASSERT(read_text(root / "eof-separator.txt") == "old\nafter\nfinal\n");
+
+    const std::string unicode_whitespace_patch =
+        "\xC2\xA0*** Begin Patch\xE3\x80\x80\n"
+        "\xE2\x80\x83*** Add File: unicode-whitespace.txt\xE2\x80\x82\n"
+        "+created\n"
+        "\xE2\x80\xAF*** End Patch\xE1\x9A\x80\n";
+    PatchApplyResult unicode_whitespace_result =
+        apply_patch(root.string(), unicode_whitespace_patch);
+    TEST_ASSERT(
+        unicode_whitespace_result.output.find("A unicode-whitespace.txt") != std::string::npos
+    );
+    TEST_ASSERT(read_text(root / "unicode-whitespace.txt") == "created\n");
+
     const std::string add_patch = "*** Begin Patch\n"
                                   "*** Add File: new.txt\n"
                                   "+new file\n"

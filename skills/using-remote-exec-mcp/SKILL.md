@@ -191,6 +191,8 @@ Guidance:
 - Use normal Codex patch syntax.
 - Relative patch paths resolve from `workdir` when supplied.
 - Existing `LF` versus `CRLF` style is preserved for updated files.
+- Empty patch envelopes, blank update context lines, blank separators after
+  `*** End of File`, and Unicode whitespace around patch control lines are accepted.
 - `remote_apply_patch` preflights deterministic failures before writing, including
   missing files, non-file targets, sandbox denial, decode failures, and
   unmatched hunks.
