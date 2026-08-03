@@ -6,7 +6,7 @@ if [ "$#" -ne 1 ]; then
     exit 2
 fi
 
-apply_patch_binary=$1
+apply_patch_binary=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/remote-exec-apply-patch-test.XXXXXX")
 help_file="$test_root/help.txt"
 
