@@ -14,7 +14,7 @@ use remote_exec_proto::rpc::{
 };
 use tokio::sync::Mutex;
 
-use crate::daemon_client::{DaemonClientError, TransferExportResponse, TransferExportStream};
+use crate::daemon_client::{DaemonClientError, TransferExportStream};
 
 use super::{TargetBackend, ensure_expected_daemon_name};
 
@@ -619,15 +619,6 @@ impl RemoteTargetHandle<'_> {
         self.handle.target_info().await
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn transfer_export_to_file(
-        &self,
-        req: &TransferExportRequest,
-        archive_path: &std::path::Path,
-    ) -> Result<TransferExportResponse, DaemonClientError> {
-        self.client.transfer_export_to_file(req, archive_path).await
-    }
-
     pub(crate) async fn transfer_export_stream(
         &self,
         req: &TransferExportRequest,
@@ -640,17 +631,6 @@ impl RemoteTargetHandle<'_> {
         req: &TransferPathInfoRequest,
     ) -> Result<TransferPathInfoResponse, DaemonClientError> {
         self.client.transfer_path_info(req).await
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn transfer_import_from_file(
-        &self,
-        archive_path: &std::path::Path,
-        req: &TransferImportRequest,
-    ) -> Result<TransferImportResponse, DaemonClientError> {
-        self.client
-            .transfer_import_from_file(archive_path, req)
-            .await
     }
 
     pub(crate) async fn transfer_import_from_archive_stream<S, E>(

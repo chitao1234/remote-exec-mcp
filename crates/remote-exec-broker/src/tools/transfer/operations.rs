@@ -32,7 +32,7 @@ struct StreamingSourceArchive {
 enum SourceArchiveStreamItem {
     Data(Bytes),
     Complete,
-    Error(String),
+    Error(io::Error),
 }
 
 struct SourceArchiveReader {
@@ -224,9 +224,7 @@ async fn pump_source_archive(
                 }
             }
             Err(err) => {
-                let _ = sender
-                    .send(SourceArchiveStreamItem::Error(err.to_string()))
-                    .await;
+                let _ = sender.send(SourceArchiveStreamItem::Error(err)).await;
                 return;
             }
         }
@@ -311,8 +309,8 @@ impl Read for SourceArchiveReader {
                     self.offset = 0;
                 }
                 Some(SourceArchiveStreamItem::Complete) => self.complete = true,
-                Some(SourceArchiveStreamItem::Error(message)) => {
-                    return Err(io::Error::other(message));
+                Some(SourceArchiveStreamItem::Error(err)) => {
+                    return Err(err);
                 }
                 None => {
                     return Err(io::Error::new(

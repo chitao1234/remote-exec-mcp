@@ -1,7 +1,6 @@
-#![allow(dead_code)]
-
 use futures_util::{StreamExt, TryStream, TryStreamExt};
 
+use crate::tools::transfer::codec;
 use remote_exec_proto::rpc::{
     TRANSFER_STREAM_PROTOCOL_VERSION, TRANSFER_STREAM_VERSION_HEADER, TransferExportMetadata,
     TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
@@ -9,17 +8,10 @@ use remote_exec_proto::rpc::{
 };
 use remote_exec_proto::transfer::TransferSourceType;
 
-use crate::tools::transfer::codec;
-
 use super::{
     DaemonClient, DaemonClientError, RpcCallContext, RpcCallKind, RpcErrorDecodePolicy,
     transfer_stream,
 };
-
-#[derive(Debug, Clone)]
-pub struct TransferExportResponse {
-    pub source_type: TransferSourceType,
-}
 
 #[derive(Debug)]
 pub struct TransferExportStream {
@@ -43,34 +35,6 @@ impl DaemonClient {
         self.post("/v1/transfer/path-info", req).await
     }
 
-    pub async fn transfer_export_to_file(
-        &self,
-        req: &TransferExportRequest,
-        archive_path: &std::path::Path,
-    ) -> Result<TransferExportResponse, DaemonClientError> {
-        let started = std::time::Instant::now();
-        tracing::debug!(
-            target = %self.target_name,
-            base_url = %self.base_url,
-            path = %req.path,
-            "starting daemon transfer export"
-        );
-        let TransferExportStream {
-            source_type,
-            response,
-        } = self.transfer_export_stream(req).await?;
-        self.write_transfer_export_archive(archive_path, response)
-            .await?;
-        tracing::debug!(
-            target = %self.target_name,
-            base_url = %self.base_url,
-            path = %req.path,
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "daemon transfer export completed"
-        );
-        Ok(TransferExportResponse { source_type })
-    }
-
     pub async fn transfer_export_stream(
         &self,
         req: &TransferExportRequest,
@@ -84,30 +48,6 @@ impl DaemonClient {
             source_type: metadata.source_type,
             response,
         })
-    }
-
-    pub async fn transfer_import_from_file(
-        &self,
-        archive_path: &std::path::Path,
-        req: &TransferImportRequest,
-    ) -> Result<TransferImportResponse, DaemonClientError> {
-        let started = std::time::Instant::now();
-        let stream = open_transfer_import_stream(archive_path).await?;
-        let body = transfer_stream::encode_request_body(stream);
-        let (response, connection_generation) = self
-            .send_transfer_import_request(req, body, started)
-            .await?;
-        let summary = self
-            .decode_transfer_import_response(req, started, response, connection_generation)
-            .await?;
-        tracing::debug!(
-            target = %self.target_name,
-            base_url = %self.base_url,
-            destination_path = %req.destination_path,
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "daemon transfer import completed"
-        );
-        Ok(summary)
     }
 
     pub async fn transfer_import_from_archive_stream<S, E>(
@@ -178,25 +118,6 @@ impl DaemonClient {
         Ok(metadata)
     }
 
-    async fn write_transfer_export_archive(
-        &self,
-        archive_path: &std::path::Path,
-        response: reqwest::Response,
-    ) -> Result<(), DaemonClientError> {
-        let mut file = tokio::fs::File::create(archive_path)
-            .await
-            .map_err(|err| DaemonClientError::Transport(err.into()))?;
-        let mut stream = tokio_util::io::StreamReader::new(
-            transfer_stream::decode_response_body(response)
-                .map_err(std::io::Error::other)
-                .boxed(),
-        );
-        tokio::io::copy(&mut stream, &mut file)
-            .await
-            .map_err(|err| DaemonClientError::Transport(err.into()))?;
-        Ok(())
-    }
-
     async fn send_transfer_import_request(
         &self,
         req: &TransferImportRequest,
@@ -248,15 +169,4 @@ impl DaemonClient {
         )
         .await
     }
-}
-
-async fn open_transfer_import_stream(
-    archive_path: &std::path::Path,
-) -> Result<tokio_util::io::ReaderStream<tokio::fs::File>, DaemonClientError> {
-    let file = tokio::fs::File::open(archive_path).await.map_err(|err| {
-        DaemonClientError::Transport(
-            anyhow::Error::from(err).context(format!("open {}", archive_path.display())),
-        )
-    })?;
-    Ok(tokio_util::io::ReaderStream::new(file))
 }

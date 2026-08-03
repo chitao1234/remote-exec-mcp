@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::path::Path;
 
 use bytes::Bytes;
@@ -14,18 +12,12 @@ use remote_exec_proto::rpc::{
 };
 use remote_exec_proto::transfer::{TransferLimits, TransferSourceType};
 
-use crate::daemon_client::{
-    DaemonClientError, RpcToolErrorMode, TransferExportResponse, normalize_tool_result,
-};
+use crate::daemon_client::{DaemonClientError, RpcToolErrorMode, normalize_tool_result};
 use crate::target::RemoteTargetHandle;
 
 use super::endpoints::PlannedEndpoint;
 
 pub(super) type ArchiveStream = BoxStream<'static, Result<Bytes, std::io::Error>>;
-
-pub(super) struct ExportedArchive {
-    pub(super) source_type: TransferSourceType,
-}
 
 pub(super) struct TransferArchiveStream {
     source_type: TransferSourceType,
@@ -69,22 +61,10 @@ pub(super) trait TransferBackend {
         request: &'a TransferPathInfoRequest,
     ) -> BoxFuture<'a, Result<TransferPathInfoResponse, DaemonClientError>>;
 
-    fn export_to_file<'a>(
-        &'a self,
-        request: &'a TransferExportRequest,
-        archive_path: &'a Path,
-    ) -> BoxFuture<'a, anyhow::Result<ExportedArchive>>;
-
     fn export_stream<'a>(
         &'a self,
         request: &'a TransferExportRequest,
     ) -> BoxFuture<'a, anyhow::Result<TransferArchiveStream>>;
-
-    fn import_from_file<'a>(
-        &'a self,
-        archive_path: &'a Path,
-        request: &'a TransferImportRequest,
-    ) -> BoxFuture<'a, anyhow::Result<TransferImportResponse>>;
 
     fn import_stream<'a>(
         &'a self,
@@ -178,17 +158,6 @@ impl TransferBackend for TransferEndpointBackend<'_> {
         }
     }
 
-    fn export_to_file<'a>(
-        &'a self,
-        request: &'a TransferExportRequest,
-        archive_path: &'a Path,
-    ) -> BoxFuture<'a, anyhow::Result<ExportedArchive>> {
-        match self {
-            Self::BrokerHost(backend) => backend.export_to_file(request, archive_path),
-            Self::Remote(backend) => backend.export_to_file(request, archive_path),
-        }
-    }
-
     fn export_stream<'a>(
         &'a self,
         request: &'a TransferExportRequest,
@@ -196,17 +165,6 @@ impl TransferBackend for TransferEndpointBackend<'_> {
         match self {
             Self::BrokerHost(backend) => backend.export_stream(request),
             Self::Remote(backend) => backend.export_stream(request),
-        }
-    }
-
-    fn import_from_file<'a>(
-        &'a self,
-        archive_path: &'a Path,
-        request: &'a TransferImportRequest,
-    ) -> BoxFuture<'a, anyhow::Result<TransferImportResponse>> {
-        match self {
-            Self::BrokerHost(backend) => backend.import_from_file(archive_path, request),
-            Self::Remote(backend) => backend.import_from_file(archive_path, request),
         }
     }
 
@@ -232,26 +190,6 @@ impl TransferBackend for BrokerHostTransferBackend<'_> {
         })
     }
 
-    fn export_to_file<'a>(
-        &'a self,
-        request: &'a TransferExportRequest,
-        archive_path: &'a Path,
-    ) -> BoxFuture<'a, anyhow::Result<ExportedArchive>> {
-        Box::pin(async move {
-            let exported = crate::local::transfer::export_path_to_archive(
-                &request.path,
-                archive_path,
-                request,
-                self.sandbox,
-                self.windows_posix_root,
-            )
-            .await?;
-            Ok(ExportedArchive {
-                source_type: exported.source_type,
-            })
-        })
-    }
-
     fn export_stream<'a>(
         &'a self,
         request: &'a TransferExportRequest,
@@ -266,23 +204,6 @@ impl TransferBackend for BrokerHostTransferBackend<'_> {
             .await?;
             let reader = crate::local::transfer::export_byte_stream_reader(exported.receiver);
             Ok(TransferArchiveStream::new(exported.source_type, reader))
-        })
-    }
-
-    fn import_from_file<'a>(
-        &'a self,
-        archive_path: &'a Path,
-        request: &'a TransferImportRequest,
-    ) -> BoxFuture<'a, anyhow::Result<TransferImportResponse>> {
-        Box::pin(async move {
-            crate::local::transfer::import_archive_from_file(
-                archive_path,
-                request,
-                self.sandbox,
-                self.windows_posix_root,
-                self.limits,
-            )
-            .await
         })
     }
 
@@ -319,25 +240,6 @@ impl TransferBackend for RemoteTransferBackend<'_> {
         })
     }
 
-    fn export_to_file<'a>(
-        &'a self,
-        request: &'a TransferExportRequest,
-        archive_path: &'a Path,
-    ) -> BoxFuture<'a, anyhow::Result<ExportedArchive>> {
-        Box::pin(async move {
-            let exported = handle_remote_transfer_result(
-                self.state,
-                self.target_name,
-                self.target,
-                self.target
-                    .transfer_export_to_file(request, archive_path)
-                    .await,
-            )
-            .await?;
-            Ok(exported_archive_from_response(exported))
-        })
-    }
-
     fn export_stream<'a>(
         &'a self,
         request: &'a TransferExportRequest,
@@ -358,24 +260,6 @@ impl TransferBackend for RemoteTransferBackend<'_> {
         })
     }
 
-    fn import_from_file<'a>(
-        &'a self,
-        archive_path: &'a Path,
-        request: &'a TransferImportRequest,
-    ) -> BoxFuture<'a, anyhow::Result<TransferImportResponse>> {
-        Box::pin(async move {
-            handle_remote_transfer_result(
-                self.state,
-                self.target_name,
-                self.target,
-                self.target
-                    .transfer_import_from_file(archive_path, request)
-                    .await,
-            )
-            .await
-        })
-    }
-
     fn import_stream<'a>(
         &'a self,
         request: &'a TransferImportRequest,
@@ -392,12 +276,6 @@ impl TransferBackend for RemoteTransferBackend<'_> {
             )
             .await
         })
-    }
-}
-
-fn exported_archive_from_response(response: TransferExportResponse) -> ExportedArchive {
-    ExportedArchive {
-        source_type: response.source_type,
     }
 }
 
