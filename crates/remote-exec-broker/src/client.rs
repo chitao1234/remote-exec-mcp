@@ -137,7 +137,7 @@ impl ClientHandler for RemoteExecClientHandler {
     fn get_info(&self) -> ClientInfo {
         let mut info = ClientInfo::default();
         info.client_info.name = CLIENT_NAME.to_string();
-        info.client_info.version = env!("CARGO_PKG_VERSION").to_string();
+        info.client_info.version = env!("REMOTE_EXEC_BUILD_VERSION").to_string();
         info
     }
 }

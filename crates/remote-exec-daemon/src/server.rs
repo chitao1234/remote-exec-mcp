@@ -34,7 +34,7 @@ where
 pub(crate) async fn health(State(state): State<Arc<AppState>>) -> Json<HealthCheckResponse> {
     Json(HealthCheckResponse {
         status: HealthStatus::Ok,
-        daemon_version: env!("CARGO_PKG_VERSION").to_string(),
+        daemon_version: env!("REMOTE_EXEC_BUILD_VERSION").to_string(),
         daemon_instance_id: state.daemon_instance_id().to_string(),
     })
 }

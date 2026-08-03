@@ -23,7 +23,7 @@ homepage = "https://github.com/chitao1234/remote-exec-mcp"
 license = "Apache-2.0"
 repository = "https://github.com/chitao1234/remote-exec-mcp"
 rust-version = "1.85.0"
-version = "0.1.0"
+version = "0.2.0"
 
 [workspace.dependencies]
 anyhow = "1"

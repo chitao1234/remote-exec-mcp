@@ -69,7 +69,7 @@ impl CliError {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "remote-exec")]
+#[command(name = "remote-exec", version = env!("REMOTE_EXEC_BUILD_VERSION"))]
 #[command(
     about = "CLI client for a remote-exec-mcp broker",
     long_about = "Connect to a remote-exec broker over an in-process config or streamable HTTP and call its public remote execution tools.",

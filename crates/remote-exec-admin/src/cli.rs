@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "remote-exec-admin")]
+#[command(name = "remote-exec-admin", version = env!("REMOTE_EXEC_BUILD_VERSION"))]
 #[command(about = "Administrative tooling for remote-exec-mcp")]
 pub struct Cli {
     #[command(subcommand)]

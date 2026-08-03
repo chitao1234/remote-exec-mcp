@@ -29,7 +29,7 @@ impl LocalDaemonClient {
     pub async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {
         Ok(remote_exec_host::target_info_response(
             &self.state,
-            env!("CARGO_PKG_VERSION"),
+            env!("REMOTE_EXEC_BUILD_VERSION"),
         ))
     }
 

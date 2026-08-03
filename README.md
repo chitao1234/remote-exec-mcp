@@ -552,6 +552,12 @@ REMOTE_EXEC_LOG='warn,remote_exec_broker=debug,remote_exec_daemon=debug,remote_e
 
 Rust MSRV is `1.85.0`, the first stable release with Rust 2024 edition support.
 
+The Rust broker and daemon embed build metadata in their reported version. A
+build from a Git checkout with `git` available reports versions in the form
+`0.2.0+g<short-commit>.<YYYYMMDD>`; builds without Git report
+`0.2.0+<YYYYMMDD>`. The SemVer core remains unchanged for compatibility, and
+the date is the UTC build date.
+
 Full quality gate:
 
 ```bash

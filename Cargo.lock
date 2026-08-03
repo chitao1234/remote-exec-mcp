@@ -1576,7 +1576,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "remote-exec-admin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1587,7 +1587,7 @@ dependencies = [
 
 [[package]]
 name = "remote-exec-broker"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1627,7 +1627,7 @@ dependencies = [
 
 [[package]]
 name = "remote-exec-daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1663,7 +1663,7 @@ dependencies = [
 
 [[package]]
 name = "remote-exec-host"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1696,7 +1696,7 @@ dependencies = [
 
 [[package]]
 name = "remote-exec-pki"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "rcgen",
@@ -1711,7 +1711,7 @@ dependencies = [
 
 [[package]]
 name = "remote-exec-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1727,7 +1727,7 @@ dependencies = [
 
 [[package]]
 name = "remote-exec-test-support"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "remote-exec-pki",
  "remote-exec-proto",
@@ -1739,7 +1739,7 @@ dependencies = [
 
 [[package]]
 name = "remote-exec-util"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tracing-subscriber",
  "windows-sys 0.61.2",

@@ -39,7 +39,7 @@ pub fn build_app_state(config: ValidatedDaemonConfig) -> Result<AppState> {
 }
 
 pub fn target_info_response(state: &AppState) -> TargetInfoResponse {
-    remote_exec_host::target_info_response(state, env!("CARGO_PKG_VERSION"))
+    remote_exec_host::target_info_response(state, env!("REMOTE_EXEC_BUILD_VERSION"))
 }
 
 pub async fn run_until<F>(config: ValidatedDaemonConfig, shutdown: F) -> Result<()>
