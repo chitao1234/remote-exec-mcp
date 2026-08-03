@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <sstream>
 #include <stdexcept>
@@ -12,6 +13,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+
+#include "platform/win32_error.h"
 #endif
 #ifndef _WIN32
 #include <unistd.h>
@@ -22,6 +25,7 @@
 #include "platform/path_utils.h"
 #include "platform/platform.h"
 #include "platform/scoped_file.h"
+#include "policy/filesystem_sandbox.h"
 #include "policy/path_policy.h"
 
 namespace {
@@ -95,6 +99,32 @@ struct NormalizedPathPrefix {
     std::string value;
     std::size_t start;
 };
+
+std::string action_description(const PatchAction& action) {
+    if (action.kind == PatchKind::Add) {
+        return "add `" + action.path + "`";
+    }
+    if (action.kind == PatchKind::Delete) {
+        return "delete `" + action.path + "`";
+    }
+    if (!action.move_to.empty()) {
+        return "move `" + action.path + "` to `" + action.move_to + "`";
+    }
+    return "update `" + action.path + "`";
+}
+
+std::string action_description(const PlannedAction& action) {
+    if (action.kind == PatchKind::Add) {
+        return "add `" + action.summary_path + "`";
+    }
+    if (action.kind == PatchKind::Delete) {
+        return "delete `" + action.summary_path + "`";
+    }
+    if (action.remove_source) {
+        return "move `" + action.source_path + "` to `" + action.destination_path + "`";
+    }
+    return "update `" + action.summary_path + "`";
+}
 
 std::string unique_atomic_write_temp_path(const std::string& path) {
     static std::atomic<unsigned long> next_suffix(1UL);
@@ -242,10 +272,22 @@ bool paths_equal(const std::string& left, const std::string& right) {
     return syntax_eq_for_policy(host_path_policy(), left, right);
 }
 
+std::string system_error_detail() {
+#ifdef _WIN32
+    const unsigned long error = GetLastError();
+    return error_message_from_code("file operation", error);
+#else
+    const int error = errno;
+    std::ostringstream out;
+    out << std::strerror(error) << " (errno " << error << ")";
+    return out.str();
+#endif
+}
+
 std::string read_text_file(const std::string& path) {
     ScopedFile input(path_utils::open_file(path, "rb"));
     if (!input.valid()) {
-        throw std::runtime_error("unable to read " + path);
+        throw std::runtime_error("unable to read " + path + ": " + system_error_detail());
     }
     std::string text;
     char buffer[8192];
@@ -256,7 +298,7 @@ std::string read_text_file(const std::string& path) {
         }
         if (received < sizeof(buffer)) {
             if (std::ferror(input.get()) != 0) {
-                throw std::runtime_error("unable to read " + path);
+                throw std::runtime_error("unable to read " + path + ": " + system_error_detail());
             }
             break;
         }
@@ -272,30 +314,34 @@ void write_text_atomic(const std::string& path, const std::string& content) {
 
     ScopedFile output(path_utils::open_file(temp_path, "wb"));
     if (!output.valid()) {
-        throw std::runtime_error("unable to write " + temp_path);
+        throw std::runtime_error("unable to write " + temp_path + ": " + system_error_detail());
     }
     if (!content.empty()
         && !stdio_retry::fwrite_all(output.get(), content.data(), content.size())) {
-        throw std::runtime_error("unable to write " + temp_path);
+        throw std::runtime_error("unable to write " + temp_path + ": " + system_error_detail());
     }
     if (output.close() != 0) {
-        throw std::runtime_error("unable to write " + temp_path);
+        throw std::runtime_error("unable to write " + temp_path + ": " + system_error_detail());
     }
     if (preserve_mode && existing.has_mode_bits
         && !path_utils::set_path_mode(temp_path, existing.mode_bits)) {
         (void)path_utils::remove_path(temp_path);
-        throw std::runtime_error("unable to preserve mode for " + temp_path);
+        throw std::runtime_error(
+            "unable to preserve mode for " + temp_path + ": " + system_error_detail()
+        );
     }
 
     if (!path_utils::rename_path(temp_path, path)) {
         (void)path_utils::remove_path(temp_path);
-        throw std::runtime_error("unable to rename " + temp_path + " to " + path);
+        throw std::runtime_error(
+            "unable to rename " + temp_path + " to " + path + ": " + system_error_detail()
+        );
     }
 }
 
 void remove_file_required(const std::string& path) {
     if (!path_utils::remove_path(path)) {
-        throw std::runtime_error("unable to remove " + path);
+        throw std::runtime_error("unable to remove " + path + ": " + system_error_detail());
     }
 }
 
@@ -968,15 +1014,23 @@ std::vector<PlannedAction> plan_patch_actions(
 
     for (std::size_t i = 0; i < actions.size(); ++i) {
         const PatchAction& action = actions[i];
-        if (action.kind == PatchKind::Add) {
-            planned.push_back(plan_add_action(root, action, authorizer, &overlay));
-            continue;
+        try {
+            if (action.kind == PatchKind::Add) {
+                planned.push_back(plan_add_action(root, action, authorizer, &overlay));
+                continue;
+            }
+            if (action.kind == PatchKind::Delete) {
+                planned.push_back(plan_delete_action(root, action, authorizer, &overlay));
+                continue;
+            }
+            planned.push_back(plan_update_action(root, action, authorizer, &overlay));
+        } catch (const SandboxError& error) {
+            throw SandboxError("failed to " + action_description(action) + ": " + error.what());
+        } catch (const std::exception& error) {
+            throw std::runtime_error(
+                "failed to " + action_description(action) + ": " + error.what()
+            );
         }
-        if (action.kind == PatchKind::Delete) {
-            planned.push_back(plan_delete_action(root, action, authorizer, &overlay));
-            continue;
-        }
-        planned.push_back(plan_update_action(root, action, authorizer, &overlay));
     }
 
     return planned;
@@ -988,22 +1042,31 @@ std::vector<std::string> execute_planned_actions(const std::vector<PlannedAction
 
     for (std::size_t i = 0; i < actions.size(); ++i) {
         const PlannedAction& action = actions[i];
-        if (action.kind == PatchKind::Add) {
-            write_text_atomic(action.source_path, action.content);
-            summary.push_back("A " + action.summary_path);
-            continue;
-        }
-        if (action.kind == PatchKind::Delete) {
-            remove_file_required(action.source_path);
-            summary.push_back("D " + action.summary_path);
-            continue;
-        }
+        try {
+            if (action.kind == PatchKind::Add) {
+                write_text_atomic(action.source_path, action.content);
+                summary.push_back("A " + action.summary_path);
+                continue;
+            }
+            if (action.kind == PatchKind::Delete) {
+                remove_file_required(action.source_path);
+                summary.push_back("D " + action.summary_path);
+                continue;
+            }
 
-        write_text_atomic(action.destination_path, action.content);
-        if (action.remove_source && file_exists(action.source_path)) {
-            remove_file_required(action.source_path);
+            write_text_atomic(action.destination_path, action.content);
+            if (action.remove_source && file_exists(action.source_path)) {
+                remove_file_required(action.source_path);
+            }
+            summary.push_back("M " + action.summary_path);
+        } catch (const std::exception& error) {
+            const std::string message =
+                "failed to " + action_description(action) + ": " + error.what();
+            if (summary.empty()) {
+                throw std::runtime_error(message);
+            }
+            throw PatchApplyPartialError(message, summary);
         }
-        summary.push_back("M " + action.summary_path);
     }
 
     return summary;

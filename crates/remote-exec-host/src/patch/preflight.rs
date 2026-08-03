@@ -109,11 +109,27 @@ pub(super) async fn plan_actions(
     let mut planned = Vec::with_capacity(actions.len());
 
     for action in actions {
-        let action = plan_action(state, cwd, action, &mut overlay).await?;
+        let description = action_description(&action);
+        let action = plan_action(state, cwd, action, &mut overlay)
+            .await
+            .map_err(|error| error.with_context(format!("failed to {description}")))?;
         planned.push(action);
     }
 
     Ok(planned)
+}
+
+fn action_description(action: &PatchAction) -> String {
+    match action {
+        PatchAction::Add { path, .. } => format!("add `{}`", path.display()),
+        PatchAction::Delete { path } => format!("delete `{}`", path.display()),
+        PatchAction::Update {
+            path,
+            move_to: Some(destination),
+            ..
+        } => format!("move `{}` to `{}`", path.display(), destination.display()),
+        PatchAction::Update { path, .. } => format!("update `{}`", path.display()),
+    }
 }
 
 async fn plan_action(

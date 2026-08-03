@@ -1,9 +1,16 @@
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 
 #include "patch/patch_engine.h"
+
+#ifdef _WIN32
+#include <windows.h>
+
+#include "platform/win32_utf8.h"
+#endif
 
 namespace {
 
@@ -15,6 +22,48 @@ const char* const HELP =
     "Options:\n"
     "  -h, --help              Print this help text\n"
     "      --help-file <PATH>  With --help, print help text from PATH instead\n";
+
+void write_text(std::ostream& stream, const std::string& text, bool stderr_stream) {
+#ifdef _WIN32
+    const HANDLE handle = GetStdHandle(stderr_stream ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
+    DWORD console_mode = 0U;
+    if (handle != INVALID_HANDLE_VALUE && handle != nullptr
+        && GetConsoleMode(handle, &console_mode)) {
+        try {
+            const std::wstring wide = win32_utf8::wide_from_utf8(text);
+            std::size_t offset = 0U;
+            while (offset < wide.size()) {
+                const std::size_t remaining = wide.size() - offset;
+                const DWORD requested = static_cast<DWORD>(
+                    std::min<std::size_t>(remaining, static_cast<std::size_t>(0x7FFFFFFFU))
+                );
+                DWORD written = 0U;
+                if (WriteConsoleW(handle, wide.data() + offset, requested, &written, nullptr)
+                    == 0) {
+                    break;
+                }
+                offset += written;
+            }
+            if (offset == wide.size()) {
+                return;
+            }
+        } catch (const std::exception&) {
+        }
+    }
+#else
+    (void)stderr_stream;
+#endif
+    stream << text;
+    stream.flush();
+}
+
+void write_stdout(const std::string& text) {
+    write_text(std::cout, text, false);
+}
+
+void write_stderr(const std::string& text) {
+    write_text(std::cerr, text, true);
+}
 
 void print_file(const std::string& path) {
     std::ifstream input(path.c_str(), std::ios::in | std::ios::binary);
@@ -43,10 +92,18 @@ void print_inline_help_file(const std::string& argument) {
     print_file(path);
 }
 
+void print_partial_success(const std::vector<std::string>& updated_paths) {
+    std::string output = "Partial success. Updated the following files:\n";
+    for (std::size_t i = 0; i < updated_paths.size(); ++i) {
+        output += updated_paths[i] + '\n';
+    }
+    write_stdout(output);
+}
+
 int run(int argc, char* argv[]) {
     if (argc == 2 && is_help_argument(argv[1])) {
-        std::cout << HELP;
-        return std::cout ? 0 : 1;
+        write_stdout(HELP);
+        return 0;
     }
     if (argc == 4 && is_help_argument(argv[1]) && std::string(argv[2]) == "--help-file") {
         print_file(argv[3]);
@@ -78,8 +135,8 @@ int run(int argc, char* argv[]) {
         std::istreambuf_iterator<char>()
     );
     const PatchApplyResult result = apply_patch(".", patch);
-    std::cout << result.output;
-    return std::cout ? 0 : 1;
+    write_stdout(result.output);
+    return 0;
 }
 
 } // namespace
@@ -87,8 +144,12 @@ int run(int argc, char* argv[]) {
 int main(int argc, char* argv[]) {
     try {
         return run(argc, argv);
+    } catch (const PatchApplyPartialError& error) {
+        print_partial_success(error.updated_paths());
+        write_stderr(std::string("apply_patch: ") + error.what() + "\n");
+        return 1;
     } catch (const std::exception& error) {
-        std::cerr << "apply_patch: " << error.what() << "\n";
+        write_stderr(std::string("apply_patch: ") + error.what() + "\n");
         return 1;
     }
 }

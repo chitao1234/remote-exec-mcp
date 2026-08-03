@@ -36,6 +36,10 @@ APPLY_PATCH_CLI_SRCS = \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/policy/path_policy.cpp
 
+WINDOWS_APPLY_PATCH_CLI_SRCS = \
+	$(APPLY_PATCH_CLI_SRCS) \
+	$(WIN32_ERROR_SRCS)
+
 IMAGE_SRCS = $(SOURCE_PREFIX)src/image/image_ops.cpp
 
 CONFIG_SRCS = $(SOURCE_PREFIX)src/core/config.cpp

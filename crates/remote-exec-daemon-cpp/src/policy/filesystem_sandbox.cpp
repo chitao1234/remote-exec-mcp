@@ -480,9 +480,6 @@ CompiledSandboxPathList compile_list(SandboxAccess access, const SandboxPathList
 
 } // namespace
 
-SandboxError::SandboxError(const std::string& message) : std::runtime_error(message) {
-}
-
 CompiledFilesystemSandbox compile_filesystem_sandbox(const FilesystemSandbox& sandbox) {
     CompiledFilesystemSandbox compiled;
     compiled.exec_cwd = compile_list(SANDBOX_EXEC_CWD, source_list(sandbox, SANDBOX_EXEC_CWD));

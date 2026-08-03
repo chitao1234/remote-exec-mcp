@@ -15,6 +15,11 @@ standard input. `apply_patch --help` prints built-in usage; `apply_patch --help
 --help-file PATH` prints help text from `PATH` instead. Without `--help`,
 `--help-file PATH` is ignored.
 
+When standalone patch application fails, read stderr for the failed action and
+its underlying filesystem or patch-engine error. A `Partial success` stdout
+summary means earlier actions completed before a later runtime error; the tool
+still exits unsuccessfully.
+
 ## Mental Model
 
 - The broker exposes seven standard MCP tools: `remote_list_targets`,

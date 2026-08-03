@@ -110,6 +110,11 @@ macro_rules! define_domain_error {
                 }
             }
 
+            pub fn with_context(mut self, context: impl std::fmt::Display) -> Self {
+                self.message = format!("{context}: {}", self.message);
+                self
+            }
+
             fn into_host_rpc_error(self) -> HostRpcError {
                 let code = self.code();
                 let message = self.message;

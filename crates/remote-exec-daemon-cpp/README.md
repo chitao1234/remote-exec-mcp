@@ -287,7 +287,12 @@ Every GNU Windows and MSVC daemon build also emits an `apply_patch-<variant>.exe
 alongside its daemon binary. The standalone tool reads a Codex-style patch from
 standard input. `--help` prints built-in usage; `--help --help-file PATH`
 prints help text from `PATH` instead. Without `--help`, `--help-file PATH` is
-ignored.
+ignored. Errors name the failed action and include the underlying patch-engine
+or filesystem error. If an execution error happens after earlier actions
+complete, the tool prints `Partial success` with those completed actions before
+exiting unsuccessfully. On Windows, these built-in success and error messages
+are written through the Unicode console API when attached to a console, while
+redirected output remains UTF-8.
 
 Example:
 

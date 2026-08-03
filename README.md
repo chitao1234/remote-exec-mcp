@@ -358,6 +358,11 @@ port forwards require a long-running broker, so prefer `--broker-url` for
   preflight
 - can use experimental target encoding autodetection when enabled in config
 
+Standalone `apply_patch` executables print the action and underlying filesystem
+or patch-engine error to stderr. If a runtime write/remove error occurs after
+earlier actions complete, stdout reports `Partial success` and lists those
+completed actions; the process still exits unsuccessfully.
+
 Default-hidden file tools:
 
 - `remote_read` reads one text file and returns text output only

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use remote_exec_host::{
     HostPortForwardLimits, HostRuntimeConfig, ProcessEnvironment, PtyMode, YieldTimeConfig,
-    build_runtime_state,
+    build_runtime_state, patch::PatchApplyFailure,
 };
 use remote_exec_proto::rpc::PatchApplyRequest;
 use remote_exec_proto::transfer::TransferLimits;
@@ -26,14 +26,31 @@ Options:
 async fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()).await {
         Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
+        Err(CliError::Failure(error)) => {
             let _ = writeln!(io::stderr(), "apply_patch: {error}");
+            ExitCode::FAILURE
+        }
+        Err(CliError::PartialFailure(failure)) => {
+            print_partial_success(&failure.updated_paths);
+            let _ = writeln!(io::stderr(), "apply_patch: {}", failure.error.message);
             ExitCode::FAILURE
         }
     }
 }
 
-async fn run(args: Vec<OsString>) -> anyhow::Result<()> {
+#[derive(Debug)]
+enum CliError {
+    Failure(anyhow::Error),
+    PartialFailure(PatchApplyFailure),
+}
+
+impl From<anyhow::Error> for CliError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Failure(error)
+    }
+}
+
+async fn run(args: Vec<OsString>) -> Result<(), CliError> {
     if let Some(help_path) = parse_help_request(&args)? {
         let help = match help_path {
             Some(path) => std::fs::read_to_string(&path).map_err(|error| {
@@ -50,8 +67,9 @@ async fn run(args: Vec<OsString>) -> anyhow::Result<()> {
         .read_to_string(&mut patch)
         .map_err(|error| anyhow::anyhow!("reading patch from standard input: {error}"))?;
 
-    let state = Arc::new(build_runtime_state(local_config(env::current_dir()?))?);
-    let response = remote_exec_host::patch::apply_patch_local(
+    let workdir = env::current_dir().map_err(anyhow::Error::from)?;
+    let state = Arc::new(build_runtime_state(local_config(workdir))?);
+    let response = remote_exec_host::patch::apply_patch_local_detailed(
         state,
         PatchApplyRequest {
             patch,
@@ -59,9 +77,22 @@ async fn run(args: Vec<OsString>) -> anyhow::Result<()> {
         },
     )
     .await
-    .map_err(|error| anyhow::anyhow!(error.message))?;
+    .map_err(|failure| {
+        if failure.updated_paths.is_empty() {
+            CliError::Failure(anyhow::anyhow!(failure.error.message))
+        } else {
+            CliError::PartialFailure(failure)
+        }
+    })?;
     print!("{}", response.output);
     Ok(())
+}
+
+fn print_partial_success(updated_paths: &[String]) {
+    print!(
+        "Partial success. Updated the following files:\n{}\n",
+        updated_paths.join("\n")
+    );
 }
 
 fn parse_help_request(args: &[OsString]) -> anyhow::Result<Option<Option<PathBuf>>> {
