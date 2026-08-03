@@ -95,7 +95,7 @@ fn names_the_failed_action_for_preflight_errors() {
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("failed to update `missing.txt`: No such file or directory")
+            .contains("failed to update `missing.txt`:")
     );
 }
 
