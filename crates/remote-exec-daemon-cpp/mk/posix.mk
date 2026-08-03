@@ -3,6 +3,8 @@ STRESS_RUNS ?= 10
 STRESS_JOBS ?= 8
 
 POSIX_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp
+POSIX_APPLY_PATCH_TARGET := $(BUILD_DIR)/apply_patch
+POSIX_APPLY_PATCH_TEST_SCRIPT := $(MAKEFILE_DIR)tests/test_apply_patch_cli.sh
 POSIX_CONFIG_HEADER := $(BUILD_DIR)/generated/remote_exec_cpp_config.h
 POSIX_CONFIG_SCRIPT := $(MAKEFILE_DIR)scripts/write_posix_config_header.sh
 POSIX_FEATURE_CPPFLAGS_SCRIPT := $(MAKEFILE_DIR)scripts/print_posix_feature_cppflags.sh
@@ -47,9 +49,11 @@ $(foreach test,$(HOST_POSIX_TESTS),$(eval HOST_$(test) := $(BUILD_DIR)/$(HOST_$(
 HOST_TEST_PHONY_TARGETS := $(foreach test,$(HOST_POSIX_TESTS),$(HOST_$(test)_TEST_TARGET))
 
 POSIX_OBJS := $(sort $(call cpp_objs,$(HOST_PROD_OBJ_DIR),$(POSIX_SRCS)))
+POSIX_APPLY_PATCH_OBJS := $(sort $(call cpp_objs,$(HOST_PROD_OBJ_DIR),$(APPLY_PATCH_CLI_SRCS)))
 $(foreach test,$(HOST_POSIX_TESTS),$(eval HOST_$(test)_OBJS := $(sort $(call cpp_objs,$(HOST_TEST_OBJ_DIR),$(HOST_$(test)_SRCS)))))
 
 DEP_FILES += $(POSIX_OBJS:.o=.d)
+DEP_FILES += $(POSIX_APPLY_PATCH_OBJS:.o=.d)
 $(foreach test,$(HOST_POSIX_TESTS),$(eval DEP_FILES += $(patsubst %.o,%.d,$(HOST_$(test)_OBJS))))
 
 define link_host_test
@@ -63,9 +67,15 @@ $(eval $(call run_test,$(HOST_$(1)_TEST_TARGET),$(HOST_$(1))))
 $(eval $(call link_host_test,$(HOST_$(1)),$(HOST_$(1)_OBJS)))
 endef
 
-all-posix: $(POSIX_TARGET)
+all-posix: $(POSIX_TARGET) $(POSIX_APPLY_PATCH_TARGET)
+
+apply-patch-posix: $(POSIX_APPLY_PATCH_TARGET)
 
 $(POSIX_TARGET): $(POSIX_OBJS)
+	mkdir -p $(dir $@)
+	$(HOST_CXX) $(HOST_PROD_CXXFLAGS) $(HOST_PROD_LDFLAGS) -o $@ $^ $(HOST_PROD_LDLIBS)
+
+$(POSIX_APPLY_PATCH_TARGET): $(POSIX_APPLY_PATCH_OBJS)
 	mkdir -p $(dir $@)
 	$(HOST_CXX) $(HOST_PROD_CXXFLAGS) $(HOST_PROD_LDFLAGS) -o $@ $^ $(HOST_PROD_LDLIBS)
 
@@ -90,7 +100,10 @@ $(foreach test,$(HOST_POSIX_TESTS),$(call register_host_test,$(test)))
 
 test-server-streaming: $(HOST_SERVER_STREAMING_TEST_TARGET)
 
-check-posix: $(HOST_TEST_PHONY_TARGETS) all-posix
+check-posix: $(HOST_TEST_PHONY_TARGETS) test-host-apply-patch-cli all-posix
+
+test-host-apply-patch-cli: $(POSIX_APPLY_PATCH_TARGET) $(POSIX_APPLY_PATCH_TEST_SCRIPT)
+	sh $(POSIX_APPLY_PATCH_TEST_SCRIPT) $(POSIX_APPLY_PATCH_TARGET)
 
 force-posix-config:
 
@@ -102,4 +115,4 @@ stress-posix:
 		i=$$((i + 1)); \
 	done
 
-.PHONY: all-posix $(HOST_TEST_PHONY_TARGETS) test-server-streaming check-posix force-posix-config stress-posix
+.PHONY: all-posix apply-patch-posix $(HOST_TEST_PHONY_TARGETS) test-host-apply-patch-cli test-server-streaming check-posix force-posix-config stress-posix

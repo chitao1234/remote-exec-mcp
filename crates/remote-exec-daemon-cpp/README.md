@@ -128,6 +128,7 @@ Common targets:
 | Task | Command |
 | --- | --- |
 | Build POSIX daemon | `make` or `make all-posix` |
+| Build POSIX standalone patch CLI | `make apply-patch-posix` |
 | Test POSIX daemon | `make check` or `make check-posix` |
 | Stress POSIX lifecycle tests | `make STRESS_RUNS=10 STRESS_JOBS=8 stress-posix` |
 | Build all GNU Windows variants | `make all-windows` plus the controls below |
@@ -136,6 +137,10 @@ Common targets:
 | Test BSD make POSIX path | `bmake check-posix` |
 | Test MSVC native | `nmake /f NMakefile check-msvc-native` |
 | Test MSVC XP-compatible | `nmake /f NMakefile check-msvc-xp` |
+
+For direct standalone builds, use `make apply-patch-windows` with the same GNU
+Windows controls as the daemon, or `nmake /f NMakefile apply-patch-msvc-native`
+or `nmake /f NMakefile apply-patch-msvc-xp` for the selected MSVC target.
 
 GNU Windows controls:
 
@@ -265,6 +270,7 @@ Use `config/daemon-cpp.example.ini` as the starting config. The configured
 | Build | Binary |
 | --- | --- |
 | POSIX | `build/remote-exec-daemon-cpp` |
+| POSIX standalone patch CLI | `build/apply_patch` |
 | GNU Windows XP/Winsock 2 | `build\remote-exec-daemon-cpp-xp-ws2-tls-openssl.exe` |
 | GNU Windows x64 XP/Winsock 2 | `build\remote-exec-daemon-cpp-x64-xp-ws2-tls-openssl.exe` |
 | GNU Windows 2000/Winsock 2 | `build\remote-exec-daemon-cpp-2000-ws2.exe` |
@@ -276,6 +282,11 @@ Use `config/daemon-cpp.example.ini` as the starting config. The configured
 | GNU Windows 9x/Me Winsock 2 ANSI | `build\remote-exec-daemon-cpp-9x-ws2-ansi.exe` |
 | GNU Windows NT 4.0 Winsock 2 | `build\remote-exec-daemon-cpp-nt4-ws2.exe` |
 | MSVC XP-compatible | `build\msvc-xp\remote-exec-daemon-cpp-xp-msvc-tls-openssl.exe` |
+
+Every GNU Windows and MSVC daemon build also emits an `apply_patch-<variant>.exe`
+alongside its daemon binary. The standalone tool reads a Codex-style patch from
+standard input. `--help` prints built-in usage; `--help-file PATH` prints help
+text from `PATH` instead.
 
 Example:
 

@@ -90,13 +90,18 @@ HOST_TEST_LINK = ${HOST_CXX} ${HOST_TEST_CXXFLAGS} ${HOST_TEST_LDFLAGS} -o ${.TA
 HOST_PROD_OBJ_DIR = ${OBJ_DIR}/host-prod-${POSIX_TLS}
 HOST_TEST_OBJ_DIR = ${OBJ_DIR}/host-test-${POSIX_TLS}
 POSIX_TARGET = ${BUILD_DIR}/remote-exec-daemon-cpp
+POSIX_APPLY_PATCH_TARGET = ${BUILD_DIR}/apply_patch
+POSIX_APPLY_PATCH_TEST_SCRIPT = ${MAKEFILE_DIR}tests/test_apply_patch_cli.sh
 
 SOURCE_PREFIX =
 .include "${MAKEFILE_DIR}mk/sources.mk"
 .include "${MAKEFILE_DIR}mk/host-tests.mk"
 
 POSIX_OBJS = ${POSIX_SRCS:C|^|${HOST_PROD_OBJ_DIR}/|:S|.cpp|.o|:O:u}
+POSIX_APPLY_PATCH_OBJS = ${APPLY_PATCH_CLI_SRCS:C|^|${HOST_PROD_OBJ_DIR}/|:S|.cpp|.o|:O:u}
+POSIX_PROD_COMPILE_SRCS = ${POSIX_SRCS} ${APPLY_PATCH_CLI_SRCS}
 DEP_FILES = ${POSIX_OBJS:S|.o|.d|}
+DEP_FILES += ${POSIX_APPLY_PATCH_OBJS:S|.o|.d|}
 
 .for test in ${HOST_POSIX_TESTS}
 HOST_${test} = ${BUILD_DIR}/${HOST_${test}_BIN}
@@ -110,11 +115,13 @@ HOST_TEST_COMPILE_SRCS = ${HOST_TEST_SRCS:O:u}
 
 all: all-posix
 
-all-posix: ${POSIX_TARGET}
+all-posix: ${POSIX_TARGET} ${POSIX_APPLY_PATCH_TARGET}
+
+apply-patch-posix: ${POSIX_APPLY_PATCH_TARGET}
 
 check: check-posix
 
-check-posix: ${HOST_TEST_PHONY_TARGETS} all-posix
+check-posix: ${HOST_TEST_PHONY_TARGETS} test-host-apply-patch-cli all-posix
 
 force-posix-config:
 
@@ -128,12 +135,19 @@ stress-posix:
 
 test-server-streaming: ${HOST_SERVER_STREAMING_TEST_TARGET}
 
+test-host-apply-patch-cli: ${POSIX_APPLY_PATCH_TARGET} ${POSIX_APPLY_PATCH_TEST_SCRIPT}
+	sh ${POSIX_APPLY_PATCH_TEST_SCRIPT} ${POSIX_APPLY_PATCH_TARGET}
+
 .for test in ${HOST_POSIX_TESTS}
 ${HOST_${test}_TEST_TARGET}: ${HOST_${test}}
 	${TEST_LOG_ENV} ${HOST_${test}}
 .endfor
 
 ${POSIX_TARGET}: ${POSIX_OBJS}
+	mkdir -p ${.TARGET:H}
+	${HOST_CXX} ${HOST_PROD_CXXFLAGS} ${HOST_PROD_LDFLAGS} -o ${.TARGET} ${.ALLSRC} ${HOST_PROD_LDLIBS}
+
+${POSIX_APPLY_PATCH_TARGET}: ${POSIX_APPLY_PATCH_OBJS}
 	mkdir -p ${.TARGET:H}
 	${HOST_CXX} ${HOST_PROD_CXXFLAGS} ${HOST_PROD_LDFLAGS} -o ${.TARGET} ${.ALLSRC} ${HOST_PROD_LDLIBS}
 
@@ -152,7 +166,7 @@ ${HOST_${test}}: ${HOST_${test}_OBJS}
 	${HOST_TEST_LINK}
 .endfor
 
-.for src in ${POSIX_SRCS}
+.for src in ${POSIX_PROD_COMPILE_SRCS:O:u}
 ${HOST_PROD_OBJ_DIR}/${src:S|.cpp|.o|}: ${src} ${POSIX_CONFIG_HEADER}
 	mkdir -p ${.TARGET:H}
 	${HOST_CXX} ${HOST_PROD_CPPFLAGS} ${HOST_PROD_CXXFLAGS} ${DEPFLAGS} -c -o ${.TARGET} ${src}
@@ -171,5 +185,5 @@ ${HOST_TEST_OBJ_DIR}/${src:S|.cpp|.o|}: ${src} ${POSIX_CONFIG_HEADER}
 clean:
 	rm -rf ${BUILD_DIR}
 
-.PHONY: all all-posix check check-posix clean force-posix-config stress-posix test-server-streaming \
+.PHONY: all all-posix apply-patch-posix check check-posix clean force-posix-config stress-posix test-host-apply-patch-cli test-server-streaming \
 	${HOST_TEST_PHONY_TARGETS}

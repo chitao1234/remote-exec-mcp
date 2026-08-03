@@ -28,6 +28,14 @@ TRANSFER_WIRE_SRCS = $(SOURCE_PREFIX)src/rpc/transfer_wire.cpp
 
 PATCH_SRCS = $(SOURCE_PREFIX)src/patch/patch_engine.cpp
 
+APPLY_PATCH_CLI_SRCS = \
+	$(SOURCE_PREFIX)src/apply_patch_main.cpp \
+	$(PATCH_SRCS) \
+	$(PLATFORM_SRCS) \
+	$(TEXT_UTILS_SRCS) \
+	$(PATH_UTILS_SRCS) \
+	$(SOURCE_PREFIX)src/policy/path_policy.cpp
+
 IMAGE_SRCS = $(SOURCE_PREFIX)src/image/image_ops.cpp
 
 CONFIG_SRCS = $(SOURCE_PREFIX)src/core/config.cpp
