@@ -10,10 +10,39 @@ pub fn init_compact_stderr_logging(log_env: &str, default_filter: &str) {
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
         .with_writer(std::io::stderr)
-        .with_ansi(std::io::stderr().is_terminal())
+        .with_ansi(stderr_supports_ansi())
         .with_target(true)
         .compact()
         .init();
+}
+
+fn stderr_supports_ansi() -> bool {
+    std::io::stderr().is_terminal() && enable_windows_virtual_terminal_processing()
+}
+
+#[cfg(not(windows))]
+fn enable_windows_virtual_terminal_processing() -> bool {
+    true
+}
+
+#[cfg(windows)]
+fn enable_windows_virtual_terminal_processing() -> bool {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::Console::{
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, SetConsoleMode,
+    };
+
+    let stderr = std::io::stderr();
+    let handle = stderr.as_raw_handle();
+    let mut mode = 0;
+
+    unsafe {
+        if GetConsoleMode(handle, &mut mode) == 0 {
+            return false;
+        }
+
+        SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0
+    }
 }
 
 pub fn preview_text(raw: &str, limit: usize) -> String {

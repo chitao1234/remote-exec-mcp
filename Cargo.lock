@@ -1742,6 +1742,7 @@ name = "remote-exec-util"
 version = "0.1.0"
 dependencies = [
  "tracing-subscriber",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
