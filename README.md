@@ -86,6 +86,7 @@ Default-hidden file tools are available only when explicitly enabled under
 | --- | --- |
 | `remote-exec-broker` | Public MCP server over stdio or streamable HTTP. It validates targets, routes calls, owns public `session_id` and `forward_id` namespaces, and can use the broker host as `local`. |
 | `remote-exec` | CLI client built from the broker crate. It can run against a config in-process or a streamable-HTTP broker. |
+| `apply_patch` | Standalone local CLI built from `remote-exec-host`. It reads a Codex-style patch from standard input. `--help` prints built-in usage, while `--help-file PATH` prints the supplied help file. |
 | `remote-exec-daemon` | Rust per-machine daemon. It supports mutual TLS by default, optional plain HTTP, exec, patch, image, transfer, sandbox checks, and v4 port-forward tunnels. |
 | `remote-exec-host` | Shared Rust host runtime reused by the Rust daemon and broker-host `local` behavior. |
 | `remote-exec-daemon-cpp` | Standalone C++11 daemon with optional OpenSSL mTLS, explicit plain HTTP, and POSIX and legacy Windows build paths. |

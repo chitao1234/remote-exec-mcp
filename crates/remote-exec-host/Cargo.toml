@@ -35,6 +35,10 @@ uuid = { workspace = true }
 vte = { workspace = true }
 zstd = { workspace = true }
 
+[[bin]]
+name = "apply_patch"
+path = "src/bin/apply_patch.rs"
+
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
 
