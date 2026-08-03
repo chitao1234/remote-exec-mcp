@@ -274,7 +274,7 @@ async fn apply_patch_runs_against_enabled_local_target() {
 }
 
 #[tokio::test]
-async fn apply_patch_local_target_preflights_later_failures_before_mutation() {
+async fn apply_patch_local_target_preserves_earlier_updates_after_later_failure() {
     let fixture = support::spawners::spawn_broker_with_local_target().await;
     let workdir = fixture.local_workdir();
     let path = workdir.join("first.txt");
@@ -299,10 +299,10 @@ async fn apply_patch_local_target_preflights_later_failures_before_mutation() {
         )
         .await;
 
-    assert!(result.is_error, "expected preflight error");
+    assert!(result.is_error, "expected patch error");
     assert!(result.text_output.contains(" tool=remote_apply_patch "));
     assert!(result.text_output.contains(" target=local: "));
-    assert_eq!(std::fs::read_to_string(path).unwrap(), "before\n");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "after\n");
 }
 
 #[tokio::test]

@@ -352,10 +352,12 @@ port forwards require a long-running broker, so prefer `--broker-url` for
   patch control lines
 - accepts `*** Environment ID: <id>` as metadata returned by the daemon; it
   never overrides the explicitly selected `target`
-- preflights deterministic failures such as sandbox denial, missing files,
-  non-file targets, decode failures, and unmatched hunks before writing
-- remains non-transactional for runtime races and write/remove failures after
-  preflight
+- parses the complete patch before writing; malformed patches make no changes
+- executes valid patch actions sequentially and is non-transactional across
+  actions, so a later filesystem, sandbox, decode, or hunk-match failure can
+  leave earlier actions applied
+- atomically replaces the target for a normal in-place `*** Update File` action,
+  so all of that action's hunks apply or its original file remains unchanged
 - can use experimental target encoding autodetection when enabled in config
 
 Standalone `apply_patch` executables print the action and underlying filesystem

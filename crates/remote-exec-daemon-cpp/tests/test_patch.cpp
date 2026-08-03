@@ -390,7 +390,7 @@ int main() {
                                       "*** End Patch\n";
 
     expect_patch_failure(root, partial_patch);
-    TEST_ASSERT(read_text(root / "partial-first.txt") == "before\n");
+    TEST_ASSERT(read_text(root / "partial-first.txt") == "after\n");
 
     write_text(root / "partial-dir-first.txt", "before\n");
     fs::create_directories(root / "partial-dir");
@@ -403,7 +403,7 @@ int main() {
                                           "*** End Patch\n";
 
     expect_patch_failure(root, partial_dir_patch);
-    TEST_ASSERT(read_text(root / "partial-dir-first.txt") == "before\n");
+    TEST_ASSERT(read_text(root / "partial-dir-first.txt") == "after\n");
 
     write_text(root / "partial-hunk-first.txt", "before\n");
     write_text(root / "partial-hunk-second.txt", "unchanged\n");
@@ -419,7 +419,7 @@ int main() {
                                            "*** End Patch\n";
 
     expect_patch_failure(root, partial_hunk_patch);
-    TEST_ASSERT(read_text(root / "partial-hunk-first.txt") == "before\n");
+    TEST_ASSERT(read_text(root / "partial-hunk-first.txt") == "after\n");
     TEST_ASSERT(read_text(root / "partial-hunk-second.txt") == "unchanged\n");
 
     write_text(root / "partial-parent-first.txt", "before\n");
@@ -434,7 +434,7 @@ int main() {
                                              "*** End Patch\n";
 
     expect_patch_failure(root, partial_parent_patch);
-    TEST_ASSERT(read_text(root / "partial-parent-first.txt") == "before\n");
+    TEST_ASSERT(read_text(root / "partial-parent-first.txt") == "after\n");
     TEST_ASSERT(!fs::exists(root / "partial-blocked" / "child.txt"));
 
     const std::string add_then_update_patch = "*** Begin Patch\n"

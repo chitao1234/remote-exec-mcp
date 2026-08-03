@@ -207,12 +207,12 @@ Guidance:
   `*** End of File`, and Unicode whitespace around patch control lines are accepted.
 - `*** Environment ID: <id>` is accepted and retained in daemon response metadata;
   it does not override the explicit `target` argument.
-- `remote_apply_patch` preflights deterministic failures before writing, including
-  missing files, non-file targets, sandbox denial, decode failures, and
-  unmatched hunks.
-- Multi-file patches are still not transactional for runtime races or
-  write/remove failures after preflight. If that residual partial-application
-  risk would be hard to recover from, split the patch.
+- `remote_apply_patch` parses the complete patch before writing, so malformed
+  patch syntax makes no changes.
+- Valid actions execute in order and are non-transactional across files: a later
+  filesystem, sandbox, decode, or hunk-match failure can leave earlier actions
+  applied. A normal in-place `*** Update File` action atomically replaces its
+  target after all of its hunks apply successfully.
 - Successful calls return text output only.
 
 ### Hidden `remote_read`, `remote_write`, `remote_edit`

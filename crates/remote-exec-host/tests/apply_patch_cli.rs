@@ -72,7 +72,7 @@ fn help_file_without_help_is_ignored() {
 }
 
 #[test]
-fn names_the_failed_action_for_preflight_errors() {
+fn names_the_failed_action_for_patch_errors() {
     let tempdir = tempfile::tempdir().unwrap();
     let patch = "*** Begin Patch\n*** Update File: missing.txt\n@@\n-old\n+new\n*** End Patch\n";
 

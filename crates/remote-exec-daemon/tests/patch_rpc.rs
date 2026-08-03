@@ -43,6 +43,33 @@ async fn add_file_overwrites_existing_content() {
 }
 
 #[tokio::test]
+async fn malformed_patch_does_not_apply_earlier_actions() {
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+    let path = fixture.workdir.join("first.txt");
+    tokio::fs::write(&path, "before\n").await.unwrap();
+
+    let err = fixture
+        .rpc_error(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: first.txt\n",
+                    "@@\n",
+                    "-before\n",
+                    "+after\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(err.wire_code(), "patch_failed");
+    assert_eq!(tokio::fs::read_to_string(path).await.unwrap(), "before\n");
+}
+
+#[tokio::test]
 async fn apply_patch_accepts_codex_parser_tolerances() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
@@ -646,7 +673,7 @@ async fn update_file_rejects_eof_pure_addition_when_context_is_missing() {
 }
 
 #[tokio::test]
-async fn later_missing_delete_target_is_preflighted_before_any_mutation() {
+async fn later_missing_delete_target_preserves_earlier_updates() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
@@ -676,12 +703,12 @@ async fn later_missing_delete_target_is_preflighted_before_any_mutation() {
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
             .unwrap(),
-        "before\n",
+        "after\n",
     );
 }
 
 #[tokio::test]
-async fn later_delete_directory_target_is_preflighted_before_any_mutation() {
+async fn later_delete_directory_target_preserves_earlier_updates() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
@@ -714,12 +741,12 @@ async fn later_delete_directory_target_is_preflighted_before_any_mutation() {
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
             .unwrap(),
-        "before\n",
+        "after\n",
     );
 }
 
 #[tokio::test]
-async fn later_non_utf8_update_source_is_preflighted_before_any_mutation() {
+async fn later_non_utf8_update_source_preserves_earlier_updates() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
@@ -755,12 +782,12 @@ async fn later_non_utf8_update_source_is_preflighted_before_any_mutation() {
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
             .unwrap(),
-        "before\n",
+        "after\n",
     );
 }
 
 #[tokio::test]
-async fn later_non_utf8_delete_source_is_preflighted_before_any_mutation() {
+async fn later_binary_delete_runs_after_earlier_updates() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
@@ -769,8 +796,8 @@ async fn later_non_utf8_delete_source_is_preflighted_before_any_mutation() {
         .await
         .unwrap();
 
-    let err = fixture
-        .rpc_error(
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
             "/v1/patch/apply",
             &PatchApplyRequest {
                 patch: concat!(
@@ -788,12 +815,18 @@ async fn later_non_utf8_delete_source_is_preflighted_before_any_mutation() {
         )
         .await;
 
-    assert_eq!(err.wire_code(), "patch_failed");
+    assert!(response.output.contains("M first.txt"));
+    assert!(response.output.contains("D binary.txt"));
     assert_eq!(
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
             .unwrap(),
-        "before\n",
+        "after\n",
+    );
+    assert!(
+        tokio::fs::metadata(fixture.workdir.join("binary.txt"))
+            .await
+            .is_err()
     );
 }
 
@@ -1005,7 +1038,7 @@ async fn add_file_overwrite_preserves_utf16le_target_encoding_when_enabled() {
 }
 
 #[tokio::test]
-async fn later_parent_file_conflict_is_preflighted_before_any_mutation() {
+async fn later_parent_file_conflict_preserves_earlier_updates() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
@@ -1039,7 +1072,7 @@ async fn later_parent_file_conflict_is_preflighted_before_any_mutation() {
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
             .unwrap(),
-        "before\n",
+        "after\n",
     );
     assert!(std::fs::metadata(fixture.workdir.join("blocked/second.txt")).is_err());
 }
@@ -1079,7 +1112,7 @@ async fn add_then_update_same_file_uses_planned_content() {
 }
 
 #[tokio::test]
-async fn update_then_delete_same_file_preflights_against_planned_update() {
+async fn update_then_delete_same_file_runs_sequentially() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     tokio::fs::write(fixture.workdir.join("planned.txt"), "before\n")
         .await
@@ -1305,7 +1338,7 @@ allow = {allow}
 }
 
 #[tokio::test]
-async fn later_sandbox_denial_is_preflighted_before_any_mutation() {
+async fn later_sandbox_denial_preserves_earlier_updates() {
     let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
         DEFAULT_TEST_TARGET,
         |workdir| {
@@ -1346,7 +1379,7 @@ allow = {allow}
         tokio::fs::read_to_string(fixture.workdir.join("visible/first.txt"))
             .await
             .unwrap(),
-        "before\n"
+        "after\n"
     );
     assert!(
         tokio::fs::metadata(fixture.workdir.join("blocked/nope.txt"))

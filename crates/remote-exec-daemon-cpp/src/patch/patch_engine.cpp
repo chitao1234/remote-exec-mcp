@@ -1080,8 +1080,22 @@ PatchApplyResult apply_patch(
     const PatchPathAuthorizer& authorizer
 ) {
     const ParsedPatch parsed = parse_patch(patch_text);
-    const std::vector<PlannedAction> planned = plan_patch_actions(root, parsed.actions, authorizer);
-    const std::vector<std::string> summary = execute_planned_actions(planned);
+    std::vector<std::string> summary;
+    summary.reserve(parsed.actions.size());
+
+    for (std::size_t i = 0; i < parsed.actions.size(); ++i) {
+        try {
+            const std::vector<PatchAction> action(1U, parsed.actions[i]);
+            const std::vector<PlannedAction> planned = plan_patch_actions(root, action, authorizer);
+            const std::vector<std::string> updated = execute_planned_actions(planned);
+            summary.insert(summary.end(), updated.begin(), updated.end());
+        } catch (const std::exception& error) {
+            if (summary.empty()) {
+                throw;
+            }
+            throw PatchApplyPartialError(error.what(), summary);
+        }
+    }
 
     std::ostringstream out;
     out << "Success. Updated the following files:\n";
