@@ -30,7 +30,7 @@ where
 pub(super) fn open_archive_reader(
     archive_path: &Path,
     compression: &TransferCompression,
-) -> anyhow::Result<Box<dyn Read>> {
+) -> anyhow::Result<Box<dyn Read + Send>> {
     let file = std::fs::File::open(archive_path)?;
     wrap_archive_reader(file, compression)
 }
@@ -38,9 +38,9 @@ pub(super) fn open_archive_reader(
 pub(super) fn wrap_archive_reader<R>(
     reader: R,
     compression: &TransferCompression,
-) -> anyhow::Result<Box<dyn Read>>
+) -> anyhow::Result<Box<dyn Read + Send>>
 where
-    R: Read + 'static,
+    R: Read + Send + 'static,
 {
     match compression {
         TransferCompression::None => Ok(Box::new(reader)),

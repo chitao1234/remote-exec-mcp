@@ -6,12 +6,14 @@ use remote_exec_proto::{rpc::TransferWarning, transfer::TransferSourceType};
 
 use crate::error::TransferError;
 
-use super::super::codec::{open_archive_reader, with_archive_builder};
+use super::super::codec::{
+    open_archive_reader, with_archive_builder, with_archive_writer, wrap_archive_reader,
+};
 use super::super::entry::{ensure_supported_archive_entry_type, normalize_archive_entry_path};
 use super::super::summary::{
     append_transfer_summary, is_transfer_summary_path, read_transfer_summary,
 };
-use super::super::{BundledArchiveSource, SINGLE_FILE_ENTRY};
+use super::super::{BundledArchiveReaderSource, BundledArchiveSource, SINGLE_FILE_ENTRY};
 
 pub(super) fn bundle_archives_to_file(
     sources: &[BundledArchiveSource],
@@ -28,9 +30,44 @@ pub(super) fn bundle_archives_to_file(
     })
 }
 
+pub(super) fn bundle_archives_to_writer<W>(
+    sources: Vec<BundledArchiveReaderSource>,
+    writer: W,
+    compression: &TransferCompression,
+) -> anyhow::Result<()>
+where
+    W: Write + Send + 'static,
+{
+    with_archive_writer(writer, compression, |builder| {
+        let mut warnings = Vec::new();
+        for source in sources {
+            warnings.extend(append_source_reader_to_bundle(builder, source)?);
+        }
+        append_transfer_summary(builder, &warnings)?;
+        Ok(())
+    })
+}
+
 fn append_source_archive<W: Write>(
     builder: &mut tar::Builder<W>,
     source: &BundledArchiveSource,
+) -> anyhow::Result<Vec<TransferWarning>> {
+    let reader = open_archive_reader(&source.archive_path, &source.compression)?;
+    append_source_reader_to_bundle(
+        builder,
+        BundledArchiveReaderSource {
+            source_path: source.source_path.clone(),
+            source_policy: source.source_policy,
+            source_type: source.source_type,
+            compression: source.compression,
+            reader,
+        },
+    )
+}
+
+fn append_source_reader_to_bundle<W: Write>(
+    builder: &mut tar::Builder<W>,
+    source: BundledArchiveReaderSource,
 ) -> anyhow::Result<Vec<TransferWarning>> {
     let source_path = source.source_path.to_string_lossy();
     let root_name = source.source_policy.basename(&source_path).ok_or_else(|| {
@@ -39,7 +76,7 @@ fn append_source_archive<W: Write>(
             source.source_path.display()
         )
     })?;
-    let reader = open_archive_reader(&source.archive_path, &source.compression)?;
+    let reader = wrap_archive_reader(source.reader, &source.compression)?;
     let mut archive = tar::Archive::new(reader);
 
     match source.source_type {

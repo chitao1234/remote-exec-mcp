@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::PathBuf;
 
 use crate::host_path;
@@ -13,8 +14,8 @@ mod import;
 mod summary;
 
 pub use export::{
-    bundle_archives_to_file, export_path_to_archive, export_path_to_byte_stream,
-    export_path_to_file,
+    bundle_archives_to_file, bundle_archives_to_writer, export_path_to_archive,
+    export_path_to_byte_stream, export_path_to_file,
 };
 pub use import::{import_archive_from_async_reader, import_archive_from_file};
 
@@ -46,6 +47,14 @@ pub struct BundledArchiveSource {
     pub source_type: TransferSourceType,
     pub compression: TransferCompression,
     pub archive_path: PathBuf,
+}
+
+pub struct BundledArchiveReaderSource {
+    pub source_path: PathBuf,
+    pub source_policy: PathPolicy,
+    pub source_type: TransferSourceType,
+    pub compression: TransferCompression,
+    pub reader: Box<dyn Read + Send>,
 }
 
 pub struct ExportPathResult {

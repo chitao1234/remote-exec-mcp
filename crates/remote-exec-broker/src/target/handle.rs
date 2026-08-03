@@ -619,6 +619,7 @@ impl RemoteTargetHandle<'_> {
         self.handle.target_info().await
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn transfer_export_to_file(
         &self,
         req: &TransferExportRequest,
@@ -641,6 +642,7 @@ impl RemoteTargetHandle<'_> {
         self.client.transfer_path_info(req).await
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn transfer_import_from_file(
         &self,
         archive_path: &std::path::Path,

@@ -20,8 +20,9 @@ use crate::sandbox::CompiledFilesystemSandbox;
 
 use super::exclude_matcher::ExcludeMatcher;
 use super::{
-    BundledArchiveSource, ExportArchiveStreamItem, ExportPathResult, ExportedArchive,
-    ExportedArchiveByteStream, archive_error_to_transfer_error, internal_transfer_error,
+    BundledArchiveReaderSource, BundledArchiveSource, ExportArchiveStreamItem, ExportPathResult,
+    ExportedArchive, ExportedArchiveByteStream, archive_error_to_transfer_error,
+    internal_transfer_error,
 };
 
 const STREAM_BUFFER_SIZE: usize = 64 * 1024;
@@ -152,6 +153,18 @@ pub async fn bundle_archives_to_file(
     result?;
 
     Ok(())
+}
+
+pub fn bundle_archives_to_writer<W>(
+    sources: Vec<BundledArchiveReaderSource>,
+    writer: W,
+    compression: TransferCompression,
+) -> Result<(), TransferError>
+where
+    W: Write + Send + 'static,
+{
+    bundle::bundle_archives_to_writer(sources, writer, &compression)
+        .map_err(archive_error_to_transfer_error)
 }
 
 #[derive(Clone)]

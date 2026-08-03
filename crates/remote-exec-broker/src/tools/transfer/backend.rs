@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::path::Path;
 
 use bytes::Bytes;
@@ -41,11 +43,18 @@ impl TransferArchiveStream {
         }
     }
 
+    pub(super) fn from_async_read(
+        source_type: TransferSourceType,
+        reader: impl tokio::io::AsyncRead + Send + Unpin + 'static,
+    ) -> Self {
+        Self::new(source_type, reader)
+    }
+
     pub(super) fn source_type(&self) -> &TransferSourceType {
         &self.source_type
     }
 
-    fn into_async_read(self) -> Box<dyn tokio::io::AsyncRead + Send + Unpin + 'static> {
+    pub(super) fn into_async_read(self) -> Box<dyn tokio::io::AsyncRead + Send + Unpin + 'static> {
         self.reader
     }
 

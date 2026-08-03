@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use futures_util::{StreamExt, TryStream, TryStreamExt};
 
 use remote_exec_proto::rpc::{

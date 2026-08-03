@@ -619,6 +619,46 @@ async fn transfer_files_bundles_multiple_local_sources_into_destination_director
 }
 
 #[tokio::test]
+async fn transfer_files_streams_more_sources_than_the_export_concurrency_limit() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let destination = fixture._tempdir.path().join("bundle");
+    let sources = (0..5)
+        .map(|index| {
+            let path = fixture._tempdir.path().join(format!("source-{index}.txt"));
+            std::fs::write(&path, format!("source {index}\n")).unwrap();
+            serde_json::json!({
+                "target": "local",
+                "path": path.display().to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "sources": sources,
+                "destination": {
+                    "target": "local",
+                    "path": destination.display().to_string(),
+                },
+                "overwrite": "fail",
+                "create_parent": false,
+            }),
+        )
+        .await;
+
+    for index in 0..5 {
+        assert_eq!(
+            std::fs::read_to_string(destination.join(format!("source-{index}.txt"))).unwrap(),
+            format!("source {index}\n")
+        );
+    }
+    assert_eq!(result.structured_content["source_type"], "multiple");
+    assert_eq!(result.structured_content["files_copied"], 5);
+}
+
+#[tokio::test]
 async fn transfer_files_multi_source_replace_preserves_unrelated_destination_entries() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let file_source = fixture._tempdir.path().join("alpha.txt");

@@ -396,6 +396,7 @@ Default-hidden file tools:
 - supports `symlink_mode = "preserve"`, `"follow"`, and `"skip"`
 - supports `exclude` glob patterns relative to each source root
 - skips unsupported special files inside directory trees with warnings
+- streams multi-source archives through the broker with bounded buffering rather than staging them on disk
 - does not expose a public compression option; compression is broker-internal
 - uses Zstandard for eligible remote transfers, but skips it when every source
   filename has a known already-compressed/container extension such as `.zip` or `.mp4`

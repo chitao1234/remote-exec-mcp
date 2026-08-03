@@ -337,6 +337,8 @@ Guidance:
 - `exclude` is matched relative to each source root with `/` as the logical
   separator on every platform.
 - `symlink_mode` is `preserve`, `follow`, or `skip`.
+- Multi-source transfers stream through the broker with bounded buffering; the broker preserves
+  the supplied source order while it repacks sources for the destination.
 - Do not send a public `compression` field; compression is broker-internal. The broker
   uses Zstandard for eligible remote transfers, but skips it when every source filename
   has a known already-compressed/container extension such as `.zip` or `.mp4`.
