@@ -230,16 +230,16 @@ void append_file_entry_from_path(
     }
     append_tar_header(archive, rel_path, '0', file_size, mode, std::string(), long_name_emitted);
 
-    char buffer[8192];
+    std::vector<char> buffer(TRANSFER_ARCHIVE_IO_BUFFER_SIZE);
     std::uint64_t remaining = file_size;
     while (remaining > 0U) {
         const std::size_t requested =
-            remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
-        const std::size_t received = stdio_retry::fread_some(input.get(), buffer, requested);
+            remaining < buffer.size() ? static_cast<std::size_t>(remaining) : buffer.size();
+        const std::size_t received = stdio_retry::fread_some(input.get(), buffer.data(), requested);
         if (received != requested) {
             throw std::runtime_error("unable to read transfer source");
         }
-        archive->write(buffer, received);
+        archive->write(buffer.data(), received);
         remaining -= static_cast<std::uint64_t>(received);
     }
     append_padding(archive, file_size);

@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <string>
 
+const std::size_t TRANSFER_ARCHIVE_IO_BUFFER_SIZE = 256U * 1024U;
+
 class TransferArchiveReader {
 public:
     virtual ~TransferArchiveReader();

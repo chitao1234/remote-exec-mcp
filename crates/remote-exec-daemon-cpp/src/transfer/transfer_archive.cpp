@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <vector>
 
 #include "rpc/rpc_failures.h"
 #include "transfer_archive.h"
@@ -61,12 +62,12 @@ void skip_exact(
     std::uint64_t size,
     const std::string& error_message
 ) {
-    char buffer[8192];
+    std::vector<char> buffer(TRANSFER_ARCHIVE_IO_BUFFER_SIZE);
     std::uint64_t remaining = size;
     while (remaining > 0U) {
         const std::size_t requested =
-            remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
-        read_exact_or_throw(reader, buffer, requested, error_message);
+            remaining < buffer.size() ? static_cast<std::size_t>(remaining) : buffer.size();
+        read_exact_or_throw(reader, buffer.data(), requested, error_message);
         remaining -= static_cast<std::uint64_t>(requested);
     }
 }

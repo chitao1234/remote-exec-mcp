@@ -89,18 +89,18 @@ void write_entry_body_to_file(
         throw std::runtime_error("unable to write destination file");
     }
 
-    char buffer[8192];
+    std::vector<char> buffer(TRANSFER_ARCHIVE_IO_BUFFER_SIZE);
     std::uint64_t remaining = size;
     while (remaining > 0U) {
         const std::size_t requested =
-            remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
+            remaining < buffer.size() ? static_cast<std::size_t>(remaining) : buffer.size();
         transfer_archive::read_exact_or_throw(
             reader,
-            buffer,
+            buffer.data(),
             requested,
             "truncated tar entry body"
         );
-        if (!stdio_retry::fwrite_all(output.get(), buffer, requested)) {
+        if (!stdio_retry::fwrite_all(output.get(), buffer.data(), requested)) {
             throw std::runtime_error("unable to write destination file");
         }
         remaining -= static_cast<std::uint64_t>(requested);

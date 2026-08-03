@@ -17,6 +17,7 @@
 #include "rpc/transfer_wire.h"
 #include "test_contract_fixtures.h"
 #include "test_filesystem.h"
+#include "transfer/transfer_archive_io.h"
 #include "transfer/transfer_ops.h"
 
 namespace fs = test_fs;
@@ -793,8 +794,12 @@ static void assert_partial_file_import_leaves_partial_destination() {
     fs::remove_all(root);
     fs::create_directories(root);
 
-    const std::string archive =
-        tar_with_truncated_file_body(SINGLE_FILE_ENTRY, 9000ULL, std::string(8192, 'x'));
+    const std::string body(TRANSFER_ARCHIVE_IO_BUFFER_SIZE, 'x');
+    const std::string archive = tar_with_truncated_file_body(
+        SINGLE_FILE_ENTRY,
+        static_cast<std::uint64_t>(body.size()) + 808ULL,
+        body
+    );
     bool rejected = false;
     try {
         (void)import_path(
@@ -809,7 +814,7 @@ static void assert_partial_file_import_leaves_partial_destination() {
     }
 
     TEST_ASSERT(rejected);
-    TEST_ASSERT(read_text(root / "dest.txt") == std::string(8192, 'x'));
+    TEST_ASSERT(read_text(root / "dest.txt") == body);
 }
 
 static void assert_invalid_replace_keeps_existing_destination() {
