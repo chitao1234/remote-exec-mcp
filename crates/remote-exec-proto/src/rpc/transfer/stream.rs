@@ -1,4 +1,4 @@
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures_util::{Stream, StreamExt, TryStream, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -159,6 +159,15 @@ pub fn transfer_stream_data_frame(payload: impl AsRef<[u8]>) -> Bytes {
     Bytes::from(encode_transfer_stream_data_frame(payload.as_ref()))
 }
 
+fn transfer_stream_data_frame_header(payload_len: usize) -> Bytes {
+    Bytes::copy_from_slice(&encode_transfer_stream_frame_header(
+        TransferStreamFrameHeader {
+            frame_type: TransferStreamFrameType::Data,
+            payload_len: payload_len as u64,
+        },
+    ))
+}
+
 pub fn transfer_stream_complete_frame(archive_bytes: u64) -> Bytes {
     Bytes::from(encode_transfer_stream_complete_frame(archive_bytes))
 }
@@ -182,6 +191,11 @@ where
         Data {
             stream: futures_util::stream::BoxStream<'static, Result<Bytes, BoxError>>,
             archive_bytes: u64,
+        },
+        DataPayload {
+            stream: futures_util::stream::BoxStream<'static, Result<Bytes, BoxError>>,
+            archive_bytes: u64,
+            payload: Bytes,
         },
         Done,
     }
@@ -214,10 +228,11 @@ where
                             let next_archive_bytes =
                                 archive_bytes.saturating_add(bytes.len() as u64);
                             return Ok::<Option<(Bytes, State)>, BoxError>(Some((
-                                transfer_stream_data_frame(bytes),
-                                State::Data {
+                                transfer_stream_data_frame_header(bytes.len()),
+                                State::DataPayload {
                                     stream,
                                     archive_bytes: next_archive_bytes,
+                                    payload: bytes,
                                 },
                             )));
                         }
@@ -229,6 +244,17 @@ where
                         }
                     }
                 },
+                State::DataPayload {
+                    stream,
+                    archive_bytes,
+                    payload,
+                } => Ok::<Option<(Bytes, State)>, BoxError>(Some((
+                    payload,
+                    State::Data {
+                        stream,
+                        archive_bytes,
+                    },
+                ))),
                 State::Done => Ok::<Option<(Bytes, State)>, BoxError>(None),
             }
         },
@@ -247,6 +273,10 @@ where
     enum State<E> {
         Preface(futures_util::stream::BoxStream<'static, TransferStreamExportItem<E>>),
         Items(futures_util::stream::BoxStream<'static, TransferStreamExportItem<E>>),
+        DataPayload {
+            stream: futures_util::stream::BoxStream<'static, TransferStreamExportItem<E>>,
+            payload: Bytes,
+        },
         Done,
     }
 
@@ -261,9 +291,13 @@ where
                     State::Items(stream),
                 )),
                 State::Items(mut stream) => match stream.next().await {
-                    Some(TransferStreamExportItem::Data(bytes)) => {
-                        Some((Ok(transfer_stream_data_frame(bytes)), State::Items(stream)))
-                    }
+                    Some(TransferStreamExportItem::Data(bytes)) => Some((
+                        Ok(transfer_stream_data_frame_header(bytes.len())),
+                        State::DataPayload {
+                            stream,
+                            payload: bytes,
+                        },
+                    )),
                     Some(TransferStreamExportItem::Complete { archive_bytes }) => Some((
                         Ok(transfer_stream_complete_frame(archive_bytes)),
                         State::Done,
@@ -282,6 +316,7 @@ where
                         State::Done,
                     )),
                 },
+                State::DataPayload { stream, payload } => Some((Ok(payload), State::Items(stream))),
                 State::Done => None,
             }
         }
@@ -312,8 +347,7 @@ where
 
 pub struct TransferStreamDecoder<S> {
     stream: S,
-    buffer: Vec<u8>,
-    offset: usize,
+    buffer: BytesMut,
     preface_read: bool,
     terminal: bool,
 }
@@ -322,8 +356,7 @@ impl<S> TransferStreamDecoder<S> {
     pub fn new(stream: S) -> Self {
         Self {
             stream,
-            buffer: Vec::new(),
-            offset: 0,
+            buffer: BytesMut::new(),
             preface_read: false,
             terminal: false,
         }
@@ -349,6 +382,7 @@ where
                 )
                 .await?;
             let header_array: [u8; TRANSFER_STREAM_FRAME_HEADER_LEN] = header_bytes
+                .as_ref()
                 .try_into()
                 .expect("read_exact returned requested length");
             let header = decode_transfer_stream_frame_header(header_array)
@@ -359,7 +393,7 @@ where
 
             match header.frame_type {
                 TransferStreamFrameType::Data if payload.is_empty() => continue,
-                TransferStreamFrameType::Data => return Ok(Some(Bytes::from(payload))),
+                TransferStreamFrameType::Data => return Ok(Some(payload)),
                 TransferStreamFrameType::Complete => {
                     self.parse_terminal_payload(TransferStreamFrameType::Complete, &payload)?;
                     self.terminal = true;
@@ -388,6 +422,7 @@ where
             )
             .await?;
         let header_array: [u8; TRANSFER_STREAM_FRAME_HEADER_LEN] = header_bytes
+            .as_ref()
             .try_into()
             .expect("read_exact returned requested length");
         let header = decode_transfer_stream_frame_header(header_array)
@@ -397,9 +432,7 @@ where
             .await?;
 
         match header.frame_type {
-            TransferStreamFrameType::Data => {
-                Ok(Some(TransferStreamFrame::Data(Bytes::from(payload))))
-            }
+            TransferStreamFrameType::Data => Ok(Some(TransferStreamFrame::Data(payload))),
             TransferStreamFrameType::Complete => {
                 let complete = parse_transfer_stream_complete_payload(&payload)
                     .map_err(TransferStreamDecodeError::MalformedComplete)?;
@@ -422,7 +455,7 @@ where
         let preface = self
             .read_exact(TRANSFER_STREAM_PREFACE.len(), "transfer stream preface")
             .await?;
-        if preface.as_slice() != TRANSFER_STREAM_PREFACE {
+        if preface.as_ref() != TRANSFER_STREAM_PREFACE {
             return Err(TransferStreamDecodeError::Invalid(
                 "invalid transfer stream preface".to_string(),
             ));
@@ -435,7 +468,7 @@ where
         &mut self,
         len: usize,
         label: &'static str,
-    ) -> Result<Vec<u8>, TransferStreamDecodeError<E>> {
+    ) -> Result<Bytes, TransferStreamDecodeError<E>> {
         while self.available() < len {
             match self.stream.try_next().await {
                 Ok(Some(chunk)) if !chunk.is_empty() => self.buffer.extend_from_slice(&chunk),
@@ -449,31 +482,11 @@ where
             }
         }
 
-        let start = self.offset;
-        let end = start + len;
-        let output = self.buffer[start..end].to_vec();
-        self.offset = end;
-        self.compact_buffer();
-        Ok(output)
+        Ok(self.buffer.split_to(len).freeze())
     }
 
     fn available(&self) -> usize {
-        self.buffer.len().saturating_sub(self.offset)
-    }
-
-    fn compact_buffer(&mut self) {
-        if self.offset == 0 {
-            return;
-        }
-        if self.offset == self.buffer.len() {
-            self.buffer.clear();
-            self.offset = 0;
-            return;
-        }
-        if self.offset >= 64 * 1024 {
-            self.buffer.drain(..self.offset);
-            self.offset = 0;
-        }
+        self.buffer.len()
     }
 
     fn parse_terminal_payload(
