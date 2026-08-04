@@ -233,6 +233,15 @@ fn available_windows_git_bash_path() -> Option<String> {
         .map(|candidate| candidate.to_string_lossy().into_owned())
 }
 
+/// Returns early from the calling test when no git bash is installed on this
+/// Windows host.
+#[cfg(windows)]
+fn skip_unless_git_bash() {
+    let Some(_) = available_windows_git_bash_path() else {
+        return;
+    };
+}
+
 #[cfg(windows)]
 fn windows_bash_root(shell: &str) -> Option<PathBuf> {
     Path::new(shell)
@@ -392,40 +401,9 @@ async fn assert_windows_bare_lf_advances_pty_line_reader(
         .daemon_session_id()
         .expect("live session")
         .to_string();
-    let response = fixture
-        .rpc::<ExecWriteRequest, ExecResponse>(
-            "/v1/exec/write",
-            &ExecWriteRequest {
-                daemon_session_id: session_id.clone(),
-                chars: "ping\n".to_string(),
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                pty_size: None,
-            },
-        )
-        .await;
-
-    let mut combined_output = started.output().output.clone();
-    combined_output.push_str(&response.output().output);
-
-    let exit_code = if response.output().running {
-        let tail = fixture
-            .rpc::<ExecWriteRequest, ExecResponse>(
-                "/v1/exec/write",
-                &ExecWriteRequest {
-                    daemon_session_id: session_id,
-                    chars: String::new(),
-                    yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                    max_output_tokens: None,
-                    pty_size: None,
-                },
-            )
+    let (exit_code, combined_output) =
+        write_and_collect_session_output(&fixture, &session_id, "ping\n", &started.output().output)
             .await;
-        combined_output.push_str(&tail.output().output);
-        tail.output().exit_code
-    } else {
-        response.output().exit_code
-    };
 
     let normalized_output = strip_terminal_noise(&combined_output);
 
@@ -546,40 +524,9 @@ async fn assert_windows_git_bash_tty_read_line(
         .daemon_session_id()
         .expect("live session")
         .to_string();
-    let response = fixture
-        .rpc::<ExecWriteRequest, ExecResponse>(
-            "/v1/exec/write",
-            &ExecWriteRequest {
-                daemon_session_id: session_id.clone(),
-                chars: "ping\n".to_string(),
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                pty_size: None,
-            },
-        )
-        .await;
-
-    let mut combined_output = started.output().output.clone();
-    combined_output.push_str(&response.output().output);
-
-    let exit_code = if response.output().running {
-        let tail = fixture
-            .rpc::<ExecWriteRequest, ExecResponse>(
-                "/v1/exec/write",
-                &ExecWriteRequest {
-                    daemon_session_id: session_id,
-                    chars: String::new(),
-                    yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                    max_output_tokens: None,
-                    pty_size: None,
-                },
-            )
+    let (exit_code, combined_output) =
+        write_and_collect_session_output(&fixture, &session_id, "ping\n", &started.output().output)
             .await;
-        combined_output.push_str(&tail.output().output);
-        tail.output().exit_code
-    } else {
-        response.output().exit_code
-    };
 
     let normalized_output = strip_terminal_noise(&combined_output).replace('\r', "");
 
@@ -645,6 +592,54 @@ fn process_environment_with(pairs: &[(&str, &str)]) -> ProcessEnvironment {
         environment.set_var(key, Some(OsString::from(value)));
     }
     environment
+}
+
+/// Writes `chars` into a live PTY session, accumulates output from `initial_output`
+/// plus the write response, and polls with empty writes until the session exits.
+/// Returns the exit code and the accumulated combined output.
+#[cfg(windows)]
+async fn write_and_collect_session_output(
+    fixture: &support::fixture::DaemonFixture,
+    session_id: &str,
+    chars: &str,
+    initial_output: &str,
+) -> (Option<i32>, String) {
+    let response = fixture
+        .rpc::<ExecWriteRequest, ExecResponse>(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: session_id.to_string(),
+                chars: chars.to_string(),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+                pty_size: None,
+            },
+        )
+        .await;
+
+    let mut combined_output = initial_output.to_string();
+    combined_output.push_str(&response.output().output);
+
+    let exit_code = if response.output().running {
+        let tail = fixture
+            .rpc::<ExecWriteRequest, ExecResponse>(
+                "/v1/exec/write",
+                &ExecWriteRequest {
+                    daemon_session_id: session_id.to_string(),
+                    chars: String::new(),
+                    yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                    max_output_tokens: None,
+                    pty_size: None,
+                },
+            )
+            .await;
+        combined_output.push_str(&tail.output().output);
+        tail.output().exit_code
+    } else {
+        response.output().exit_code
+    };
+
+    (exit_code, combined_output)
 }
 
 #[cfg(unix)]

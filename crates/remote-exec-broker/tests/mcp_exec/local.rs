@@ -89,16 +89,19 @@ min_ms = 3000
     assert!(result.text_output.contains("ready"));
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn exec_command_local_pipe_mode_preserves_stdout_stderr_order() {
     let fixture = support::spawners::spawn_broker_with_local_target().await;
+    #[cfg(unix)]
+    let cmd = "printf 'stdout-1\\n'; printf 'stderr-1\\n' >&2; printf 'stdout-2\\n'; printf 'stderr-2\\n' >&2";
+    #[cfg(windows)]
+    let cmd = LOCAL_PIPE_MODE_STDOUT_STDERR_CMD;
     let result = fixture
         .call_tool(
             "exec_command",
             serde_json::json!({
                 "target": "local",
-                "cmd": "printf 'stdout-1\\n'; printf 'stderr-1\\n' >&2; printf 'stdout-2\\n'; printf 'stderr-2\\n' >&2",
+                "cmd": cmd,
                 "shell": LOCAL_TEST_SHELL,
                 "login": false,
                 "tty": false,
@@ -108,31 +111,12 @@ async fn exec_command_local_pipe_mode_preserves_stdout_stderr_order() {
         .await;
 
     assert_eq!(result.structured_content["exit_code"], 0);
+    #[cfg(unix)]
     assert_eq!(
         result.structured_content["output"],
         serde_json::json!("stdout-1\nstderr-1\nstdout-2\nstderr-2\n")
     );
-}
-
-#[cfg(windows)]
-#[tokio::test]
-async fn exec_command_local_pipe_mode_preserves_stdout_stderr_order() {
-    let fixture = support::spawners::spawn_broker_with_local_target().await;
-    let result = fixture
-        .call_tool(
-            "exec_command",
-            serde_json::json!({
-                "target": "local",
-                "cmd": LOCAL_PIPE_MODE_STDOUT_STDERR_CMD,
-                "shell": LOCAL_TEST_SHELL,
-                "login": false,
-                "tty": false,
-                "yield_time_ms": 10_000
-            }),
-        )
-        .await;
-
-    assert_eq!(result.structured_content["exit_code"], 0);
+    #[cfg(windows)]
     assert_eq!(
         result.structured_content["output"]
             .as_str()

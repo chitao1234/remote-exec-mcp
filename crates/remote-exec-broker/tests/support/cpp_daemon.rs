@@ -1,15 +1,14 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Once};
+use std::sync::Once;
 use std::time::Duration;
 
 use remote_exec_broker::{Connection, RemoteExecClient, ToolResponse};
 use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::public::{ForwardPortProtocol, ForwardPortsInput};
 use tempfile::TempDir;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
-use tokio::sync::{Mutex, oneshot};
+
+use super::tunnel_drop_proxy::{TunnelDropProxy, TunnelDropProxyOptions};
 
 #[cfg(feature = "broker-tls")]
 use super::certs::TestCerts;
@@ -123,7 +122,15 @@ impl CppDaemonBrokerFixture {
         let raw_stream = certs.is_some();
         #[cfg(not(feature = "broker-tls"))]
         let raw_stream = false;
-        let proxy = TunnelDropProxy::spawn(backend_addr, raw_stream).await;
+        let proxy = TunnelDropProxy::spawn(
+            backend_addr,
+            TunnelDropProxyOptions {
+                raw_stream,
+                rewrite_plain_requests: false,
+                panic_context: "C++ tunnel-drop proxy",
+            },
+        )
+        .await;
         let daemon_addr = proxy.listen_addr;
 
         #[cfg(feature = "broker-tls")]
@@ -250,6 +257,7 @@ pty = "none"
 
     pub async fn drop_port_tunnels(&self) {
         self.proxy.drop_port_tunnels().await;
+        self.proxy.assert_no_task_panics().await;
     }
 }
 
@@ -359,7 +367,7 @@ path = "/mcp"
 
         let mut broker = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
         broker.arg(&broker_config);
-        apply_quiet_test_logging(&mut broker);
+        super::apply_quiet_test_logging(&mut broker);
         super::streamable_http_child::configure_streamable_http_broker_child(&mut broker);
         broker.kill_on_drop(true);
         let mut broker = broker.spawn().unwrap();
@@ -453,187 +461,6 @@ impl Drop for CrashableCppDaemonBrokerFixture {
         let _ = self.broker.start_kill();
         let _ = self.daemon.start_kill();
     }
-}
-
-struct TunnelDropProxy {
-    listen_addr: std::net::SocketAddr,
-    active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
-    background_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
-    shutdown: Option<oneshot::Sender<()>>,
-    handle: Option<tokio::task::JoinHandle<()>>,
-}
-
-impl TunnelDropProxy {
-    async fn spawn(daemon_addr: std::net::SocketAddr, raw_stream: bool) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let listen_addr = listener.local_addr().unwrap();
-        let active_port_tunnels = Arc::new(Mutex::new(Vec::new()));
-        let background_tasks = Arc::new(Mutex::new(Vec::new()));
-        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
-        let active_port_tunnels_task = active_port_tunnels.clone();
-        let background_tasks_accept = background_tasks.clone();
-        let handle = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = &mut shutdown_rx => {
-                        break;
-                    }
-                    accepted = listener.accept() => {
-                        let (stream, _) = match accepted {
-                            Ok(value) => value,
-                            Err(_) => break,
-                        };
-                        let active_port_tunnels = active_port_tunnels_task.clone();
-                        let connection_handle = tokio::spawn(async move {
-                            if let Err(err) = proxy_connection(stream, daemon_addr, active_port_tunnels, raw_stream).await {
-                                if is_expected_proxy_teardown_error(&err) {
-                                    return;
-                                }
-                                panic!("C++ tunnel-drop proxy connection failed: {err}");
-                            }
-                        });
-                        background_tasks_accept.lock().await.push(connection_handle);
-                    }
-                }
-            }
-        });
-
-        Self {
-            listen_addr,
-            active_port_tunnels,
-            background_tasks,
-            shutdown: Some(shutdown_tx),
-            handle: Some(handle),
-        }
-    }
-
-    async fn drop_port_tunnels(&self) {
-        let mut active = self.active_port_tunnels.lock().await;
-        for shutdown in active.drain(..) {
-            let _ = shutdown.send(());
-        }
-        drop(active);
-        self.assert_no_task_panics().await;
-    }
-
-    async fn assert_no_task_panics(&self) {
-        let finished = {
-            let mut tasks = self.background_tasks.lock().await;
-            let mut finished = Vec::new();
-            let mut pending = Vec::with_capacity(tasks.len());
-            for handle in tasks.drain(..) {
-                if handle.is_finished() {
-                    finished.push(handle);
-                } else {
-                    pending.push(handle);
-                }
-            }
-            *tasks = pending;
-            finished
-        };
-
-        for handle in finished {
-            handle.await.expect("C++ tunnel-drop proxy task panicked");
-        }
-    }
-
-    fn stop(&mut self) {
-        if let Some(shutdown) = self.shutdown.take() {
-            let _ = shutdown.send(());
-        }
-        if let Some(handle) = self.handle.take() {
-            handle.abort();
-        }
-        if let Ok(mut tasks) = self.background_tasks.try_lock() {
-            for handle in tasks.drain(..) {
-                handle.abort();
-            }
-        }
-    }
-}
-
-async fn proxy_connection(
-    mut client_stream: tokio::net::TcpStream,
-    daemon_addr: std::net::SocketAddr,
-    active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
-    raw_stream: bool,
-) -> std::io::Result<()> {
-    let mut backend_stream = tokio::net::TcpStream::connect(daemon_addr).await?;
-    if raw_stream {
-        return proxy_plain_streams(client_stream, backend_stream).await;
-    }
-    let mut request = Vec::new();
-    let mut byte = [0u8; 1];
-
-    loop {
-        let read = client_stream.read(&mut byte).await?;
-        if read == 0 {
-            return Ok(());
-        }
-        request.push(byte[0]);
-        if request.ends_with(b"\r\n\r\n") {
-            break;
-        }
-    }
-
-    let request_text = String::from_utf8_lossy(&request);
-    let is_port_tunnel = is_port_tunnel_upgrade_request(&request_text);
-
-    backend_stream.write_all(&request).await?;
-
-    if is_port_tunnel {
-        let (drop_tx, drop_rx) = oneshot::channel();
-        active_port_tunnels.lock().await.push(drop_tx);
-        proxy_port_tunnel_streams(client_stream, backend_stream, drop_rx).await
-    } else {
-        proxy_plain_streams(client_stream, backend_stream).await
-    }
-}
-
-fn is_port_tunnel_upgrade_request(request: &str) -> bool {
-    let lower = request.to_ascii_lowercase();
-    let first_line = lower.lines().next().unwrap_or_default();
-    first_line.starts_with("post /v1/port/tunnel ")
-        && lower.contains("\r\nconnection: upgrade\r\n")
-        && lower.contains("\r\nupgrade: remote-exec-port-tunnel\r\n")
-}
-
-async fn proxy_plain_streams(
-    mut client_stream: tokio::net::TcpStream,
-    mut backend_stream: tokio::net::TcpStream,
-) -> std::io::Result<()> {
-    let _ = tokio::io::copy_bidirectional(&mut client_stream, &mut backend_stream).await?;
-    Ok(())
-}
-
-async fn proxy_port_tunnel_streams(
-    mut client_stream: tokio::net::TcpStream,
-    mut backend_stream: tokio::net::TcpStream,
-    mut drop_rx: oneshot::Receiver<()>,
-) -> std::io::Result<()> {
-    tokio::select! {
-        result = tokio::io::copy_bidirectional(&mut client_stream, &mut backend_stream) => {
-            let _ = result?;
-        }
-        _ = &mut drop_rx => {
-            let _ = client_stream.shutdown().await;
-            let _ = backend_stream.shutdown().await;
-        }
-    }
-
-    Ok(())
-}
-
-fn is_expected_proxy_teardown_error(err: &std::io::Error) -> bool {
-    matches!(
-        err.kind(),
-        std::io::ErrorKind::ConnectionAborted
-            | std::io::ErrorKind::ConnectionRefused
-            | std::io::ErrorKind::ConnectionReset
-            | std::io::ErrorKind::BrokenPipe
-            | std::io::ErrorKind::NotConnected
-            | std::io::ErrorKind::UnexpectedEof
-    ) || matches!(err.raw_os_error(), Some(10053 | 10054 | 10061))
 }
 
 fn cpp_daemon_binary() -> Option<PathBuf> {
@@ -733,7 +560,7 @@ async fn spawn_cpp_daemon_with_bound_addr(
     std::fs::write(daemon_config, config_body).unwrap();
     let mut daemon = tokio::process::Command::new(daemon_binary);
     daemon.arg(daemon_config);
-    apply_quiet_test_logging(&mut daemon);
+    super::apply_quiet_test_logging(&mut daemon);
     let child = spawn_cpp_daemon_process(&mut daemon).await;
     let daemon_addr = wait_for_bound_addr_file(bound_addr_file, "C++ daemon").await;
     if wait_for_http_ready {
@@ -743,70 +570,21 @@ async fn spawn_cpp_daemon_with_bound_addr(
 }
 
 async fn wait_until_ready_http(addr: std::net::SocketAddr) {
-    remote_exec_broker::install_crypto_provider().unwrap();
-    let client = reqwest::Client::builder().build().unwrap();
-
-    tokio::time::timeout(CPP_READY_TIMEOUT, async {
-        loop {
-            if client
-                .post(format!("http://{addr}/v1/health"))
-                .json(&serde_json::json!({}))
-                .send()
-                .await
-                .is_ok()
-            {
-                return;
-            }
-            tokio::time::sleep(CPP_READY_POLL).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| {
-        panic!("real C++ daemon at http://{addr} did not become ready within {CPP_READY_TIMEOUT:?}")
-    });
+    super::wait_until_ready_http(addr, CPP_READY_TIMEOUT, CPP_READY_POLL, "real C++ daemon").await;
 }
 
 async fn wait_until_ready_mcp_http(url: &str) {
-    remote_exec_broker::install_crypto_provider().unwrap();
-    let client = reqwest::Client::builder().build().unwrap();
-
-    tokio::time::timeout(CPP_READY_TIMEOUT, async {
-        loop {
-            let response = client
-                .post(url)
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
-                .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
-                .send()
-                .await;
-            if response
-                .as_ref()
-                .is_ok_and(|response| response.status().is_success())
-            {
-                return;
-            }
-            tokio::time::sleep(CPP_READY_POLL).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| {
-        panic!(
-            "broker MCP HTTP endpoint at {url} did not become ready within {CPP_READY_TIMEOUT:?}"
-        )
-    });
+    super::wait_until_ready_mcp_http(
+        url,
+        CPP_READY_TIMEOUT,
+        CPP_READY_POLL,
+        "broker MCP HTTP endpoint",
+    )
+    .await;
 }
 
 fn cpp_config_path(path: &Path) -> String {
     path.display().to_string()
-}
-
-fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
-    if std::env::var_os("REMOTE_EXEC_LOG").is_some() || std::env::var_os("RUST_LOG").is_some() {
-        return;
-    }
-
-    let filter = std::env::var("REMOTE_EXEC_TEST_LOG").unwrap_or_else(|_| "error".to_string());
-    command.env("REMOTE_EXEC_LOG", filter);
 }
 
 fn cpp_daemon_skip_message() -> String {

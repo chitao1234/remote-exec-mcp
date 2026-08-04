@@ -1,21 +1,12 @@
 mod support;
 
-use encoding_rs::{Encoding, SHIFT_JIS};
+use encoding_rs::SHIFT_JIS;
 use remote_exec_proto::rpc::{
     FileEditRequest, FileEditResponse, FileReadRequest, FileReadResponse, FileWriteRequest,
     FileWriteResponse,
 };
 use remote_exec_test_support::test_helpers::{DEFAULT_TEST_TARGET, utf16le_bom_bytes};
-
-fn encoded_bytes(encoding: &'static Encoding, text: &str) -> Vec<u8> {
-    let (encoded, _, had_errors) = encoding.encode(text);
-    assert!(
-        !had_errors,
-        "test text should encode as {}",
-        encoding.name()
-    );
-    encoded.into_owned()
-}
+use support::encoded_bytes;
 
 #[tokio::test]
 async fn read_file_formats_line_numbers_and_reminders() {
@@ -245,7 +236,7 @@ async fn edit_rejects_empty_old_string() {
 async fn read_write_and_edit_preserve_autodetected_utf16le_encoding() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
         DEFAULT_TEST_TARGET,
-        "experimental_apply_patch_target_encoding_autodetect = true",
+        support::ENCODING_AUTODETECT_CONFIG,
     )
     .await;
     let path = fixture.workdir.join("utf16.txt");
@@ -306,7 +297,7 @@ async fn read_write_and_edit_preserve_autodetected_utf16le_encoding() {
 async fn write_and_edit_report_write_failure_for_unencodable_detected_text() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
         DEFAULT_TEST_TARGET,
-        "experimental_apply_patch_target_encoding_autodetect = true",
+        support::ENCODING_AUTODETECT_CONFIG,
     )
     .await;
     let path = fixture.workdir.join("shift-jis.txt");

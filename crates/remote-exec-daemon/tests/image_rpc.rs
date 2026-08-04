@@ -35,30 +35,8 @@ fn decode_data_url(image_url: &str) -> (String, Vec<u8>) {
     (mime.to_string(), bytes)
 }
 
-async fn assert_default_passthrough(extension: &str, format: ImageFormat, expected_mime: &str) {
-    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let path = fixture.workdir.join(format!("small.{extension}"));
-    write_image(&path, 64, 64, format).await;
-    let original = tokio::fs::read(&path).await.unwrap();
-
-    let response = fixture
-        .rpc::<ImageReadRequest, ImageReadResponse>(
-            "/v1/image/read",
-            &ImageReadRequest {
-                path: format!("small.{extension}"),
-                workdir: Some(".".to_string()),
-                detail: None,
-            },
-        )
-        .await;
-
-    let (mime, returned) = decode_data_url(&response.image_url);
-    assert_eq!(mime, expected_mime);
-    assert_eq!(returned, original);
-    assert_eq!(response.detail, None);
-}
-
-async fn assert_large_passthrough(
+async fn assert_passthrough(
+    prefix: &str,
     extension: &str,
     format: ImageFormat,
     expected_mime: &str,
@@ -66,7 +44,7 @@ async fn assert_large_passthrough(
     height: u32,
 ) {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let path = fixture.workdir.join(format!("large.{extension}"));
+    let path = fixture.workdir.join(format!("{prefix}.{extension}"));
     write_image(&path, width, height, format).await;
     let original = tokio::fs::read(&path).await.unwrap();
 
@@ -74,7 +52,7 @@ async fn assert_large_passthrough(
         .rpc::<ImageReadRequest, ImageReadResponse>(
             "/v1/image/read",
             &ImageReadRequest {
-                path: format!("large.{extension}"),
+                path: format!("{prefix}.{extension}"),
                 workdir: Some(".".to_string()),
                 detail: None,
             },
@@ -113,9 +91,9 @@ async fn image_read_preserves_large_passthrough_bytes_by_default() {
 
 #[tokio::test]
 async fn image_read_preserves_small_png_jpeg_and_webp_bytes_by_default() {
-    assert_default_passthrough("png", ImageFormat::Png, "image/png").await;
-    assert_default_passthrough("jpg", ImageFormat::Jpeg, "image/jpeg").await;
-    assert_default_passthrough("webp", ImageFormat::WebP, "image/webp").await;
+    assert_passthrough("small", "png", ImageFormat::Png, "image/png", 64, 64).await;
+    assert_passthrough("small", "jpg", ImageFormat::Jpeg, "image/jpeg", 64, 64).await;
+    assert_passthrough("small", "webp", ImageFormat::WebP, "image/webp", 64, 64).await;
 }
 
 #[tokio::test]
@@ -144,12 +122,12 @@ async fn image_read_preserves_original_detail_for_passthrough_formats() {
 
 #[tokio::test]
 async fn image_read_preserves_large_png_bytes_by_default() {
-    assert_large_passthrough("png", ImageFormat::Png, "image/png", 2050, 64).await;
+    assert_passthrough("large", "png", ImageFormat::Png, "image/png", 2050, 64).await;
 }
 
 #[tokio::test]
 async fn image_read_preserves_large_jpeg_bytes_by_default() {
-    assert_large_passthrough("jpg", ImageFormat::Jpeg, "image/jpeg", 64, 2050).await;
+    assert_passthrough("large", "jpg", ImageFormat::Jpeg, "image/jpeg", 64, 2050).await;
 }
 
 #[tokio::test]

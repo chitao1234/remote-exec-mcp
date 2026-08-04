@@ -1,26 +1,17 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
-use remote_exec_test_support::port_tunnel_io::{read_frame, write_frame};
 use remote_exec_test_support::test_helpers;
 use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
-use rmcp::{
-    ClientHandler, RoleClient, ServiceExt,
-    model::{CallToolRequestParams, CallToolResult, ClientInfo, ContentBlock},
-    service::RunningService,
-};
+use rmcp::{RoleClient, ServiceExt, model::CallToolRequestParams, service::RunningService};
 use tempfile::TempDir;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
-use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 
-#[path = "../support/blocking_child_process.rs"]
-mod blocking_child_process;
-#[path = "../support/streamable_http_child.rs"]
-mod streamable_http_child;
-use blocking_child_process::BlockingChildProcess;
+#[path = "../support/mod.rs"]
+mod shared;
+use shared::blocking_child_process::BlockingChildProcess;
+use shared::fixture::mcp_tool_name;
+use shared::tunnel_drop_proxy::TunnelDropProxy;
 const BROKER_TOOL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 const BROKER_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 const MULTI_TARGET_READY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -45,12 +36,7 @@ pub async fn spawn_cluster() -> ClusterFixture {
 }
 
 fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
-    if std::env::var_os("REMOTE_EXEC_LOG").is_some() || std::env::var_os("RUST_LOG").is_some() {
-        return;
-    }
-
-    let filter = std::env::var("REMOTE_EXEC_TEST_LOG").unwrap_or_else(|_| "error".to_string());
-    command.env("REMOTE_EXEC_LOG", filter);
+    shared::apply_quiet_test_logging(command);
 }
 
 pub fn long_running_tty_exec_input(target: &str) -> serde_json::Value {
@@ -88,40 +74,8 @@ pub fn long_running_tty_exec_input(target: &str) -> serde_json::Value {
     arguments
 }
 
-pub fn assert_correlated_tool_error(
-    error: &str,
-    tool: &str,
-    target: Option<&str>,
-    expected_suffix: &str,
-) {
-    let tool = if tool.starts_with("remote_") {
-        tool.to_string()
-    } else {
-        format!("remote_{tool}")
-    };
-    assert!(
-        error.starts_with("request_id=req_"),
-        "missing request_id prefix in error: {error}"
-    );
-    assert!(
-        error.contains(&format!(" tool={tool}")),
-        "missing tool={tool} in error: {error}"
-    );
-    match target {
-        Some(target) => assert!(
-            error.contains(&format!(" target={target}: ")),
-            "missing target={target} in error: {error}"
-        ),
-        None => assert!(
-            !error.contains(" target="),
-            "unexpected target context in error: {error}"
-        ),
-    }
-    assert!(
-        error.ends_with(expected_suffix),
-        "error did not preserve expected suffix `{expected_suffix}`: {error}"
-    );
-}
+pub use shared::assert_correlated_tool_error;
+pub use shared::assert_stream_closed;
 
 pub struct BrokerFixture {
     pub _tempdir: TempDir,
@@ -250,14 +204,6 @@ impl BrokerFixture {
     }
 }
 
-fn mcp_tool_name(name: &str) -> String {
-    if name.starts_with("remote_") {
-        name.to_string()
-    } else {
-        format!("remote_{name}")
-    }
-}
-
 async fn serve_broker_child_stdio(
     command: tokio::process::Command,
 ) -> RunningService<RoleClient, DummyClientHandler> {
@@ -289,10 +235,10 @@ impl HttpBrokerFixture {
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
         command.arg(&config_path);
         apply_quiet_test_logging(&mut command);
-        streamable_http_child::configure_streamable_http_broker_child(&mut command);
+        shared::streamable_http_child::configure_streamable_http_broker_child(&mut command);
         command.kill_on_drop(true);
         let mut child = command.spawn().unwrap();
-        let broker_addr = streamable_http_child::wait_for_streamable_http_bound_addr(
+        let broker_addr = shared::streamable_http_child::wait_for_streamable_http_bound_addr(
             &mut child,
             "multi-target broker",
         )
@@ -319,72 +265,7 @@ impl Drop for HttpBrokerFixture {
     }
 }
 
-pub struct ToolResult {
-    pub is_error: bool,
-    pub text_output: String,
-    pub structured_content: serde_json::Value,
-    pub raw_content: Vec<serde_json::Value>,
-}
-
-impl ToolResult {
-    fn from_call_tool_result(result: CallToolResult) -> Self {
-        let text_output = result
-            .content
-            .iter()
-            .filter_map(|content| content.as_text().map(|text| text.text.as_str()))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let raw_content = result.content.iter().map(normalize_content).collect();
-
-        Self {
-            is_error: result.is_error.unwrap_or(false),
-            text_output,
-            structured_content: result.structured_content.unwrap_or(serde_json::Value::Null),
-            raw_content,
-        }
-    }
-
-    pub fn forward_id(&self) -> String {
-        self.structured_content["forwards"][0]["forward_id"]
-            .as_str()
-            .expect("forward result should include forward_id")
-            .to_string()
-    }
-
-    pub fn listen_endpoint(&self) -> String {
-        self.structured_content["forwards"][0]["listen_endpoint"]
-            .as_str()
-            .expect("forward result should include listen_endpoint")
-            .to_string()
-    }
-}
-
-fn normalize_content(content: &ContentBlock) -> serde_json::Value {
-    if let Some(text) = content.as_text() {
-        return serde_json::json!({
-            "type": "text",
-            "text": text.text,
-        });
-    }
-
-    if let Some(image) = content.as_image() {
-        return serde_json::json!({
-            "type": "input_image",
-            "image_url": format!("data:{};base64,{}", image.mime_type, image.data),
-        });
-    }
-
-    serde_json::to_value(content).unwrap()
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct DummyClientHandler;
-
-impl ClientHandler for DummyClientHandler {
-    fn get_info(&self) -> ClientInfo {
-        ClientInfo::default()
-    }
-}
+pub use shared::fixture::{DummyClientHandler, ToolResult};
 
 pub struct DaemonFixture {
     _tempdir: TempDir,
@@ -392,24 +273,9 @@ pub struct DaemonFixture {
     pub addr: std::net::SocketAddr,
     backend_addr: std::net::SocketAddr,
     pub workdir: PathBuf,
-    client: reqwest::Client,
     proxy: TunnelDropProxy,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     handle: Option<JoinHandle<anyhow::Result<()>>>,
-}
-
-struct TunnelDropProxy {
-    listen_addr: std::net::SocketAddr,
-    daemon_addr: Arc<Mutex<std::net::SocketAddr>>,
-    active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<PortTunnelAction>>>>,
-    background_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
-    shutdown: Option<oneshot::Sender<()>>,
-    handle: Option<JoinHandle<()>>,
-}
-
-enum PortTunnelAction {
-    Drop,
-    Corrupt,
 }
 
 impl DaemonFixture {
@@ -420,8 +286,14 @@ impl DaemonFixture {
         let backend_addr = backend_listener.local_addr().unwrap();
         let workdir = tempdir.path().join("workdir");
         std::fs::create_dir_all(&workdir).unwrap();
-        let client = build_http_client();
-        let proxy = TunnelDropProxy::spawn(backend_addr).await;
+        let proxy = TunnelDropProxy::spawn(
+            backend_addr,
+            shared::tunnel_drop_proxy::TunnelDropProxyOptions {
+                panic_context: "multi-target tunnel-drop proxy",
+                ..Default::default()
+            },
+        )
+        .await;
         let addr = proxy.listen_addr;
 
         let mut fixture = Self {
@@ -430,7 +302,6 @@ impl DaemonFixture {
             addr,
             backend_addr,
             workdir,
-            client,
             proxy,
             shutdown: None,
             handle: None,
@@ -502,7 +373,7 @@ expected_daemon_name = {expected_daemon_name}
                 let _ = shutdown_rx.await;
             }),
         ));
-        wait_until_ready_http(&self.client, self.addr).await;
+        wait_until_ready_http(self.addr).await;
     }
 
     async fn start(&mut self) {
@@ -537,346 +408,31 @@ impl Drop for DaemonFixture {
     }
 }
 
-impl TunnelDropProxy {
-    async fn spawn(daemon_addr: std::net::SocketAddr) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind tunnel drop proxy");
-        let listen_addr = listener.local_addr().expect("read tunnel drop proxy addr");
-        let daemon_addr = Arc::new(Mutex::new(daemon_addr));
-        let active_port_tunnels = Arc::new(Mutex::new(Vec::new()));
-        let background_tasks = Arc::new(Mutex::new(Vec::new()));
-        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
-        let daemon_addr_task = daemon_addr.clone();
-        let active_port_tunnels_task = active_port_tunnels.clone();
-        let background_tasks_accept = background_tasks.clone();
-        let handle = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = &mut shutdown_rx => {
-                        break;
-                    }
-                    accepted = listener.accept() => {
-                        let (stream, _) = match accepted {
-                            Ok(value) => value,
-                            Err(_) => break,
-                        };
-                        let daemon_addr = daemon_addr_task.clone();
-                        let active_port_tunnels = active_port_tunnels_task.clone();
-                        let connection_handle = tokio::spawn(async move {
-                            let daemon_addr = *daemon_addr.lock().await;
-                            if let Err(err) = proxy_connection(stream, daemon_addr, active_port_tunnels).await {
-                                if is_expected_proxy_teardown_error(&err) {
-                                    return;
-                                }
-                                panic!("multi-target tunnel-drop proxy connection failed: {err}");
-                            }
-                        });
-                        background_tasks_accept.lock().await.push(connection_handle);
-                    }
-                }
-            }
-        });
-
-        Self {
-            listen_addr,
-            daemon_addr,
-            active_port_tunnels,
-            background_tasks,
-            shutdown: Some(shutdown_tx),
-            handle: Some(handle),
-        }
-    }
-
-    async fn set_daemon_addr(&self, addr: std::net::SocketAddr) {
-        *self.daemon_addr.lock().await = addr;
-    }
-
-    async fn drop_port_tunnels(&self) {
-        let mut active = self.active_port_tunnels.lock().await;
-        for shutdown in active.drain(..) {
-            let _ = shutdown.send(PortTunnelAction::Drop);
-        }
-    }
-
-    async fn corrupt_port_tunnels(&self) {
-        let mut active = self.active_port_tunnels.lock().await;
-        for shutdown in active.drain(..) {
-            let _ = shutdown.send(PortTunnelAction::Corrupt);
-        }
-    }
-
-    async fn assert_no_task_panics(&self) {
-        let finished = {
-            let mut tasks = self.background_tasks.lock().await;
-            let mut finished = Vec::new();
-            let mut pending = Vec::with_capacity(tasks.len());
-            for handle in tasks.drain(..) {
-                if handle.is_finished() {
-                    finished.push(handle);
-                } else {
-                    pending.push(handle);
-                }
-            }
-            *tasks = pending;
-            finished
-        };
-
-        for handle in finished {
-            handle
-                .await
-                .expect("multi-target tunnel-drop proxy task panicked");
-        }
-    }
-
-    fn stop(&mut self) {
-        if let Some(shutdown) = self.shutdown.take() {
-            let _ = shutdown.send(());
-        }
-        if let Some(handle) = self.handle.take() {
-            handle.abort();
-        }
-        if let Ok(mut tasks) = self.background_tasks.try_lock() {
-            for handle in tasks.drain(..) {
-                handle.abort();
-            }
-        }
-    }
-}
-
-async fn proxy_connection(
-    mut client_stream: tokio::net::TcpStream,
-    daemon_addr: std::net::SocketAddr,
-    active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<PortTunnelAction>>>>,
-) -> std::io::Result<()> {
-    let mut backend_stream = tokio::net::TcpStream::connect(daemon_addr).await?;
-    let mut request = Vec::new();
-    let mut byte = [0u8; 1];
-
-    loop {
-        let read = client_stream.read(&mut byte).await?;
-        if read == 0 {
-            return Ok(());
-        }
-        request.push(byte[0]);
-        if request.ends_with(b"\r\n\r\n") {
-            break;
-        }
-    }
-
-    let request_text = String::from_utf8_lossy(&request);
-    let is_port_tunnel = is_port_tunnel_upgrade_request(&request_text);
-
-    if is_port_tunnel {
-        backend_stream.write_all(&request).await?;
-        let (drop_tx, drop_rx) = oneshot::channel();
-        active_port_tunnels.lock().await.push(drop_tx);
-        proxy_port_tunnel_streams(client_stream, backend_stream, drop_rx).await
-    } else {
-        let request = rewrite_request_connection_close(&request_text);
-        backend_stream.write_all(&request).await?;
-        proxy_plain_streams(client_stream, backend_stream).await
-    }
-}
-
-fn is_port_tunnel_upgrade_request(request: &str) -> bool {
-    let lower = request.to_ascii_lowercase();
-    let first_line = lower.lines().next().unwrap_or_default();
-    first_line.starts_with("post /v1/port/tunnel ")
-        && lower.contains("\r\nconnection: upgrade\r\n")
-        && lower.contains("\r\nupgrade: remote-exec-port-tunnel\r\n")
-}
-
-fn rewrite_request_connection_close(request: &str) -> Vec<u8> {
-    let (headers, _) = request.split_once("\r\n\r\n").unwrap_or((request, ""));
-    let mut lines = headers.lines();
-    let mut rewritten = String::new();
-    if let Some(first_line) = lines.next() {
-        rewritten.push_str(first_line);
-        rewritten.push_str("\r\n");
-    }
-    for line in lines {
-        if line.to_ascii_lowercase().starts_with("connection:") {
-            continue;
-        }
-        rewritten.push_str(line);
-        rewritten.push_str("\r\n");
-    }
-    rewritten.push_str("Connection: close\r\n\r\n");
-    rewritten.into_bytes()
-}
-
-async fn proxy_plain_streams(
-    mut client_stream: tokio::net::TcpStream,
-    mut backend_stream: tokio::net::TcpStream,
-) -> std::io::Result<()> {
-    let _ = tokio::io::copy_bidirectional(&mut client_stream, &mut backend_stream).await?;
-    Ok(())
-}
-
-async fn proxy_port_tunnel_streams(
-    mut client_stream: tokio::net::TcpStream,
-    mut backend_stream: tokio::net::TcpStream,
-    mut drop_rx: oneshot::Receiver<PortTunnelAction>,
-) -> std::io::Result<()> {
-    tokio::select! {
-        result = tokio::io::copy_bidirectional(&mut client_stream, &mut backend_stream) => {
-            let _ = result?;
-        }
-        action = &mut drop_rx => {
-            match action {
-                Ok(PortTunnelAction::Drop) | Err(_) => {
-                    let _ = client_stream.shutdown().await;
-                    let _ = backend_stream.shutdown().await;
-                }
-                Ok(PortTunnelAction::Corrupt) => {
-                    backend_stream
-                        .write_all(&[
-                            remote_exec_proto::port_tunnel::FrameType::TcpData as u8,
-                            0,
-                            1,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                        ])
-                        .await?;
-                    if let Ok(Ok(frame)) = tokio::time::timeout(
-                        Duration::from_secs(1),
-                        read_frame(&mut backend_stream),
-                    )
-                    .await
-                    {
-                        write_frame(&mut client_stream, &frame).await?;
-                    }
-                    let _ = backend_stream.shutdown().await;
-                    let _ = client_stream.shutdown().await;
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
 pub async fn write_png(path: &Path, width: u32, height: u32) {
     let image = image::DynamicImage::new_rgba8(width, height);
     image.save(path).unwrap();
 }
 
-pub async fn spawn_tcp_echo() -> std::net::SocketAddr {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        loop {
-            let (mut stream, _) = match listener.accept().await {
-                Ok(value) => value,
-                Err(_) => return,
-            };
-            tokio::spawn(async move {
-                let mut buf = [0u8; 1024];
-                loop {
-                    let read = match stream.read(&mut buf).await {
-                        Ok(0) => return,
-                        Ok(read) => read,
-                        Err(_) => return,
-                    };
-                    if stream.write_all(&buf[..read]).await.is_err() {
-                        return;
-                    }
-                }
-            });
-        }
-    });
-    addr
-}
+pub use shared::{spawn_tcp_echo, spawn_udp_echo};
 
-pub async fn spawn_udp_echo() -> std::net::SocketAddr {
-    let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let addr = socket.local_addr().unwrap();
-    tokio::spawn(async move {
-        let mut buf = [0u8; 1024];
-        loop {
-            let (read, peer) = match socket.recv_from(&mut buf).await {
-                Ok(value) => value,
-                Err(_) => return,
-            };
-            if socket.send_to(&buf[..read], peer).await.is_err() {
-                return;
-            }
-        }
-    });
-    addr
-}
-
-async fn wait_until_ready_http(client: &reqwest::Client, addr: std::net::SocketAddr) {
-    tokio::time::timeout(MULTI_TARGET_READY_TIMEOUT, async {
-        loop {
-            if client
-                .post(format!("http://{addr}/v1/health"))
-                .json(&serde_json::json!({}))
-                .send()
-                .await
-                .is_ok()
-            {
-                return;
-            }
-            tokio::time::sleep(MULTI_TARGET_READY_POLL).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| {
-        panic!(
-            "daemon HTTP endpoint at http://{addr} did not become ready within {MULTI_TARGET_READY_TIMEOUT:?}"
-        )
-    });
+async fn wait_until_ready_http(addr: std::net::SocketAddr) {
+    shared::wait_until_ready_http(
+        addr,
+        MULTI_TARGET_READY_TIMEOUT,
+        MULTI_TARGET_READY_POLL,
+        "daemon HTTP endpoint",
+    )
+    .await;
 }
 
 async fn wait_until_ready_mcp_http(url: &str) {
-    remote_exec_broker::install_crypto_provider().unwrap();
-    let client = reqwest::Client::builder().build().unwrap();
-
-    tokio::time::timeout(MULTI_TARGET_READY_TIMEOUT, async {
-        loop {
-            let response = client
-                .post(url)
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
-                .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
-                .send()
-                .await;
-            if response
-                .as_ref()
-                .is_ok_and(|response| response.status().is_success())
-            {
-                return;
-            }
-            tokio::time::sleep(MULTI_TARGET_READY_POLL).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| {
-        panic!(
-            "streamable HTTP broker at {url} did not become ready within {MULTI_TARGET_READY_TIMEOUT:?}"
-        )
-    });
-}
-
-fn build_http_client() -> reqwest::Client {
-    remote_exec_broker::install_crypto_provider().unwrap();
-    reqwest::Client::builder()
-        .pool_max_idle_per_host(0)
-        .build()
-        .unwrap()
+    shared::wait_until_ready_mcp_http(
+        url,
+        MULTI_TARGET_READY_TIMEOUT,
+        MULTI_TARGET_READY_POLL,
+        "streamable HTTP broker",
+    )
+    .await;
 }
 
 fn bind_reusable_daemon_test_listener(
@@ -890,18 +446,6 @@ fn bind_reusable_daemon_test_listener(
     socket.set_reuseaddr(true)?;
     socket.bind(addr)?;
     socket.listen(1024)
-}
-
-fn is_expected_proxy_teardown_error(err: &std::io::Error) -> bool {
-    matches!(
-        err.kind(),
-        std::io::ErrorKind::ConnectionAborted
-            | std::io::ErrorKind::ConnectionRefused
-            | std::io::ErrorKind::ConnectionReset
-            | std::io::ErrorKind::BrokenPipe
-            | std::io::ErrorKind::NotConnected
-            | std::io::ErrorKind::UnexpectedEof
-    ) || matches!(err.raw_os_error(), Some(10053 | 10054 | 10061))
 }
 
 pub async fn wait_for_forward_status_timeout(
@@ -993,7 +537,7 @@ mod tests {
     use tokio::sync::Mutex;
 
     use super::DEFAULT_TEST_TARGET;
-    use super::{DaemonFixture, TunnelDropProxy, build_http_client};
+    use super::{DaemonFixture, TunnelDropProxy};
 
     #[test]
     fn target_config_fragment_renders_insecure_http_target() {
@@ -1003,7 +547,6 @@ mod tests {
             addr: "127.0.0.1:9443".parse().unwrap(),
             backend_addr: "127.0.0.1:9444".parse().unwrap(),
             workdir: PathBuf::from("/tmp/workdir"),
-            client: build_http_client(),
             proxy: TunnelDropProxy {
                 listen_addr: "127.0.0.1:9443".parse().unwrap(),
                 daemon_addr: Arc::new(Mutex::new("127.0.0.1:9444".parse().unwrap())),

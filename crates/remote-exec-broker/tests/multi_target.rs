@@ -206,28 +206,15 @@ async fn forward_ports_relays_remote_udp_datagrams_from_two_peers_full_duplex() 
 
     let open = cluster
         .broker
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": DEFAULT_TEST_TARGET,
-                "connect_side": "local",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo_addr.to_string(),
-                    "protocol": "udp"
-                }]
-            }),
+        .open_udp_forward(
+            DEFAULT_TEST_TARGET,
+            "local",
+            "127.0.0.1:0",
+            &echo_addr.to_string(),
         )
         .await;
-    let forward_id = open.structured_content["forwards"][0]["forward_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let forward_id = open.forward_id();
+    let listen_endpoint = open.listen_endpoint();
 
     let client_a = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_b = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -337,19 +324,7 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_accept_new_t
     })
     .await
     .expect("active tcp stream should close when connect-side tunnel drops");
-    match read_after_drop {
-        Ok(0) => {}
-        Err(err)
-            if matches!(
-                err.kind(),
-                std::io::ErrorKind::BrokenPipe
-                    | std::io::ErrorKind::ConnectionReset
-                    | std::io::ErrorKind::NotConnected
-                    | std::io::ErrorKind::UnexpectedEof
-            ) => {}
-        Ok(read) => panic!("expected active tcp stream to close, read {read} byte(s) instead"),
-        Err(err) => panic!("unexpected active tcp stream read error: {err}"),
-    }
+    support::assert_stream_closed(read_after_drop, "active tcp stream");
 
     let forward = support::wait_for_forward_ready_after_reconnect(
         &cluster.broker,
@@ -538,24 +513,9 @@ async fn forward_ports_release_remote_listeners_when_broker_stops() {
 
     let open = cluster
         .broker
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": DEFAULT_TEST_TARGET,
-                "connect_side": "local",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": "127.0.0.1:9",
-                    "protocol": "tcp"
-                }]
-            }),
-        )
+        .open_tcp_forward(DEFAULT_TEST_TARGET, "local", "127.0.0.1:0", "127.0.0.1:9")
         .await;
-    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
-        .as_str()
-        .expect("listen endpoint")
-        .to_string();
+    let listen_endpoint = open.listen_endpoint();
     assert_ne!(listen_endpoint, "127.0.0.1:0");
 
     cluster.broker.stop().await;
@@ -602,24 +562,14 @@ async fn forward_ports_release_remote_listeners_after_broker_crash() {
 
     let reopened_broker = support::BrokerFixture::spawn(&daemon_a, &daemon_b).await;
     let reopened = reopened_broker
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": DEFAULT_TEST_TARGET,
-                "connect_side": "local",
-                "forwards": [{
-                    "listen_endpoint": listen_endpoint,
-                    "connect_endpoint": "127.0.0.1:9",
-                    "protocol": "tcp"
-                }]
-            }),
+        .open_tcp_forward(
+            DEFAULT_TEST_TARGET,
+            "local",
+            &listen_endpoint,
+            "127.0.0.1:9",
         )
         .await;
-    let reopened_forward_id = reopened.structured_content["forwards"][0]["forward_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let reopened_forward_id = reopened.forward_id();
     assert_eq!(
         reopened.structured_content["forwards"][0]["listen_endpoint"],
         listen_endpoint
@@ -640,54 +590,19 @@ async fn forward_ports_release_remote_listeners_after_broker_crash() {
 #[tokio::test]
 async fn forward_ports_fail_cleanly_after_daemon_restart_and_can_reopen() {
     let mut cluster = support::spawn_cluster().await;
-    let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let echo_addr = echo_listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        loop {
-            let (mut stream, _) = match echo_listener.accept().await {
-                Ok(value) => value,
-                Err(_) => return,
-            };
-            tokio::spawn(async move {
-                let mut buf = [0u8; 1024];
-                loop {
-                    let read = match stream.read(&mut buf).await {
-                        Ok(0) => return,
-                        Ok(read) => read,
-                        Err(_) => return,
-                    };
-                    if stream.write_all(&buf[..read]).await.is_err() {
-                        return;
-                    }
-                }
-            });
-        }
-    });
+    let echo_addr = support::spawn_tcp_echo().await;
 
     let open = cluster
         .broker
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": DEFAULT_TEST_TARGET,
-                "connect_side": "local",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo_addr.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
+        .open_tcp_forward(
+            DEFAULT_TEST_TARGET,
+            "local",
+            "127.0.0.1:0",
+            &echo_addr.to_string(),
         )
         .await;
-    let forward_id = open.structured_content["forwards"][0]["forward_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let forward_id = open.forward_id();
+    let listen_endpoint = open.listen_endpoint();
 
     let mut before_restart = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
@@ -768,7 +683,6 @@ async fn forward_ports_fail_cleanly_after_daemon_restart_and_can_reopen() {
     assert_eq!(closed.structured_content["forwards"][0]["status"], "closed");
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn exec_command_preserves_output_after_external_pipeline_steps() {
     let cluster = support::spawn_cluster().await;
@@ -790,34 +704,12 @@ async fn exec_command_preserves_output_after_external_pipeline_steps() {
 
     assert_eq!(result.structured_content["target"], DEFAULT_TEST_TARGET);
     assert_eq!(result.structured_content["exit_code"], 0);
+    #[cfg(unix)]
     assert_eq!(
         result.structured_content["output"],
         serde_json::Value::String("marker\nexternal\ndone\n".to_string())
     );
-}
-
-#[cfg(windows)]
-#[tokio::test]
-async fn exec_command_preserves_output_after_external_pipeline_steps() {
-    let cluster = support::spawn_cluster().await;
-
-    let result = cluster
-        .broker
-        .call_tool(
-            "exec_command",
-            serde_json::json!({
-                "target": DEFAULT_TEST_TARGET,
-                "cmd": PIPE_MODE_OUTPUT_CMD,
-                "shell": PIPE_MODE_SHELL,
-                "login": false,
-                "tty": false,
-                "yield_time_ms": 10_000
-            }),
-        )
-        .await;
-
-    assert_eq!(result.structured_content["target"], DEFAULT_TEST_TARGET);
-    assert_eq!(result.structured_content["exit_code"], 0);
+    #[cfg(windows)]
     assert_eq!(
         result.structured_content["output"]
             .as_str()

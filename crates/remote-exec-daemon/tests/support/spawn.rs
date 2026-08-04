@@ -49,7 +49,8 @@ impl WindowsPtyTestBackend {
     }
 }
 
-fn base_daemon_config(
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
+pub(crate) fn base_daemon_config(
     target: &str,
     listen: SocketAddr,
     default_workdir: &Path,
@@ -104,26 +105,6 @@ pub(super) enum StartupWaitOutcome {
     Ready,
     ThreadFinished,
     TimedOut,
-}
-
-fn daemon_fixture(
-    tempdir: tempfile::TempDir,
-    client: reqwest::Client,
-    addr: SocketAddr,
-    scheme: &'static str,
-    workdir: std::path::PathBuf,
-    shutdown: tokio::sync::oneshot::Sender<()>,
-    server_thread: std::thread::JoinHandle<anyhow::Result<()>>,
-) -> DaemonFixture {
-    DaemonFixture::new(
-        tempdir,
-        client,
-        addr,
-        scheme,
-        workdir,
-        shutdown,
-        server_thread,
-    )
 }
 
 pub(super) async fn wait_until_ready(
@@ -281,7 +262,7 @@ async fn spawn_daemon_with_pty_mode(
         wait_until_ready(&client, &format!("http://{addr}/v1/health"), &server_thread).await;
 
     if startup == StartupWaitOutcome::Ready {
-        return daemon_fixture(
+        return DaemonFixture::new(
             tempdir,
             client,
             addr,
@@ -301,11 +282,6 @@ async fn spawn_daemon_with_pty_mode(
         server_thread,
     );
     panic!("daemon test startup failed: {err:#}");
-}
-
-#[allow(dead_code, reason = "Shared across daemon integration test crates")]
-pub async fn spawn_daemon_over_http(target: &str) -> DaemonFixture {
-    spawn_daemon(target).await
 }
 
 #[allow(dead_code, reason = "Shared across daemon integration test crates")]
@@ -448,7 +424,7 @@ transport = "http"
         wait_until_ready(&client, &format!("http://{addr}/v1/health"), &server_thread).await;
 
     if startup == StartupWaitOutcome::Ready {
-        return daemon_fixture(
+        return DaemonFixture::new(
             tempdir,
             client,
             addr,

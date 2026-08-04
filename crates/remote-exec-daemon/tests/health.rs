@@ -2,10 +2,7 @@ mod support;
 
 use std::net::{Ipv4Addr, SocketAddr};
 
-use remote_exec_daemon::config::{
-    DaemonConfig, DaemonTransport, HostPortForwardLimits, ProcessEnvironment, PtyMode,
-    YieldTimeConfig,
-};
+use remote_exec_daemon::config::{DaemonConfig, ProcessEnvironment, PtyMode};
 use remote_exec_proto::request_id::{REQUEST_ID_HEADER, RequestId};
 use remote_exec_proto::rpc::TargetInfoResponse;
 use reqwest::StatusCode;
@@ -14,29 +11,13 @@ use support::test_helpers::{DEFAULT_TEST_TARGET, TEST_BEARER_SECRET};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn startup_validation_config() -> DaemonConfig {
-    DaemonConfig {
-        target: DEFAULT_TEST_TARGET.to_string(),
-        listen: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
-        connection_mode: remote_exec_daemon::config::DaemonConnectionMode::Listen,
-        reverse: None,
-        default_workdir: std::env::temp_dir(),
-        windows_posix_root: None,
-        transport: DaemonTransport::Http,
-        http_auth: None,
-        sandbox: None,
-        enable_transfer_compression: true,
-        transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
-        max_open_sessions: remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS,
-        allow_login_shell: true,
-        pty: PtyMode::Auto,
-        default_shell: None,
-        yield_time: YieldTimeConfig::default(),
-        port_forward_limits: HostPortForwardLimits::default(),
-        experimental_apply_patch_target_encoding_autodetect: false,
-        process_environment: ProcessEnvironment::capture_current(),
-        tls: None,
-        request_timeout_ms: 300_000,
-    }
+    support::spawn::base_daemon_config(
+        DEFAULT_TEST_TARGET,
+        SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+        &std::env::temp_dir(),
+        PtyMode::Auto,
+        ProcessEnvironment::capture_current(),
+    )
 }
 
 async fn raw_http_request(addr: SocketAddr, request: &str) -> String {

@@ -1,18 +1,69 @@
 mod support;
 
-use encoding_rs::{BIG5, EUC_KR, Encoding, GBK, SHIFT_JIS};
+use encoding_rs::{BIG5, EUC_KR, GBK, SHIFT_JIS};
 use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse};
 use remote_exec_test_support::test_helpers::utf16le_bom_bytes;
+use support::encoded_bytes;
 use support::test_helpers::DEFAULT_TEST_TARGET;
 
-fn encoded_bytes(encoding: &'static Encoding, text: &str) -> Vec<u8> {
-    let (encoded, _, had_errors) = encoding.encode(text);
-    assert!(
-        !had_errors,
-        "test text should be encodable as {}",
-        encoding.name()
+/// Applies `patch` to `plain.txt` (seeded with `initial_content`) and asserts the
+/// standard "M plain.txt" + resulting-content outcome shared by update_file_* tests.
+async fn assert_update_file_outcome(initial_content: &str, patch: &str, expected_content: &str) {
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+    let path = fixture.workdir.join("plain.txt");
+    tokio::fs::write(&path, initial_content).await.unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: patch.to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("M plain.txt"));
+    assert_eq!(
+        tokio::fs::read_to_string(path).await.unwrap(),
+        expected_content,
     );
-    encoded.into_owned()
+}
+
+/// Asserts that a `*** Update File: first.txt` change still applies even when the
+/// later `later_action` fails, leaving `first.txt` with the updated content.
+async fn assert_later_action_preserves_earlier_updates(
+    fixture: &support::fixture::DaemonFixture,
+    later_action: &str,
+) {
+    let err = fixture
+        .rpc_error(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: format!(
+                    concat!(
+                        "*** Begin Patch\n",
+                        "*** Update File: first.txt\n",
+                        "@@\n",
+                        "-before\n",
+                        "+after\n",
+                        "{later_action}",
+                        "*** End Patch\n",
+                    ),
+                    later_action = later_action
+                ),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(err.wire_code(), "patch_failed");
+    assert_eq!(
+        tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
+            .await
+            .unwrap(),
+        "after\n",
+    );
 }
 
 #[tokio::test]
@@ -322,194 +373,104 @@ async fn apply_patch_accepts_windows_posix_root_paths_on_windows() {
 
 #[tokio::test]
 async fn update_file_accepts_end_of_file_marker() {
-    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let path = fixture.workdir.join("plain.txt");
-    tokio::fs::write(&path, "before\nmiddle\nbefore\n")
-        .await
-        .unwrap();
-
-    let response = fixture
-        .rpc::<PatchApplyRequest, PatchApplyResponse>(
-            "/v1/patch/apply",
-            &PatchApplyRequest {
-                patch: concat!(
-                    "*** Begin Patch\n",
-                    "*** Update File: plain.txt\n",
-                    "@@\n",
-                    "-before\n",
-                    "+after\n",
-                    "*** End of File\n",
-                    "*** End Patch\n",
-                )
-                .to_string(),
-                workdir: Some(".".to_string()),
-            },
-        )
-        .await;
-
-    assert!(response.output.contains("M plain.txt"));
-    assert_eq!(
-        tokio::fs::read_to_string(path).await.unwrap(),
+    assert_update_file_outcome(
+        "before\nmiddle\nbefore\n",
+        concat!(
+            "*** Begin Patch\n",
+            "*** Update File: plain.txt\n",
+            "@@\n",
+            "-before\n",
+            "+after\n",
+            "*** End of File\n",
+            "*** End Patch\n",
+        ),
         "before\nmiddle\nafter\n",
-    );
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn update_file_replaces_blank_last_real_line_at_end_of_file() {
-    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let path = fixture.workdir.join("plain.txt");
-    tokio::fs::write(&path, "alpha\n\n").await.unwrap();
-
-    let response = fixture
-        .rpc::<PatchApplyRequest, PatchApplyResponse>(
-            "/v1/patch/apply",
-            &PatchApplyRequest {
-                patch: concat!(
-                    "*** Begin Patch\n",
-                    "*** Update File: plain.txt\n",
-                    "@@\n",
-                    "-\n",
-                    "+omega\n",
-                    "*** End of File\n",
-                    "*** End Patch\n",
-                )
-                .to_string(),
-                workdir: Some(".".to_string()),
-            },
-        )
-        .await;
-
-    assert!(response.output.contains("M plain.txt"));
-    assert_eq!(
-        tokio::fs::read_to_string(path).await.unwrap(),
-        "alpha\nomega\n"
-    );
+    assert_update_file_outcome(
+        "alpha\n\n",
+        concat!(
+            "*** Begin Patch\n",
+            "*** Update File: plain.txt\n",
+            "@@\n",
+            "-\n",
+            "+omega\n",
+            "*** End of File\n",
+            "*** End Patch\n",
+        ),
+        "alpha\nomega\n",
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn update_file_accepts_first_chunk_without_explicit_header() {
-    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let path = fixture.workdir.join("plain.txt");
-    tokio::fs::write(&path, "before\nmiddle\n").await.unwrap();
-
-    let response = fixture
-        .rpc::<PatchApplyRequest, PatchApplyResponse>(
-            "/v1/patch/apply",
-            &PatchApplyRequest {
-                patch: concat!(
-                    "*** Begin Patch\n",
-                    "*** Update File: plain.txt\n",
-                    "-before\n",
-                    "+after\n",
-                    "*** End Patch\n",
-                )
-                .to_string(),
-                workdir: Some(".".to_string()),
-            },
-        )
-        .await;
-
-    assert!(response.output.contains("M plain.txt"));
-    assert_eq!(
-        tokio::fs::read_to_string(path).await.unwrap(),
+    assert_update_file_outcome(
+        "before\nmiddle\n",
+        concat!(
+            "*** Begin Patch\n",
+            "*** Update File: plain.txt\n",
+            "-before\n",
+            "+after\n",
+            "*** End Patch\n",
+        ),
         "after\nmiddle\n",
-    );
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn update_file_matches_old_lines_ignoring_trailing_whitespace() {
-    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let path = fixture.workdir.join("plain.txt");
-    tokio::fs::write(&path, "alpha  \ntail\n").await.unwrap();
-
-    let response = fixture
-        .rpc::<PatchApplyRequest, PatchApplyResponse>(
-            "/v1/patch/apply",
-            &PatchApplyRequest {
-                patch: concat!(
-                    "*** Begin Patch\n",
-                    "*** Update File: plain.txt\n",
-                    "@@\n",
-                    "-alpha\n",
-                    "+omega\n",
-                    "*** End Patch\n",
-                )
-                .to_string(),
-                workdir: Some(".".to_string()),
-            },
-        )
-        .await;
-
-    assert!(response.output.contains("M plain.txt"));
-    assert_eq!(
-        tokio::fs::read_to_string(path).await.unwrap(),
+    assert_update_file_outcome(
+        "alpha  \ntail\n",
+        concat!(
+            "*** Begin Patch\n",
+            "*** Update File: plain.txt\n",
+            "@@\n",
+            "-alpha\n",
+            "+omega\n",
+            "*** End Patch\n",
+        ),
         "omega\ntail\n",
-    );
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn update_file_matches_change_context_after_unicode_normalization() {
-    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let path = fixture.workdir.join("plain.txt");
-    tokio::fs::write(&path, "start\nalpha — “beta\u{00a0}gamma”\ntail\n")
-        .await
-        .unwrap();
-
-    let response = fixture
-        .rpc::<PatchApplyRequest, PatchApplyResponse>(
-            "/v1/patch/apply",
-            &PatchApplyRequest {
-                patch: concat!(
-                    "*** Begin Patch\n",
-                    "*** Update File: plain.txt\n",
-                    "@@ alpha - \"beta gamma\"\n",
-                    "+inserted\n",
-                    "*** End Patch\n",
-                )
-                .to_string(),
-                workdir: Some(".".to_string()),
-            },
-        )
-        .await;
-
-    assert!(response.output.contains("M plain.txt"));
-    assert_eq!(
-        tokio::fs::read_to_string(path).await.unwrap(),
-        "start\ninserted\nalpha — “beta\u{00a0}gamma”\ntail\n"
-    );
+    assert_update_file_outcome(
+        "start\nalpha — “beta\u{00a0}gamma”\ntail\n",
+        concat!(
+            "*** Begin Patch\n",
+            "*** Update File: plain.txt\n",
+            "@@ alpha - \"beta gamma\"\n",
+            "+inserted\n",
+            "*** End Patch\n",
+        ),
+        "start\ninserted\nalpha — “beta\u{00a0}gamma”\ntail\n",
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn update_file_matches_old_lines_after_unicode_normalization() {
-    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let path = fixture.workdir.join("plain.txt");
-    tokio::fs::write(&path, "start\nalpha — “beta\u{00a0}gamma”\ntail\n")
-        .await
-        .unwrap();
-
-    let response = fixture
-        .rpc::<PatchApplyRequest, PatchApplyResponse>(
-            "/v1/patch/apply",
-            &PatchApplyRequest {
-                patch: concat!(
-                    "*** Begin Patch\n",
-                    "*** Update File: plain.txt\n",
-                    "@@\n",
-                    "-alpha - \"beta gamma\"\n",
-                    "+omega\n",
-                    "*** End Patch\n",
-                )
-                .to_string(),
-                workdir: Some(".".to_string()),
-            },
-        )
-        .await;
-
-    assert!(response.output.contains("M plain.txt"));
-    assert_eq!(
-        tokio::fs::read_to_string(path).await.unwrap(),
+    assert_update_file_outcome(
+        "start\nalpha — “beta\u{00a0}gamma”\ntail\n",
+        concat!(
+            "*** Begin Patch\n",
+            "*** Update File: plain.txt\n",
+            "@@\n",
+            "-alpha - \"beta gamma\"\n",
+            "+omega\n",
+            "*** End Patch\n",
+        ),
         "start\nomega\ntail\n",
-    );
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -612,33 +573,19 @@ async fn update_file_rejects_non_eof_match_for_end_of_file_marker() {
 
 #[tokio::test]
 async fn update_file_appends_at_eof_for_pure_addition_with_matching_context() {
-    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let path = fixture.workdir.join("plain.txt");
-    tokio::fs::write(&path, "before\ntail\n").await.unwrap();
-
-    let response = fixture
-        .rpc::<PatchApplyRequest, PatchApplyResponse>(
-            "/v1/patch/apply",
-            &PatchApplyRequest {
-                patch: concat!(
-                    "*** Begin Patch\n",
-                    "*** Update File: plain.txt\n",
-                    "@@ tail\n",
-                    "+after\n",
-                    "*** End of File\n",
-                    "*** End Patch\n",
-                )
-                .to_string(),
-                workdir: Some(".".to_string()),
-            },
-        )
-        .await;
-
-    assert!(response.output.contains("M plain.txt"));
-    assert_eq!(
-        tokio::fs::read_to_string(path).await.unwrap(),
+    assert_update_file_outcome(
+        "before\ntail\n",
+        concat!(
+            "*** Begin Patch\n",
+            "*** Update File: plain.txt\n",
+            "@@ tail\n",
+            "+after\n",
+            "*** End of File\n",
+            "*** End Patch\n",
+        ),
         "before\ntail\nafter\n",
-    );
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -679,32 +626,7 @@ async fn later_missing_delete_target_preserves_earlier_updates() {
         .await
         .unwrap();
 
-    let err = fixture
-        .rpc_error(
-            "/v1/patch/apply",
-            &PatchApplyRequest {
-                patch: concat!(
-                    "*** Begin Patch\n",
-                    "*** Update File: first.txt\n",
-                    "@@\n",
-                    "-before\n",
-                    "+after\n",
-                    "*** Delete File: missing.txt\n",
-                    "*** End Patch\n",
-                )
-                .to_string(),
-                workdir: Some(".".to_string()),
-            },
-        )
-        .await;
-
-    assert_eq!(err.wire_code(), "patch_failed");
-    assert_eq!(
-        tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
-            .await
-            .unwrap(),
-        "after\n",
-    );
+    assert_later_action_preserves_earlier_updates(&fixture, "*** Delete File: missing.txt\n").await;
 }
 
 #[tokio::test]
@@ -717,32 +639,7 @@ async fn later_delete_directory_target_preserves_earlier_updates() {
         .await
         .unwrap();
 
-    let err = fixture
-        .rpc_error(
-            "/v1/patch/apply",
-            &PatchApplyRequest {
-                patch: concat!(
-                    "*** Begin Patch\n",
-                    "*** Update File: first.txt\n",
-                    "@@\n",
-                    "-before\n",
-                    "+after\n",
-                    "*** Delete File: nested\n",
-                    "*** End Patch\n",
-                )
-                .to_string(),
-                workdir: Some(".".to_string()),
-            },
-        )
-        .await;
-
-    assert_eq!(err.wire_code(), "patch_failed");
-    assert_eq!(
-        tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
-            .await
-            .unwrap(),
-        "after\n",
-    );
+    assert_later_action_preserves_earlier_updates(&fixture, "*** Delete File: nested\n").await;
 }
 
 #[tokio::test]
@@ -755,35 +652,11 @@ async fn later_non_utf8_update_source_preserves_earlier_updates() {
         .await
         .unwrap();
 
-    let err = fixture
-        .rpc_error(
-            "/v1/patch/apply",
-            &PatchApplyRequest {
-                patch: concat!(
-                    "*** Begin Patch\n",
-                    "*** Update File: first.txt\n",
-                    "@@\n",
-                    "-before\n",
-                    "+after\n",
-                    "*** Update File: binary.txt\n",
-                    "@@\n",
-                    "-old\n",
-                    "+new\n",
-                    "*** End Patch\n",
-                )
-                .to_string(),
-                workdir: Some(".".to_string()),
-            },
-        )
-        .await;
-
-    assert_eq!(err.wire_code(), "patch_failed");
-    assert_eq!(
-        tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
-            .await
-            .unwrap(),
-        "after\n",
-    );
+    assert_later_action_preserves_earlier_updates(
+        &fixture,
+        concat!("*** Update File: binary.txt\n", "@@\n", "-old\n", "+new\n",),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -867,7 +740,7 @@ async fn utf16le_update_source_still_fails_when_autodetect_is_disabled() {
 async fn update_file_autodetects_utf16le_target_encoding_when_enabled() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
         DEFAULT_TEST_TARGET,
-        "experimental_apply_patch_target_encoding_autodetect = true",
+        support::ENCODING_AUTODETECT_CONFIG,
     )
     .await;
     let path = fixture.workdir.join("utf16.txt");
@@ -904,7 +777,7 @@ async fn update_file_autodetects_utf16le_target_encoding_when_enabled() {
 async fn delete_file_autodetects_utf16le_target_encoding_when_enabled() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
         DEFAULT_TEST_TARGET,
-        "experimental_apply_patch_target_encoding_autodetect = true",
+        support::ENCODING_AUTODETECT_CONFIG,
     )
     .await;
     let path = fixture.workdir.join("utf16.txt");
@@ -930,7 +803,7 @@ async fn delete_file_autodetects_utf16le_target_encoding_when_enabled() {
 async fn update_file_autodetects_common_east_asian_encodings_when_enabled() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
         DEFAULT_TEST_TARGET,
-        "experimental_apply_patch_target_encoding_autodetect = true",
+        support::ENCODING_AUTODETECT_CONFIG,
     )
     .await;
 
@@ -1011,7 +884,7 @@ async fn update_file_autodetects_common_east_asian_encodings_when_enabled() {
 async fn add_file_overwrite_preserves_utf16le_target_encoding_when_enabled() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
         DEFAULT_TEST_TARGET,
-        "experimental_apply_patch_target_encoding_autodetect = true",
+        support::ENCODING_AUTODETECT_CONFIG,
     )
     .await;
     let path = fixture.workdir.join("utf16.txt");
@@ -1222,52 +1095,27 @@ async fn add_then_delete_same_file_leaves_no_file() {
 
 #[tokio::test]
 async fn update_file_applies_repeated_context_additions_in_order() {
-    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let path = fixture.workdir.join("plain.txt");
-    tokio::fs::write(&path, "a\nmarker\nb\nmarker\nc\n")
-        .await
-        .unwrap();
-
-    let response = fixture
-        .rpc::<PatchApplyRequest, PatchApplyResponse>(
-            "/v1/patch/apply",
-            &PatchApplyRequest {
-                patch: concat!(
-                    "*** Begin Patch\n",
-                    "*** Update File: plain.txt\n",
-                    "@@ marker\n",
-                    "+first\n",
-                    "@@ marker\n",
-                    "+second\n",
-                    "*** End Patch\n",
-                )
-                .to_string(),
-                workdir: Some(".".to_string()),
-            },
-        )
-        .await;
-
-    assert!(response.output.contains("M plain.txt"));
-    assert_eq!(
-        tokio::fs::read_to_string(path).await.unwrap(),
+    assert_update_file_outcome(
+        "a\nmarker\nb\nmarker\nc\n",
+        concat!(
+            "*** Begin Patch\n",
+            "*** Update File: plain.txt\n",
+            "@@ marker\n",
+            "+first\n",
+            "@@ marker\n",
+            "+second\n",
+            "*** End Patch\n",
+        ),
         "a\nfirst\nmarker\nb\nsecond\nmarker\nc\n",
-    );
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn apply_patch_uses_resolved_paths_not_workdir_for_sandbox_checks() {
     let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
         DEFAULT_TEST_TARGET,
-        |workdir| {
-            let allow = toml::Value::Array(vec![toml::Value::String(
-                workdir.join("visible").display().to_string(),
-            )]);
-            format!(
-                r#"[sandbox.write]
-allow = {allow}
-"#
-            )
-        },
+        |workdir| support::sandbox_allow_config("write", &workdir.join("visible"), None),
     )
     .await;
     tokio::fs::create_dir_all(fixture.workdir.join("visible"))
@@ -1301,16 +1149,7 @@ allow = {allow}
 async fn apply_patch_rejects_writes_outside_sandbox() {
     let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
         DEFAULT_TEST_TARGET,
-        |workdir| {
-            let allow = toml::Value::Array(vec![toml::Value::String(
-                workdir.join("visible").display().to_string(),
-            )]);
-            format!(
-                r#"[sandbox.write]
-allow = {allow}
-"#
-            )
-        },
+        |workdir| support::sandbox_allow_config("write", &workdir.join("visible"), None),
     )
     .await;
     tokio::fs::create_dir_all(fixture.workdir.join("blocked"))
@@ -1341,16 +1180,7 @@ allow = {allow}
 async fn later_sandbox_denial_preserves_earlier_updates() {
     let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
         DEFAULT_TEST_TARGET,
-        |workdir| {
-            let allow = toml::Value::Array(vec![toml::Value::String(
-                workdir.join("visible").display().to_string(),
-            )]);
-            format!(
-                r#"[sandbox.write]
-allow = {allow}
-"#
-            )
-        },
+        |workdir| support::sandbox_allow_config("write", &workdir.join("visible"), None),
     )
     .await;
     tokio::fs::create_dir_all(fixture.workdir.join("visible"))

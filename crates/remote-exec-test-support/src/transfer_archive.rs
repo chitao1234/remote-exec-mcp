@@ -156,8 +156,7 @@ pub fn multi_source_tar() -> Vec<u8> {
     builder.into_inner().unwrap()
 }
 
-#[cfg(unix)]
-pub fn directory_tar_with_symlink() -> Vec<u8> {
+pub fn directory_tar_with_symlink(link_target: &str) -> Vec<u8> {
     let mut builder = tar::Builder::new(Vec::new());
 
     let file_body = b"alpha\n";
@@ -178,7 +177,7 @@ pub fn directory_tar_with_symlink() -> Vec<u8> {
     link.set_entry_type(tar::EntryType::Symlink);
     link.set_size(0);
     builder
-        .append_link(&mut link, "alpha-link", "alpha.txt")
+        .append_link(&mut link, "alpha-link", link_target)
         .unwrap();
 
     builder.finish().unwrap();

@@ -15,9 +15,9 @@ use remote_exec_proto::rpc::{
 };
 use remote_exec_proto::transfer::{TransferCompression, TransferSourceType};
 use support::test_helpers::DEFAULT_TEST_TARGET;
-#[cfg(unix)]
-use support::transfer_archive::directory_tar_with_symlink;
-use support::transfer_archive::{decode_archive, multi_source_tar, raw_tar_file_with_path};
+use support::transfer_archive::{
+    decode_archive, directory_tar_with_symlink, multi_source_tar, raw_tar_file_with_path,
+};
 
 async fn transfer_path_info(
     fixture: &support::fixture::DaemonFixture,
@@ -51,18 +51,32 @@ async fn export_path(
         .await
 }
 
+/// Writes `source.txt` with `artifact\n` content, exports it, and returns the
+/// decoded archive bytes, ready for an import round trip.
+async fn exported_source_file_bytes(fixture: &support::fixture::DaemonFixture) -> Vec<u8> {
+    let source = fixture.workdir.join("source.txt");
+    tokio::fs::write(&source, "artifact\n").await.unwrap();
+    let exported = export_path(fixture, source.display(), TransferCompression::None).await;
+    archive_bytes_from_response(exported).await
+}
+
 fn import_headers(
     destination: impl ToString,
     overwrite: &str,
     create_parent: &str,
     source_type: &str,
+    compression: Option<&str>,
 ) -> Vec<(&'static str, String)> {
-    vec![
+    let mut headers = vec![
         encoded_destination_header(destination),
         (TRANSFER_OVERWRITE_HEADER, overwrite.to_string()),
         (TRANSFER_CREATE_PARENT_HEADER, create_parent.to_string()),
         (TRANSFER_SOURCE_TYPE_HEADER, source_type.to_string()),
-    ]
+    ];
+    if let Some(compression) = compression {
+        headers.push((TRANSFER_COMPRESSION_HEADER, compression.to_string()));
+    }
+    headers
 }
 
 fn encoded_destination_header(destination: impl ToString) -> (&'static str, String) {
@@ -174,18 +188,6 @@ async fn transfer_stream_error_from_response(
     decode_transfer_stream_error(&response.bytes().await.unwrap())
 }
 
-fn directory_tar_with_symlink_target(target: &str) -> Vec<u8> {
-    let mut builder = tar::Builder::new(Vec::new());
-    let mut link = tar::Header::new_gnu();
-    link.set_entry_type(tar::EntryType::Symlink);
-    link.set_size(0);
-    builder
-        .append_link(&mut link, "link", target)
-        .expect("append symlink entry");
-    builder.finish().expect("finish tar");
-    builder.into_inner().expect("tar bytes")
-}
-
 #[tokio::test]
 async fn export_file_streams_archive_and_reports_file_source_type() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
@@ -252,8 +254,9 @@ async fn transfer_path_info_reports_permission_denied_as_internal_error() {
         .await
         .unwrap();
 
-    let original_mode = std::fs::metadata(&blocked).unwrap().permissions().mode();
-    let mut blocked_perms = std::fs::metadata(&blocked).unwrap().permissions();
+    let blocked_metadata = std::fs::metadata(&blocked).unwrap();
+    let original_mode = blocked_metadata.permissions().mode();
+    let mut blocked_perms = blocked_metadata.permissions();
     blocked_perms.set_mode(0o000);
     std::fs::set_permissions(&blocked, blocked_perms).unwrap();
 
@@ -338,17 +341,7 @@ async fn export_directory_preserves_symlinks_by_default() {
         .unwrap();
     std::os::unix::fs::symlink("app.txt", root.join("app-link")).unwrap();
 
-    let response = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: root.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
+    let response = export_path(&fixture, root.display(), TransferCompression::None).await;
 
     assert!(response.status().is_success());
     let bytes = archive_bytes_from_response(response).await;
@@ -382,17 +375,7 @@ async fn export_directory_skips_special_files_with_warning() {
         .unwrap();
     assert!(status.success());
 
-    let response = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: root.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
+    let response = export_path(&fixture, root.display(), TransferCompression::None).await;
 
     assert!(response.status().is_success());
     assert!(
@@ -416,7 +399,7 @@ async fn export_directory_skips_special_files_with_warning() {
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "merge", "false", "directory"),
+            &import_headers(destination.display(), "merge", "false", "directory", None),
             archive.into_inner().into_inner(),
         )
         .await;
@@ -444,7 +427,7 @@ async fn import_accepts_unicode_destination_paths() {
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "replace", "true", "file"),
+            &import_headers(destination.display(), "replace", "true", "file", None),
             body,
         )
         .await;
@@ -568,17 +551,7 @@ async fn export_file_preserves_executable_mode_in_archive_header() {
     perms.set_mode(0o755);
     std::fs::set_permissions(&source, perms).unwrap();
 
-    let response = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: source.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
+    let response = export_path(&fixture, source.display(), TransferCompression::None).await;
     let bytes = archive_bytes_from_response(response).await;
     let mut archive = tar::Archive::new(std::io::Cursor::new(bytes));
     let mut entries = archive.entries().unwrap();
@@ -594,17 +567,7 @@ async fn import_accepts_forward_slash_windows_destination_paths() {
     let source = fixture.workdir.join("source.txt");
     tokio::fs::write(&source, "artifact\n").await.unwrap();
 
-    let exported = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: source.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
+    let exported = export_path(&fixture, source.display(), TransferCompression::None).await;
     let bytes = archive_bytes_from_response(exported).await;
     let destination = fixture.workdir.join("release").join("artifact.txt");
     let destination_text = destination.display().to_string().replace('\\', "/");
@@ -612,12 +575,7 @@ async fn import_accepts_forward_slash_windows_destination_paths() {
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &[
-                encoded_destination_header(destination_text),
-                (TRANSFER_OVERWRITE_HEADER, "fail".to_string()),
-                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
-                (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
-            ],
+            &import_headers(destination_text, "fail", "true", "file", None),
             bytes,
         )
         .await;
@@ -636,17 +594,12 @@ async fn export_accepts_msys_style_windows_source_paths() {
     let source = fixture.workdir.join("msys-source.txt");
     tokio::fs::write(&source, "artifact\n").await.unwrap();
 
-    let response = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: support::msys_style_path(&source),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
+    let response = export_path(
+        &fixture,
+        support::msys_style_path(&source),
+        TransferCompression::None,
+    )
+    .await;
 
     assert!(response.status().is_success());
     assert_eq!(
@@ -668,17 +621,7 @@ async fn import_accepts_cygwin_style_windows_destination_paths() {
     let source = fixture.workdir.join("source.txt");
     tokio::fs::write(&source, "artifact\n").await.unwrap();
 
-    let exported = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: source.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
+    let exported = export_path(&fixture, source.display(), TransferCompression::None).await;
     let bytes = archive_bytes_from_response(exported).await;
     let destination = fixture
         .workdir
@@ -688,12 +631,13 @@ async fn import_accepts_cygwin_style_windows_destination_paths() {
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &[
-                encoded_destination_header(support::cygwin_style_path(&destination)),
-                (TRANSFER_OVERWRITE_HEADER, "fail".to_string()),
-                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
-                (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
-            ],
+            &import_headers(
+                support::cygwin_style_path(&destination),
+                "fail",
+                "true",
+                "file",
+                None,
+            ),
             bytes,
         )
         .await;
@@ -726,17 +670,12 @@ async fn export_accepts_windows_posix_root_source_paths() {
         .unwrap();
     tokio::fs::write(&source, "artifact\n").await.unwrap();
 
-    let response = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: "/artifacts/synthetic-source.txt".to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
+    let response = export_path(
+        &fixture,
+        "/artifacts/synthetic-source.txt",
+        TransferCompression::None,
+    )
+    .await;
 
     assert!(response.status().is_success());
     assert!(!archive_bytes_from_response(response).await.is_empty());
@@ -759,17 +698,7 @@ async fn import_accepts_windows_posix_root_destination_paths() {
     let source = fixture.workdir.join("source.txt");
     tokio::fs::write(&source, "artifact\n").await.unwrap();
 
-    let exported = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: source.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
+    let exported = export_path(&fixture, source.display(), TransferCompression::None).await;
     let bytes = archive_bytes_from_response(exported).await;
     let root = fixture.workdir.join("synthetic-msys-root");
     let destination = root.join("release").join("artifact.txt");
@@ -777,12 +706,7 @@ async fn import_accepts_windows_posix_root_destination_paths() {
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &[
-                encoded_destination_header("/release/artifact.txt"),
-                (TRANSFER_OVERWRITE_HEADER, "fail".to_string()),
-                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
-                (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
-            ],
+            &import_headers("/release/artifact.txt", "fail", "true", "file", None),
             bytes,
         )
         .await;
@@ -823,7 +747,7 @@ async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "replace", "true", "directory"),
+            &import_headers(destination.display(), "replace", "true", "directory", None),
             bytes,
         )
         .await;
@@ -857,13 +781,13 @@ async fn import_multiple_source_archive_creates_destination_directory_bundle() {
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &[
-                encoded_destination_header(destination.display()),
-                (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
-                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
-                (TRANSFER_SOURCE_TYPE_HEADER, "multiple".to_string()),
-                (TRANSFER_COMPRESSION_HEADER, "none".to_string()),
-            ],
+            &import_headers(
+                destination.display(),
+                "replace",
+                "true",
+                "multiple",
+                Some("none"),
+            ),
             multi_source_tar(),
         )
         .await;
@@ -896,14 +820,14 @@ async fn import_directory_preserves_symlinks_by_default() {
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &[
-                encoded_destination_header(destination.display()),
-                (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
-                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
-                (TRANSFER_SOURCE_TYPE_HEADER, "directory".to_string()),
-                (TRANSFER_COMPRESSION_HEADER, "none".to_string()),
-            ],
-            directory_tar_with_symlink(),
+            &import_headers(
+                destination.display(),
+                "replace",
+                "true",
+                "directory",
+                Some("none"),
+            ),
+            directory_tar_with_symlink("alpha.txt"),
         )
         .await;
 
@@ -951,13 +875,13 @@ async fn import_directory_merge_preserves_unrelated_destination_entries() {
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &[
-                encoded_destination_header(destination.display()),
-                (TRANSFER_OVERWRITE_HEADER, "merge".to_string()),
-                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
-                (TRANSFER_SOURCE_TYPE_HEADER, "directory".to_string()),
-                (TRANSFER_COMPRESSION_HEADER, "none".to_string()),
-            ],
+            &import_headers(
+                destination.display(),
+                "merge",
+                "true",
+                "directory",
+                Some("none"),
+            ),
             bytes,
         )
         .await;
@@ -1023,18 +947,15 @@ async fn import_directory_merge_rejects_existing_file_destination() {
 #[tokio::test]
 async fn import_rejects_existing_destination_when_overwrite_is_fail() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let source = fixture.workdir.join("source.txt");
     let destination = fixture.workdir.join("dest.txt");
-    tokio::fs::write(&source, "new\n").await.unwrap();
     tokio::fs::write(&destination, "old\n").await.unwrap();
 
-    let exported = export_path(&fixture, source.display(), TransferCompression::None).await;
-    let bytes = archive_bytes_from_response(exported).await;
+    let bytes = exported_source_file_bytes(&fixture).await;
 
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "fail", "false", "file"),
+            &import_headers(destination.display(), "fail", "false", "file", None),
             bytes,
         )
         .await;
@@ -1054,21 +975,7 @@ async fn import_rejects_existing_destination_when_overwrite_is_fail() {
 #[tokio::test]
 async fn import_rejects_missing_destination_header_as_bad_request() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let source = fixture.workdir.join("source.txt");
-    tokio::fs::write(&source, "artifact\n").await.unwrap();
-
-    let exported = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: source.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
-    let bytes = archive_bytes_from_response(exported).await;
+    let bytes = exported_source_file_bytes(&fixture).await;
 
     let response = fixture
         .raw_post_bytes(
@@ -1094,21 +1001,7 @@ async fn import_rejects_missing_destination_header_as_bad_request() {
 #[tokio::test]
 async fn import_rejects_missing_create_parent_header_as_bad_request() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let source = fixture.workdir.join("source.txt");
-    tokio::fs::write(&source, "artifact\n").await.unwrap();
-
-    let exported = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: source.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
-    let bytes = archive_bytes_from_response(exported).await;
+    let bytes = exported_source_file_bytes(&fixture).await;
     let destination = fixture.workdir.join("missing-create-parent.txt");
 
     let response = fixture
@@ -1136,21 +1029,7 @@ async fn import_rejects_missing_create_parent_header_as_bad_request() {
 #[tokio::test]
 async fn import_rejects_invalid_create_parent_header_as_bad_request() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let source = fixture.workdir.join("source.txt");
-    tokio::fs::write(&source, "artifact\n").await.unwrap();
-
-    let exported = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: source.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
-    let bytes = archive_bytes_from_response(exported).await;
+    let bytes = exported_source_file_bytes(&fixture).await;
     let destination = fixture.workdir.join("invalid-create-parent.txt");
 
     let response = fixture
@@ -1179,21 +1058,7 @@ async fn import_rejects_invalid_create_parent_header_as_bad_request() {
 #[tokio::test]
 async fn import_rejects_invalid_metadata_enum_header_as_bad_request() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let source = fixture.workdir.join("source.txt");
-    tokio::fs::write(&source, "artifact\n").await.unwrap();
-
-    let exported = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: source.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
-    let bytes = archive_bytes_from_response(exported).await;
+    let bytes = exported_source_file_bytes(&fixture).await;
     let destination = fixture.workdir.join("invalid-overwrite.txt");
 
     let response = fixture
@@ -1222,17 +1087,13 @@ async fn import_rejects_invalid_metadata_enum_header_as_bad_request() {
 #[tokio::test]
 async fn import_accepts_omitted_optional_metadata_defaults() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let source = fixture.workdir.join("source.txt");
-    tokio::fs::write(&source, "artifact\n").await.unwrap();
-
-    let exported = export_path(&fixture, source.display(), TransferCompression::None).await;
-    let bytes = archive_bytes_from_response(exported).await;
+    let bytes = exported_source_file_bytes(&fixture).await;
     let destination = fixture.workdir.join("defaults.txt");
 
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "replace", "true", "file"),
+            &import_headers(destination.display(), "replace", "true", "file", None),
             bytes,
         )
         .await;
@@ -1260,7 +1121,7 @@ max_entry_bytes = 8
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "replace", "true", "file"),
+            &import_headers(destination.display(), "replace", "true", "file", None),
             body,
         )
         .await;
@@ -1285,7 +1146,7 @@ async fn import_rejects_missing_tar_terminator() {
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "replace", "true", "file"),
+            &import_headers(destination.display(), "replace", "true", "file", None),
             body,
         )
         .await;
@@ -1309,7 +1170,7 @@ async fn import_rejects_trailing_data_after_tar_terminator() {
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "replace", "true", "file"),
+            &import_headers(destination.display(), "replace", "true", "file", None),
             body,
         )
         .await;
@@ -1326,9 +1187,7 @@ async fn import_rejects_trailing_data_after_tar_terminator() {
 #[tokio::test]
 async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let source = fixture.workdir.join("tool.txt");
     let destination = fixture.workdir.join("release");
-    tokio::fs::write(&source, "artifact\n").await.unwrap();
     tokio::fs::create_dir_all(destination.join("nested"))
         .await
         .unwrap();
@@ -1336,13 +1195,12 @@ async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
         .await
         .unwrap();
 
-    let exported = export_path(&fixture, source.display(), TransferCompression::None).await;
-    let bytes = archive_bytes_from_response(exported).await;
+    let bytes = exported_source_file_bytes(&fixture).await;
 
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "replace", "false", "file"),
+            &import_headers(destination.display(), "replace", "false", "file", None),
             bytes,
         )
         .await;
@@ -1357,17 +1215,14 @@ async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
 #[tokio::test]
 async fn import_rejects_missing_parent_when_create_parent_is_false() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-    let source = fixture.workdir.join("source.txt");
     let destination = fixture.workdir.join("missing/child.txt");
-    tokio::fs::write(&source, "artifact\n").await.unwrap();
 
-    let exported = export_path(&fixture, source.display(), TransferCompression::None).await;
-    let bytes = archive_bytes_from_response(exported).await;
+    let bytes = exported_source_file_bytes(&fixture).await;
 
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "fail", "false", "file"),
+            &import_headers(destination.display(), "fail", "false", "file", None),
             bytes,
         )
         .await;
@@ -1391,7 +1246,7 @@ async fn import_rejects_directory_entries_that_escape_destination() {
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "replace", "true", "directory"),
+            &import_headers(destination.display(), "replace", "true", "directory", None),
             bytes,
         )
         .await;
@@ -1414,12 +1269,12 @@ async fn import_rejects_directory_entries_that_escape_destination() {
 async fn import_rejects_symlink_targets_that_escape_destination() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let destination = fixture.workdir.join("release");
-    let bytes = directory_tar_with_symlink_target("../escaped.txt");
+    let bytes = directory_tar_with_symlink("../escaped.txt");
 
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "replace", "true", "directory"),
+            &import_headers(destination.display(), "replace", "true", "directory", None),
             bytes,
         )
         .await;
@@ -1438,32 +1293,13 @@ async fn import_rejects_symlink_targets_that_escape_destination() {
 async fn export_rejects_paths_outside_read_sandbox() {
     let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
         DEFAULT_TEST_TARGET,
-        |workdir| {
-            let allow = toml::Value::Array(vec![toml::Value::String(
-                workdir.join("visible").display().to_string(),
-            )]);
-            format!(
-                r#"[sandbox.read]
-allow = {allow}
-"#
-            )
-        },
+        |workdir| support::sandbox_allow_config("read", &workdir.join("visible"), None),
     )
     .await;
     let blocked = fixture.workdir.join("blocked.txt");
     tokio::fs::write(&blocked, "blocked\n").await.unwrap();
 
-    let response = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: blocked.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
+    let response = export_path(&fixture, blocked.display(), TransferCompression::None).await;
 
     assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
     let err = response
@@ -1479,16 +1315,10 @@ async fn export_stream_reports_recursive_read_sandbox_denial() {
     let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
         DEFAULT_TEST_TARGET,
         |workdir| {
-            let source = workdir.join("source");
-            let allow = toml::Value::Array(vec![toml::Value::String(source.display().to_string())]);
-            let deny = toml::Value::Array(vec![toml::Value::String(
-                source.join("secret").display().to_string(),
-            )]);
-            format!(
-                r#"[sandbox.read]
-allow = {allow}
-deny = {deny}
-"#
+            support::sandbox_allow_config(
+                "read",
+                &workdir.join("source"),
+                Some(&workdir.join("source").join("secret")),
             )
         },
     )
@@ -1504,17 +1334,7 @@ deny = {deny}
         .await
         .unwrap();
 
-    let response = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: source.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: Default::default(),
-                exclude: Vec::new(),
-            },
-        )
-        .await;
+    let response = export_path(&fixture, source.display(), TransferCompression::None).await;
 
     assert!(response.status().is_success());
     let err = transfer_stream_error_from_response(response).await;
@@ -1556,16 +1376,7 @@ async fn export_rejects_zstd_when_transfer_compression_is_disabled() {
 async fn import_rejects_destinations_outside_write_sandbox() {
     let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
         DEFAULT_TEST_TARGET,
-        |workdir| {
-            let allow = toml::Value::Array(vec![toml::Value::String(
-                workdir.join("allowed").display().to_string(),
-            )]);
-            format!(
-                r#"[sandbox.write]
-allow = {allow}
-"#
-            )
-        },
+        |workdir| support::sandbox_allow_config("write", &workdir.join("allowed"), None),
     )
     .await;
     let source = fixture.workdir.join("source.txt");
@@ -1578,7 +1389,7 @@ allow = {allow}
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(blocked_destination.display(), "fail", "true", "file"),
+            &import_headers(blocked_destination.display(), "fail", "true", "file", None),
             bytes,
         )
         .await;
@@ -1598,17 +1409,10 @@ async fn import_rejects_recursive_child_outside_write_sandbox() {
     let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
         DEFAULT_TEST_TARGET,
         |workdir| {
-            let destination = workdir.join("allowed");
-            let allow =
-                toml::Value::Array(vec![toml::Value::String(destination.display().to_string())]);
-            let deny = toml::Value::Array(vec![toml::Value::String(
-                destination.join("blocked").display().to_string(),
-            )]);
-            format!(
-                r#"[sandbox.write]
-allow = {allow}
-deny = {deny}
-"#
+            support::sandbox_allow_config(
+                "write",
+                &workdir.join("allowed"),
+                Some(&workdir.join("allowed").join("blocked")),
             )
         },
     )
@@ -1619,7 +1423,7 @@ deny = {deny}
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "replace", "true", "directory"),
+            &import_headers(destination.display(), "replace", "true", "directory", None),
             bytes,
         )
         .await;
@@ -1639,17 +1443,10 @@ async fn import_replace_authorizes_existing_children_before_removal() {
     let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
         DEFAULT_TEST_TARGET,
         |workdir| {
-            let destination = workdir.join("allowed");
-            let allow =
-                toml::Value::Array(vec![toml::Value::String(destination.display().to_string())]);
-            let deny = toml::Value::Array(vec![toml::Value::String(
-                destination.join("blocked").display().to_string(),
-            )]);
-            format!(
-                r#"[sandbox.write]
-allow = {allow}
-deny = {deny}
-"#
+            support::sandbox_allow_config(
+                "write",
+                &workdir.join("allowed"),
+                Some(&workdir.join("allowed").join("blocked")),
             )
         },
     )
@@ -1666,7 +1463,7 @@ deny = {deny}
     let response = fixture
         .raw_post_bytes(
             "/v1/transfer/import",
-            &import_headers(destination.display(), "replace", "true", "file"),
+            &import_headers(destination.display(), "replace", "true", "file", None),
             bytes,
         )
         .await;

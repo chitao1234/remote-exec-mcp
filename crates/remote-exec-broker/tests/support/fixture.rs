@@ -68,26 +68,9 @@ impl BrokerFixture {
         )
         .await
     }
-
-    pub async fn open_remote_udp_forward(&self, connect_endpoint: &str) -> ToolResult {
-        self.call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": DEFAULT_TEST_TARGET,
-                "connect_side": "local",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": connect_endpoint,
-                    "protocol": "udp"
-                }]
-            }),
-        )
-        .await
-    }
 }
 
-fn mcp_tool_name(name: &str) -> String {
+pub fn mcp_tool_name(name: &str) -> String {
     if name.starts_with("remote_") {
         name.to_string()
     } else {
@@ -271,7 +254,7 @@ pub struct ToolResult {
 }
 
 impl ToolResult {
-    fn from_call_tool_result(result: CallToolResult) -> Self {
+    pub fn from_call_tool_result(result: CallToolResult) -> Self {
         assert!(
             result.meta.is_none(),
             "tool responses should not populate MCP _meta"
@@ -290,6 +273,20 @@ impl ToolResult {
             structured_content: result.structured_content.unwrap_or(serde_json::Value::Null),
             raw_content,
         }
+    }
+
+    pub fn forward_id(&self) -> String {
+        self.structured_content["forwards"][0]["forward_id"]
+            .as_str()
+            .expect("forward result should include forward_id")
+            .to_string()
+    }
+
+    pub fn listen_endpoint(&self) -> String {
+        self.structured_content["forwards"][0]["listen_endpoint"]
+            .as_str()
+            .expect("forward result should include listen_endpoint")
+            .to_string()
     }
 }
 

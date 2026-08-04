@@ -20,13 +20,10 @@ use super::stub_daemon::{
     spawn_plain_http_stub_daemon, spawn_plain_http_stub_on_listener,
     spawn_plain_http_unknown_session_exec_write_daemon, stub_daemon_state,
 };
-use super::test_helpers::{
-    DEFAULT_TEST_TARGET, ReadinessWaitOutcome, XP_TEST_TARGET, poll_until_ready, toml_string,
-};
+use super::test_helpers::{DEFAULT_TEST_TARGET, XP_TEST_TARGET, toml_string};
 
 const TEST_HTTP_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const TEST_HTTP_READY_POLL: Duration = Duration::from_millis(50);
-const TEST_HTTP_READY_ATTEMPTS: usize = 100;
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub struct DelayedTargetFixture {
@@ -97,9 +94,8 @@ async fn spawn_unavailable_plain_http_target() -> std::net::SocketAddr {
     addr
 }
 
-fn render_broker_target(target: &BrokerConfigTarget<'_>) -> String {
-    let extra_config = target
-        .extra_config
+fn render_extra_config(extra_config: Option<&str>) -> String {
+    extra_config
         .map(|extra| {
             if extra.is_empty() {
                 String::new()
@@ -107,7 +103,11 @@ fn render_broker_target(target: &BrokerConfigTarget<'_>) -> String {
                 format!("{extra}\n")
             }
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+fn render_broker_target(target: &BrokerConfigTarget<'_>) -> String {
+    let extra_config = render_extra_config(target.extra_config);
     match target.transport {
         BrokerTargetTransport::Http => format!(
             r#"[targets.{name}]
@@ -151,16 +151,7 @@ fn render_local_broker_config(local: &LocalBrokerConfig<'_>) -> String {
         } else {
             ""
         };
-    let extra_config = local
-        .extra_config
-        .map(|extra| {
-            if extra.is_empty() {
-                String::new()
-            } else {
-                format!("{extra}\n")
-            }
-        })
-        .unwrap_or_default();
+    let extra_config = render_extra_config(local.extra_config);
     format!(
         r#"[local]
 default_workdir = {default_workdir}
@@ -229,6 +220,32 @@ async fn spawn_broker_fixture_from_config(
         client,
         stub_state,
     }
+}
+
+/// Spawns a broker fixture with exactly one plain-HTTP stub target under
+/// `DEFAULT_TEST_TARGET`, optionally extending the target config and/or the
+/// top-level broker config.
+async fn spawn_broker_fixture_with_stub_target(
+    addr: std::net::SocketAddr,
+    stub_state: StubDaemonState,
+    extra_target_config: Option<&str>,
+    extra_top_level: Option<&str>,
+) -> BrokerFixture {
+    let tempdir = tempfile::tempdir().unwrap();
+    spawn_broker_fixture_from_config(
+        tempdir,
+        &[BrokerConfigTarget {
+            name: DEFAULT_TEST_TARGET,
+            addr,
+            transport: BrokerTargetTransport::Http,
+            extra_config: extra_target_config,
+        }],
+        None,
+        None,
+        extra_top_level,
+        stub_state,
+    )
+    .await
 }
 
 fn broker_config_fixture_from_config(
@@ -349,63 +366,27 @@ pub async fn spawn_broker_with_tls_stub_daemon_and_daemon_spec(
 }
 
 pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
-    let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    spawn_broker_fixture_from_config(
-        tempdir,
-        &[BrokerConfigTarget {
-            name: DEFAULT_TEST_TARGET,
-            addr,
-            transport: BrokerTargetTransport::Http,
-            extra_config: None,
-        }],
-        None,
-        None,
-        None,
-        stub_state,
-    )
-    .await
+    spawn_broker_fixture_with_stub_target(addr, stub_state, None, None).await
 }
 
 pub async fn spawn_broker_with_stub_daemon_and_extra_config(
     extra_top_level: &str,
 ) -> BrokerFixture {
-    let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    spawn_broker_fixture_from_config(
-        tempdir,
-        &[BrokerConfigTarget {
-            name: DEFAULT_TEST_TARGET,
-            addr,
-            transport: BrokerTargetTransport::Http,
-            extra_config: None,
-        }],
-        None,
-        None,
-        Some(extra_top_level),
-        stub_state,
-    )
-    .await
+    spawn_broker_fixture_with_stub_target(addr, stub_state, None, Some(extra_top_level)).await
 }
 
 pub async fn spawn_broker_with_stub_daemon_and_extra_target_config(
     extra_target_config: &str,
     extra_top_level: Option<&str>,
 ) -> BrokerFixture {
-    let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    spawn_broker_fixture_from_config(
-        tempdir,
-        &[BrokerConfigTarget {
-            name: DEFAULT_TEST_TARGET,
-            addr,
-            transport: BrokerTargetTransport::Http,
-            extra_config: Some(extra_target_config),
-        }],
-        None,
-        None,
-        extra_top_level,
+    spawn_broker_fixture_with_stub_target(
+        addr,
         stub_state,
+        Some(extra_target_config),
+        extra_top_level,
     )
     .await
 }
@@ -413,7 +394,6 @@ pub async fn spawn_broker_with_stub_daemon_and_extra_target_config(
 pub async fn spawn_broker_with_stub_daemon_without_file_tool_support(
     extra_top_level: &str,
 ) -> BrokerFixture {
-    let tempdir = tempfile::tempdir().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let mut stub_state = stub_daemon_state(
@@ -424,24 +404,10 @@ pub async fn spawn_broker_with_stub_daemon_without_file_tool_support(
     );
     set_file_tool_support(&mut stub_state, false);
     spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
-    spawn_broker_fixture_from_config(
-        tempdir,
-        &[BrokerConfigTarget {
-            name: DEFAULT_TEST_TARGET,
-            addr,
-            transport: BrokerTargetTransport::Http,
-            extra_config: None,
-        }],
-        None,
-        None,
-        Some(extra_top_level),
-        stub_state,
-    )
-    .await
+    spawn_broker_fixture_with_stub_target(addr, stub_state, None, Some(extra_top_level)).await
 }
 
 pub async fn spawn_broker_with_stub_daemon_http_auth(bearer_token: &str) -> BrokerFixture {
-    let tempdir = tempfile::tempdir().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let mut stub_state = stub_daemon_state(
@@ -458,20 +424,7 @@ pub async fn spawn_broker_with_stub_daemon_http_auth(bearer_token: &str) -> Brok
 bearer_token = {}"#,
         toml_string(bearer_token)
     );
-    spawn_broker_fixture_from_config(
-        tempdir,
-        &[BrokerConfigTarget {
-            name: DEFAULT_TEST_TARGET,
-            addr,
-            transport: BrokerTargetTransport::Http,
-            extra_config: Some(&auth_config),
-        }],
-        None,
-        None,
-        None,
-        stub_state,
-    )
-    .await
+    spawn_broker_fixture_with_stub_target(addr, stub_state, Some(&auth_config), None).await
 }
 
 pub async fn spawn_broker_config_with_stub_daemon() -> BrokerConfigFixture {
@@ -594,28 +547,13 @@ pub async fn spawn_broker_with_stub_daemon_platform(
     platform: &str,
     supports_pty: bool,
 ) -> BrokerFixture {
-    let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) =
         spawn_plain_http_daemon_with_platform(ExecWriteBehavior::Success, platform, supports_pty)
             .await;
-    spawn_broker_fixture_from_config(
-        tempdir,
-        &[BrokerConfigTarget {
-            name: DEFAULT_TEST_TARGET,
-            addr,
-            transport: BrokerTargetTransport::Http,
-            extra_config: None,
-        }],
-        None,
-        None,
-        None,
-        stub_state,
-    )
-    .await
+    spawn_broker_fixture_with_stub_target(addr, stub_state, None, None).await
 }
 
 pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> BrokerFixture {
-    let tempdir = tempfile::tempdir().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let mut stub_state = stub_daemon_state(
@@ -626,21 +564,7 @@ pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> Broker
     );
     set_port_forward_support(&mut stub_state, true, version);
     spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
-
-    spawn_broker_fixture_from_config(
-        tempdir,
-        &[BrokerConfigTarget {
-            name: DEFAULT_TEST_TARGET,
-            addr,
-            transport: BrokerTargetTransport::Http,
-            extra_config: None,
-        }],
-        None,
-        None,
-        None,
-        stub_state,
-    )
-    .await
+    spawn_broker_fixture_with_stub_target(addr, stub_state, None, None).await
 }
 
 pub async fn spawn_broker_with_local_and_stub_port_forward_version(version: u32) -> BrokerFixture {
@@ -737,104 +661,51 @@ pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
     .await
 }
 
-#[allow(dead_code, reason = "Shared across broker integration test crates")]
-pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
+async fn spawn_broker_with_live_and_dead_targets_in_order(reverse: bool) -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
     // Keep builder-b structurally unavailable without guessing a future free port.
     let unavailable_addr = spawn_unavailable_plain_http_target().await;
-    spawn_broker_fixture_from_config(
-        tempdir,
-        &[
-            BrokerConfigTarget {
-                name: "builder-b",
-                addr: unavailable_addr,
-                transport: BrokerTargetTransport::Http,
-                extra_config: None,
-            },
-            BrokerConfigTarget {
-                name: DEFAULT_TEST_TARGET,
-                addr: live_addr,
-                transport: BrokerTargetTransport::Http,
-                extra_config: None,
-            },
-        ],
-        None,
-        None,
-        None,
-        stub_state,
-    )
-    .await
+    let mut targets = vec![
+        BrokerConfigTarget {
+            name: DEFAULT_TEST_TARGET,
+            addr: live_addr,
+            transport: BrokerTargetTransport::Http,
+            extra_config: None,
+        },
+        BrokerConfigTarget {
+            name: "builder-b",
+            addr: unavailable_addr,
+            transport: BrokerTargetTransport::Http,
+            extra_config: None,
+        },
+    ];
+    if reverse {
+        targets.reverse();
+    }
+    spawn_broker_fixture_from_config(tempdir, &targets, None, None, None, stub_state).await
+}
+
+#[allow(dead_code, reason = "Shared across broker integration test crates")]
+pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
+    spawn_broker_with_live_and_dead_targets_in_order(true).await
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
-    let tempdir = tempfile::tempdir().unwrap();
-    let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    // Keep builder-b structurally unavailable without guessing a future free port.
-    let unavailable_addr = spawn_unavailable_plain_http_target().await;
-    spawn_broker_fixture_from_config(
-        tempdir,
-        &[
-            BrokerConfigTarget {
-                name: DEFAULT_TEST_TARGET,
-                addr: live_addr,
-                transport: BrokerTargetTransport::Http,
-                extra_config: None,
-            },
-            BrokerConfigTarget {
-                name: "builder-b",
-                addr: unavailable_addr,
-                transport: BrokerTargetTransport::Http,
-                extra_config: None,
-            },
-        ],
-        None,
-        None,
-        None,
-        stub_state,
-    )
-    .await
+    spawn_broker_with_live_and_dead_targets_in_order(false).await
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
-    let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_plain_http_retryable_exec_write_daemon().await;
-    spawn_broker_fixture_from_config(
-        tempdir,
-        &[BrokerConfigTarget {
-            name: DEFAULT_TEST_TARGET,
-            addr,
-            transport: BrokerTargetTransport::Http,
-            extra_config: None,
-        }],
-        None,
-        None,
-        None,
-        stub_state,
-    )
-    .await
+    spawn_broker_fixture_with_stub_target(addr, stub_state, None, None).await
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixture {
-    let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_plain_http_unknown_session_exec_write_daemon().await;
-    spawn_broker_fixture_from_config(
-        tempdir,
-        &[BrokerConfigTarget {
-            name: DEFAULT_TEST_TARGET,
-            addr,
-            transport: BrokerTargetTransport::Http,
-            extra_config: None,
-        }],
-        None,
-        None,
-        None,
-        stub_state,
-    )
-    .await
+    spawn_broker_fixture_with_stub_target(addr, stub_state, None, None).await
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
@@ -969,74 +840,32 @@ pub async fn spawn_broker_with_local_target_and_extra_config(extra_config: &str)
 }
 
 async fn wait_until_ready_http(addr: std::net::SocketAddr) {
-    remote_exec_broker::install_crypto_provider().unwrap();
-    let client = reqwest::Client::builder().build().unwrap();
-
-    let outcome = poll_until_ready(
-        TEST_HTTP_READY_ATTEMPTS,
+    super::wait_until_ready_http(
+        addr,
+        TEST_HTTP_READY_TIMEOUT,
         TEST_HTTP_READY_POLL,
-        || async {
-            client
-                .post(format!("http://{addr}/v1/health"))
-                .json(&serde_json::json!({}))
-                .send()
-                .await
-                .is_ok()
-        },
-        || false,
+        "plain HTTP stub daemon",
     )
     .await;
-    assert_eq!(
-        outcome,
-        ReadinessWaitOutcome::Ready,
-        "plain HTTP stub daemon at http://{addr} did not become ready within {TEST_HTTP_READY_TIMEOUT:?}"
-    );
 }
 
 async fn wait_until_ready_mcp_http(url: &str) {
-    remote_exec_broker::install_crypto_provider().unwrap();
-    let client = reqwest::Client::builder().build().unwrap();
-
-    let outcome = poll_until_ready(
-        TEST_HTTP_READY_ATTEMPTS,
+    super::wait_until_ready_mcp_http(
+        url,
+        TEST_HTTP_READY_TIMEOUT,
         TEST_HTTP_READY_POLL,
-        || async {
-            let response = client
-                .post(url)
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
-                .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
-                .send()
-                .await;
-            response
-                .as_ref()
-                .is_ok_and(|response| response.status().is_success())
-        },
-        || false,
+        "streamable HTTP broker",
     )
     .await;
-    assert_eq!(
-        outcome,
-        ReadinessWaitOutcome::Ready,
-        "streamable HTTP broker at {url} did not become ready within {TEST_HTTP_READY_TIMEOUT:?}"
-    );
 }
 
 pub async fn spawn_broker_with_stub_daemon_and_structured_content_disabled() -> BrokerFixture {
-    let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    spawn_broker_fixture_from_config(
-        tempdir,
-        &[BrokerConfigTarget {
-            name: DEFAULT_TEST_TARGET,
-            addr,
-            transport: BrokerTargetTransport::Http,
-            extra_config: None,
-        }],
-        None,
+    spawn_broker_fixture_with_stub_target(
+        addr,
+        stub_state,
         None,
         Some("disable_structured_content = true"),
-        stub_state,
     )
     .await
 }

@@ -3,6 +3,20 @@ use super::*;
 const EXPECTED_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|C|en_US.UTF-8|";
 const ENV_OVERLAY_COMMAND: &str = "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\" \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"";
 
+fn env_overlay_environment() -> ProcessEnvironment {
+    process_environment_with(&[
+        ("TERM", "rainbow-terminal"),
+        ("NO_COLOR", "0"),
+        ("PAGER", "less"),
+        ("GIT_PAGER", "more"),
+        ("CODEX_CI", "0"),
+        (
+            "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
+            "fr_FR.UTF-8\nen_US.UTF-8\n",
+        ),
+    ])
+}
+
 fn pty_size_output_matches(output: &str, rows: u16, cols: u16) -> bool {
     let normalized = output
         .replace(['\0', '\r', '\n', '\t'], " ")
@@ -282,17 +296,7 @@ deny = ["/"]
 async fn env_overlay_is_applied_in_pipe_mode() {
     let fixture = support::spawn::spawn_daemon_with_process_environment(
         DEFAULT_TEST_TARGET,
-        process_environment_with(&[
-            ("TERM", "rainbow-terminal"),
-            ("NO_COLOR", "0"),
-            ("PAGER", "less"),
-            ("GIT_PAGER", "more"),
-            ("CODEX_CI", "0"),
-            (
-                "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
-                "fr_FR.UTF-8\nen_US.UTF-8\n",
-            ),
-        ]),
+        env_overlay_environment(),
     )
     .await;
 
@@ -316,17 +320,7 @@ async fn env_overlay_is_applied_in_pipe_mode() {
 async fn env_overlay_is_applied_in_pty_mode() {
     let fixture = support::spawn::spawn_daemon_with_process_environment(
         DEFAULT_TEST_TARGET,
-        process_environment_with(&[
-            ("TERM", "rainbow-terminal"),
-            ("NO_COLOR", "0"),
-            ("PAGER", "less"),
-            ("GIT_PAGER", "more"),
-            ("CODEX_CI", "0"),
-            (
-                "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
-                "fr_FR.UTF-8\nen_US.UTF-8\n",
-            ),
-        ]),
+        env_overlay_environment(),
     )
     .await;
 
@@ -774,11 +768,7 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon() {
         .rpc::<ExecWriteRequest, ExecResponse>(
             "/v1/exec/write",
             &ExecWriteRequest {
-                daemon_session_id: fast
-                    .daemon_session_id()
-                    .expect("fast session")
-                    .to_string()
-                    .to_string(),
+                daemon_session_id: fast.daemon_session_id().expect("fast session").to_string(),
                 chars: "ping\n".to_string(),
                 yield_time_ms: Some(250),
                 max_output_tokens: None,

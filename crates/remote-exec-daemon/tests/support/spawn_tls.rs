@@ -82,7 +82,7 @@ async fn spawn_daemon_with_tls_pty_mode(
     .await;
 
     if startup == super::StartupWaitOutcome::Ready {
-        return super::daemon_fixture(
+        return DaemonFixture::new(
             tempdir,
             client,
             addr,
@@ -173,7 +173,7 @@ pub async fn spawn_daemon_with_pinned_client_cert(
     };
 
     if startup == super::StartupWaitOutcome::Ready {
-        return super::daemon_fixture(
+        return DaemonFixture::new(
             tempdir,
             client,
             addr,

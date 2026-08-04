@@ -5,6 +5,19 @@ const WINDOWS_PIPE_MODE_EXTERNAL_PIPELINE_CMD: &str =
 const WINDOWS_PIPE_MODE_STDOUT_STDERR_CMD: &str =
     "echo stdout-1&echo stderr-1>&2&echo stdout-2&echo stderr-2>&2";
 
+fn env_overlay_environment() -> ProcessEnvironment {
+    process_environment_with(&[
+        ("TERM", "rainbow-terminal"),
+        ("NO_COLOR", "0"),
+        ("PAGER", "less"),
+        ("GIT_PAGER", "more"),
+        ("CODEX_CI", "0"),
+        ("LANG", "fr_FR.UTF-8"),
+        ("LC_CTYPE", "fr_FR.UTF-8"),
+        ("LC_ALL", "fr_FR.UTF-8"),
+    ])
+}
+
 #[tokio::test]
 async fn exec_start_allows_login_requests_on_windows_when_enabled() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
@@ -12,15 +25,14 @@ async fn exec_start_allows_login_requests_on_windows_when_enabled() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "echo windows-ready".to_string(),
-                workdir: None,
-                shell: Some("cmd.exe".to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: Some(true),
-            },
+            &windows_start_request_with_shell(
+                Some("cmd.exe"),
+                "echo windows-ready",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+                true,
+            ),
         )
         .await;
 
@@ -131,15 +143,14 @@ async fn exec_start_rejects_login_requests_on_windows_when_disabled_by_config() 
     let err = fixture
         .rpc_error(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "echo should-not-run".to_string(),
-                workdir: None,
-                shell: Some("cmd.exe".to_string()),
-                tty: false,
-                yield_time_ms: Some(250),
-                max_output_tokens: None,
-                login: Some(true),
-            },
+            &windows_start_request_with_shell(
+                Some("cmd.exe"),
+                "echo should-not-run",
+                false,
+                Some(250),
+                None,
+                true,
+            ),
         )
         .await;
 
@@ -158,15 +169,14 @@ async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "echo windows-ready".to_string(),
-                workdir: None,
-                shell: None,
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: None,
-            },
+            &test_exec_start_request(
+                None,
+                "echo windows-ready",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+                None,
+            ),
         )
         .await;
 
@@ -182,23 +192,20 @@ async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
 
 #[tokio::test]
 async fn exec_start_prefers_git_bash_when_shell_is_omitted_on_windows() {
-    let Some(_git_bash) = available_windows_git_bash_path() else {
-        return;
-    };
+    skip_unless_git_bash();
 
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf '%s' git-bash-ready".to_string(),
-                workdir: None,
-                shell: None,
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &test_exec_start_request(
+                None,
+                "printf '%s' git-bash-ready",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+                Some(false),
+            ),
         )
         .await;
 
@@ -208,23 +215,20 @@ async fn exec_start_prefers_git_bash_when_shell_is_omitted_on_windows() {
 
 #[tokio::test]
 async fn exec_start_resolves_bare_bash_shell_requests_to_git_bash_on_windows() {
-    let Some(_git_bash) = available_windows_git_bash_path() else {
-        return;
-    };
+    skip_unless_git_bash();
 
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf '%s' explicit-git-bash".to_string(),
-                workdir: None,
-                shell: Some("bash.exe".to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &windows_start_request_with_shell(
+                Some("bash.exe"),
+                "printf '%s' explicit-git-bash",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+                false,
+            ),
         )
         .await;
 
@@ -234,9 +238,7 @@ async fn exec_start_resolves_bare_bash_shell_requests_to_git_bash_on_windows() {
 
 #[tokio::test]
 async fn exec_start_preserves_workdir_for_git_bash_login_shells_on_windows() {
-    let Some(_git_bash) = available_windows_git_bash_path() else {
-        return;
-    };
+    skip_unless_git_bash();
 
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let workdir = fixture.workdir.join("git bash cwd");
@@ -352,15 +354,14 @@ async fn exec_start_resolves_windows_posix_root_shells_and_sets_chere_invoking()
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf '%s' \"$CHERE_INVOKING\"".to_string(),
-                workdir: None,
-                shell: None,
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: Some(true),
-            },
+            &test_exec_start_request(
+                None,
+                "printf '%s' \"$CHERE_INVOKING\"",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+                Some(true),
+            ),
         )
         .await;
 
@@ -370,9 +371,7 @@ async fn exec_start_resolves_windows_posix_root_shells_and_sets_chere_invoking()
 
 #[tokio::test]
 async fn exec_start_uses_git_bash_login_profiles_when_shell_is_omitted() {
-    let Some(_git_bash) = available_windows_git_bash_path() else {
-        return;
-    };
+    skip_unless_git_bash();
 
     let home = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -390,15 +389,14 @@ async fn exec_start_uses_git_bash_login_profiles_when_shell_is_omitted() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf '%s' \"$LOGIN_SENTINEL\"".to_string(),
-                workdir: None,
-                shell: None,
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: None,
-            },
+            &test_exec_start_request(
+                None,
+                "printf '%s' \"$LOGIN_SENTINEL\"",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+                None,
+            ),
         )
         .await;
 
@@ -415,15 +413,14 @@ async fn exec_start_rejects_tty_when_disabled_by_config_on_windows() {
     let err = fixture
         .rpc_error(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "echo should-not-run".to_string(),
-                workdir: None,
-                shell: Some("cmd.exe".to_string()),
-                tty: true,
-                yield_time_ms: Some(250),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &windows_start_request_with_shell(
+                Some("cmd.exe"),
+                "echo should-not-run",
+                true,
+                Some(250),
+                None,
+                false,
+            ),
         )
         .await;
 
@@ -439,9 +436,7 @@ async fn exec_start_keeps_windows_tty_sessions_alive_and_answers_terminal_querie
 
 #[tokio::test]
 async fn exec_start_prefers_git_bash_for_windows_pty_when_shell_is_omitted() {
-    let Some(_git_bash) = available_windows_git_bash_path() else {
-        return;
-    };
+    skip_unless_git_bash();
 
     for_each_windows_pty_backend!(backend, fixture, {
         let response = fixture
@@ -476,9 +471,7 @@ async fn exec_start_prefers_git_bash_for_windows_pty_when_shell_is_omitted() {
 
 #[tokio::test]
 async fn exec_start_resolves_bare_bash_shell_requests_to_git_bash_for_windows_pty() {
-    let Some(_git_bash) = available_windows_git_bash_path() else {
-        return;
-    };
+    skip_unless_git_bash();
 
     for_each_windows_pty_backend!(backend, fixture, {
         assert_windows_git_bash_tty_read_line(&fixture, backend, Some("bash.exe")).await;
@@ -487,9 +480,7 @@ async fn exec_start_resolves_bare_bash_shell_requests_to_git_bash_for_windows_pt
 
 #[tokio::test]
 async fn exec_start_preserves_workdir_for_git_bash_login_shells_over_windows_ptys() {
-    let Some(_git_bash) = available_windows_git_bash_path() else {
-        return;
-    };
+    skip_unless_git_bash();
 
     for_each_windows_pty_backend!(backend, fixture, {
         let workdir = fixture
@@ -533,16 +524,7 @@ async fn exec_start_preserves_workdir_for_git_bash_login_shells_over_windows_pty
 async fn env_overlay_is_applied_in_pipe_mode_on_windows() {
     let fixture = support::spawn::spawn_daemon_with_process_environment(
         DEFAULT_TEST_TARGET,
-        process_environment_with(&[
-            ("TERM", "rainbow-terminal"),
-            ("NO_COLOR", "0"),
-            ("PAGER", "less"),
-            ("GIT_PAGER", "more"),
-            ("CODEX_CI", "0"),
-            ("LANG", "fr_FR.UTF-8"),
-            ("LC_CTYPE", "fr_FR.UTF-8"),
-            ("LC_ALL", "fr_FR.UTF-8"),
-        ]),
+        env_overlay_environment(),
     )
     .await;
 
@@ -571,16 +553,7 @@ async fn env_overlay_is_applied_in_pipe_mode_on_windows() {
 
 #[tokio::test]
 async fn env_overlay_is_applied_in_pty_mode_on_windows() {
-    let environment = process_environment_with(&[
-        ("TERM", "rainbow-terminal"),
-        ("NO_COLOR", "0"),
-        ("PAGER", "less"),
-        ("GIT_PAGER", "more"),
-        ("CODEX_CI", "0"),
-        ("LANG", "fr_FR.UTF-8"),
-        ("LC_CTYPE", "fr_FR.UTF-8"),
-        ("LC_ALL", "fr_FR.UTF-8"),
-    ]);
+    let environment = env_overlay_environment();
     for_each_windows_pty_backend_with_environment!(backend, fixture, environment, {
         let response = fixture
             .rpc::<ExecStartRequest, ExecResponse>(
@@ -982,11 +955,7 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows(
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         let started = Instant::now();
-        let fast_session_id = fast
-            .daemon_session_id()
-            .expect("fast session")
-            .to_string()
-            .to_string();
+        let fast_session_id = fast.daemon_session_id().expect("fast session").to_string();
         let fast_response = fixture
             .rpc::<ExecWriteRequest, ExecResponse>(
                 "/v1/exec/write",
@@ -1055,9 +1024,7 @@ async fn exec_start_preserves_cmd_command_quoting_across_windows_pty_backends() 
 
 #[tokio::test]
 async fn exec_start_preserves_git_bash_command_quoting_across_windows_pty_backends() {
-    let Some(_git_bash) = available_windows_git_bash_path() else {
-        return;
-    };
+    skip_unless_git_bash();
 
     for_each_windows_pty_backend!(backend, fixture, {
         assert_windows_git_bash_command_quoting(&fixture, backend, Some("bash.exe")).await;
@@ -1066,24 +1033,21 @@ async fn exec_start_preserves_git_bash_command_quoting_across_windows_pty_backen
 
 #[tokio::test]
 async fn exec_start_accepts_git_bash_aliases_on_windows() {
-    let Some(_git_bash) = available_windows_git_bash_path() else {
-        return;
-    };
+    skip_unless_git_bash();
 
     for alias in ["bash", "sh", "git-bash"] {
         let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
         let response = fixture
             .rpc::<ExecStartRequest, ExecResponse>(
                 "/v1/exec/start",
-                &ExecStartRequest {
-                    cmd: "printf '%s' alias-ok".to_string(),
-                    workdir: None,
-                    shell: Some(alias.to_string()),
-                    tty: false,
-                    yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                    max_output_tokens: None,
-                    login: Some(false),
-                },
+                &windows_start_request_with_shell(
+                    Some(alias),
+                    "printf '%s' alias-ok",
+                    false,
+                    Some(COMPLETED_COMMAND_YIELD_MS),
+                    None,
+                    false,
+                ),
             )
             .await;
 

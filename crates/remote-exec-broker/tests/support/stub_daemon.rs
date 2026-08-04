@@ -55,8 +55,7 @@ pub(crate) use stub_daemon_port_forward::{
     UdpConnectorStats, assert_port_tunnel_relay_preserves_partial_frame_reads,
     block_connect_tunnel_open_after_first, block_session_ready_after_first, block_session_resume,
     closed_port_tunnel_transport_count, delay_session_ready_after_first,
-    drop_next_connect_tunnel_opens, drop_next_port_tunnel_heartbeat_ack,
-    drop_tcp_connect_ok_frames, enable_reconnectable_port_tunnel,
+    drop_next_connect_tunnel_opens, drop_tcp_connect_ok_frames, enable_reconnectable_port_tunnel,
     fail_first_forward_runtime_before_multi_open_finishes, fail_next_port_tunnel_upgrades,
     fail_next_udp_connector_bind, force_close_connect_port_tunnel_transport,
     force_close_listen_port_tunnel_transport, force_close_port_tunnel_transport,
@@ -244,24 +243,11 @@ async fn spawn_stub_task(
 }
 
 pub(crate) async fn assert_no_stub_task_panics(state: &StubDaemonState) {
-    let finished = {
-        let mut tasks = state.background_tasks.lock().await;
-        let mut finished = Vec::new();
-        let mut pending = Vec::with_capacity(tasks.len());
-        for handle in tasks.drain(..) {
-            if handle.is_finished() {
-                finished.push(handle);
-            } else {
-                pending.push(handle);
-            }
-        }
-        *tasks = pending;
-        finished
-    };
-
-    for handle in finished {
-        handle.await.expect("stub daemon background task panicked");
-    }
+    super::tunnel_drop_proxy::assert_no_background_task_panics(
+        &state.background_tasks,
+        "stub daemon background task panicked",
+    )
+    .await;
 }
 
 #[cfg(feature = "broker-tls")]
@@ -627,27 +613,11 @@ async fn wait_until_ready(certs: &TestCerts, addr: std::net::SocketAddr) {
 }
 
 async fn wait_until_ready_http(addr: std::net::SocketAddr) {
-    remote_exec_broker::install_crypto_provider().unwrap();
-    let client = reqwest::Client::builder().build().unwrap();
-
-    tokio::time::timeout(STUB_READY_TIMEOUT, async {
-        loop {
-            if client
-                .post(format!("http://{addr}/v1/health"))
-                .json(&serde_json::json!({}))
-                .send()
-                .await
-                .is_ok()
-            {
-                return;
-            }
-            tokio::time::sleep(STUB_READY_POLL).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| {
-        panic!(
-            "plain HTTP stub daemon at http://{addr} did not become ready within {STUB_READY_TIMEOUT:?}"
-        )
-    });
+    super::wait_until_ready_http(
+        addr,
+        STUB_READY_TIMEOUT,
+        STUB_READY_POLL,
+        "plain HTTP stub daemon",
+    )
+    .await;
 }

@@ -12,24 +12,6 @@ use support::transfer_archive::{
     read_single_file_archive,
 };
 
-#[cfg(windows)]
-fn msys_style_path(path: &std::path::Path) -> String {
-    let text = path.display().to_string().replace('\\', "/");
-    let bytes = text.as_bytes();
-    assert!(
-        bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic(),
-        "expected drive-qualified Windows path, got {text}"
-    );
-
-    let drive = (bytes[0] as char).to_ascii_lowercase();
-    let rest = text[2..].trim_start_matches('/');
-    if rest.is_empty() {
-        format!("/{drive}")
-    } else {
-        format!("/{drive}/{rest}")
-    }
-}
-
 #[tokio::test]
 async fn transfer_files_is_listed_for_mcp_clients() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
@@ -734,11 +716,11 @@ async fn transfer_files_copies_local_file_using_msys_style_windows_paths() {
             serde_json::json!({
                 "source": {
                     "target": "local",
-                    "path": msys_style_path(&source)
+                    "path": support::test_helpers::msys_style_path(&source)
                 },
                 "destination": {
                     "target": "local",
-                    "path": msys_style_path(&destination)
+                    "path": support::test_helpers::msys_style_path(&destination)
                 },
                 "overwrite": "fail",
                 "create_parent": false
@@ -1208,15 +1190,14 @@ async fn transfer_files_still_rejects_windows_paths_for_unix_local_endpoints() {
     assert!(error.contains("is not absolute"));
 }
 
-async fn transfer_single_source(
-    fixture: &support::fixture::BrokerFixture,
+fn transfer_single_source_payload(
     source_target: &str,
     source_path: impl ToString,
     destination_target: &str,
     destination_path: impl ToString,
     overwrite: Option<&str>,
     create_parent: bool,
-) -> support::fixture::ToolResult {
+) -> serde_json::Value {
     let mut payload = serde_json::json!({
         "source": {
             "target": source_target,
@@ -1231,7 +1212,31 @@ async fn transfer_single_source(
     if let Some(overwrite) = overwrite {
         payload["overwrite"] = serde_json::Value::String(overwrite.to_string());
     }
-    fixture.call_tool("transfer_files", payload).await
+    payload
+}
+
+async fn transfer_single_source(
+    fixture: &support::fixture::BrokerFixture,
+    source_target: &str,
+    source_path: impl ToString,
+    destination_target: &str,
+    destination_path: impl ToString,
+    overwrite: Option<&str>,
+    create_parent: bool,
+) -> support::fixture::ToolResult {
+    fixture
+        .call_tool(
+            "transfer_files",
+            transfer_single_source_payload(
+                source_target,
+                source_path,
+                destination_target,
+                destination_path,
+                overwrite,
+                create_parent,
+            ),
+        )
+        .await
 }
 
 async fn transfer_single_source_error(
@@ -1243,21 +1248,19 @@ async fn transfer_single_source_error(
     overwrite: Option<&str>,
     create_parent: bool,
 ) -> String {
-    let mut payload = serde_json::json!({
-        "source": {
-            "target": source_target,
-            "path": source_path.to_string()
-        },
-        "destination": {
-            "target": destination_target,
-            "path": destination_path.to_string()
-        },
-        "create_parent": create_parent
-    });
-    if let Some(overwrite) = overwrite {
-        payload["overwrite"] = serde_json::Value::String(overwrite.to_string());
-    }
-    fixture.call_tool_error("transfer_files", payload).await
+    fixture
+        .call_tool_error(
+            "transfer_files",
+            transfer_single_source_payload(
+                source_target,
+                source_path,
+                destination_target,
+                destination_path,
+                overwrite,
+                create_parent,
+            ),
+        )
+        .await
 }
 
 #[tokio::test]

@@ -293,36 +293,30 @@ pub(crate) async fn delay_session_ready_after_first(state: &StubDaemonState, del
         .delay_session_ready_after_first = Some(delay);
 }
 
-pub(crate) async fn block_session_ready_after_first(
-    state: &StubDaemonState,
-) -> BlockedSessionReady {
-    let (release_tx, release_rx) = oneshot::channel();
-    let (blocked_tx, blocked_rx) = oneshot::channel();
+pub(crate) async fn block_session_ready_after_first(state: &StubDaemonState) -> BlockedEvent {
+    let (event, control_state) = blocked_event("session ready frame should become blocked");
     state
         .port_forward
         .control
         .lock()
         .await
-        .blocked_session_ready_after_first = Some(BlockedPortTunnelEventState {
-        release_rx: Some(release_rx),
-        blocked_tx: Some(blocked_tx),
-    });
-    BlockedSessionReady {
-        release_tx: Some(release_tx),
-        blocked_rx,
-    }
+        .blocked_session_ready_after_first = Some(control_state);
+    event
 }
 
-pub(crate) struct BlockedSessionReady {
+/// A handle for a stub port-tunnel event that the test blocked until it fires
+/// and can then release.
+pub(crate) struct BlockedEvent {
     release_tx: Option<oneshot::Sender<()>>,
     blocked_rx: oneshot::Receiver<()>,
+    blocked_message: &'static str,
 }
 
-impl BlockedSessionReady {
+impl BlockedEvent {
     pub(crate) async fn wait_blocked(&mut self) {
         let _ = tokio::time::timeout(Duration::from_secs(5), &mut self.blocked_rx)
             .await
-            .expect("session ready frame should become blocked");
+            .expect(self.blocked_message);
     }
 
     pub(crate) fn release(mut self) {
@@ -332,43 +326,31 @@ impl BlockedSessionReady {
     }
 }
 
-pub(crate) async fn block_connect_tunnel_open_after_first(
-    state: &StubDaemonState,
-) -> BlockedConnectTunnelOpen {
+fn blocked_event(message: &'static str) -> (BlockedEvent, BlockedPortTunnelEventState) {
     let (release_tx, release_rx) = oneshot::channel();
     let (blocked_tx, blocked_rx) = oneshot::channel();
+    (
+        BlockedEvent {
+            release_tx: Some(release_tx),
+            blocked_rx,
+            blocked_message: message,
+        },
+        BlockedPortTunnelEventState {
+            release_rx: Some(release_rx),
+            blocked_tx: Some(blocked_tx),
+        },
+    )
+}
+
+pub(crate) async fn block_connect_tunnel_open_after_first(state: &StubDaemonState) -> BlockedEvent {
+    let (event, control_state) = blocked_event("connect tunnel open frame should become blocked");
     state
         .port_forward
         .control
         .lock()
         .await
-        .blocked_connect_tunnel_open_after_first = Some(BlockedPortTunnelEventState {
-        release_rx: Some(release_rx),
-        blocked_tx: Some(blocked_tx),
-    });
-    BlockedConnectTunnelOpen {
-        release_tx: Some(release_tx),
-        blocked_rx,
-    }
-}
-
-pub(crate) struct BlockedConnectTunnelOpen {
-    release_tx: Option<oneshot::Sender<()>>,
-    blocked_rx: oneshot::Receiver<()>,
-}
-
-impl BlockedConnectTunnelOpen {
-    pub(crate) async fn wait_blocked(&mut self) {
-        let _ = tokio::time::timeout(Duration::from_secs(5), &mut self.blocked_rx)
-            .await
-            .expect("connect tunnel open frame should become blocked");
-    }
-
-    pub(crate) fn release(mut self) {
-        if let Some(release_tx) = self.release_tx.take() {
-            let _ = release_tx.send(());
-        }
-    }
+        .blocked_connect_tunnel_open_after_first = Some(control_state);
+    event
 }
 
 pub(crate) async fn override_tunnel_ready_limits(
@@ -410,15 +392,6 @@ pub(crate) async fn fail_next_udp_connector_bind(state: &StubDaemonState) {
         .lock()
         .await
         .udp_connector_bind_errors_remaining += 1;
-}
-
-pub(crate) async fn drop_next_port_tunnel_heartbeat_ack(state: &StubDaemonState) {
-    state
-        .port_forward
-        .control
-        .lock()
-        .await
-        .heartbeat_acks_to_drop += 1;
 }
 
 pub(crate) async fn fail_first_forward_runtime_before_multi_open_finishes(state: &StubDaemonState) {
