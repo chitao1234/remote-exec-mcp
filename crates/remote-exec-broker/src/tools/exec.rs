@@ -11,9 +11,7 @@ use remote_exec_proto::rpc::{
 };
 
 use crate::mcp_server::ToolCallOutput;
-use format::{
-    format_command_text, format_intercepted_patch_text, format_poll_text, prepend_warning_text,
-};
+use format::{format_exec_text, format_intercepted_patch_text, prepend_warning_text};
 use intercept::maybe_intercept_apply_patch;
 
 struct WriteStdinCompletion {
@@ -206,7 +204,11 @@ fn exec_command_output(
 ) -> anyhow::Result<ToolCallOutput> {
     let output = response.output().clone();
     let text = prepend_warning_text(
-        format_command_text(&session_command, &response, session_id.as_deref()),
+        format_exec_text(
+            Some(session_command.as_str()),
+            &response,
+            session_id.as_deref(),
+        ),
         &output.warnings,
     );
     Ok(ToolCallOutput::text_and_structured(
@@ -232,8 +234,8 @@ fn write_stdin_output(
 ) -> anyhow::Result<WriteStdinCompletion> {
     let output = response.output().clone();
     let text = prepend_warning_text(
-        format_poll_text(
-            Some(&record.session_command),
+        format_exec_text(
+            Some(record.session_command.as_str()),
             &response,
             session_id.as_deref(),
         ),

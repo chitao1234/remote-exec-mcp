@@ -491,20 +491,12 @@ impl TargetHandle {
     }
 
     pub(crate) async fn mark_health_probe_timed_out(&self, name: &str, error: String) {
-        let (previous_snapshot, current_snapshot) = {
-            let mut runtime = self.runtime.lock().await;
-            let previous_snapshot = runtime.snapshot();
-            runtime.record_health_failure_message(error.clone());
-            let current_snapshot = runtime.snapshot();
-            (previous_snapshot, current_snapshot)
-        };
-
-        if !log_target_availability_transition(
-            name,
-            &previous_snapshot,
-            &current_snapshot,
-            Some(error.as_str()),
-        ) {
+        if !self
+            .mutate_snapshot_and_log(name, Some(error.as_str()), |runtime| {
+                runtime.record_health_failure_message(error.clone());
+            })
+            .await
+        {
             tracing::debug!(
                 target = %name,
                 error = %error,
@@ -524,20 +516,34 @@ impl TargetHandle {
     }
 
     pub(crate) async fn invalidate_cached_daemon_info(&self, name: &str) {
-        let (previous_snapshot, current_snapshot) = {
-            let mut runtime = self.runtime.lock().await;
-            let previous_snapshot = runtime.snapshot();
-            runtime.snapshot.daemon_info = None;
-            let current_snapshot = runtime.snapshot();
-            (previous_snapshot, current_snapshot)
-        };
-
-        if !log_target_availability_transition(name, &previous_snapshot, &current_snapshot, None) {
+        if !self
+            .mutate_snapshot_and_log(name, None, |runtime| {
+                runtime.snapshot.daemon_info = None;
+            })
+            .await
+        {
             tracing::info!(
                 target = %name,
                 "cleared cached daemon identity and metadata"
             );
         }
+    }
+
+    async fn mutate_snapshot_and_log(
+        &self,
+        name: &str,
+        error: Option<&str>,
+        mutate: impl FnOnce(&mut TargetRuntimeState),
+    ) -> bool {
+        let (previous_snapshot, current_snapshot) = {
+            let mut runtime = self.runtime.lock().await;
+            let previous_snapshot = runtime.snapshot();
+            mutate(&mut runtime);
+            let current_snapshot = runtime.snapshot();
+            (previous_snapshot, current_snapshot)
+        };
+
+        log_target_availability_transition(name, &previous_snapshot, &current_snapshot, error)
     }
 }
 

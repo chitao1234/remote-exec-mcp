@@ -141,14 +141,6 @@ fn tool_route(tool: BrokerTool, prepend_tool_names: bool) -> ToolRoute<BrokerSer
     )
 }
 
-pub(crate) async fn finish_scoped_tool_call(
-    tool: BrokerTool,
-    include_structured_content: bool,
-    future: ToolCallFuture<'_>,
-) -> CallToolResult {
-    finish_scoped_tool_call_named(tool.name().to_string(), include_structured_content, future).await
-}
-
 pub(crate) async fn finish_scoped_tool_call_named(
     tool_name: String,
     include_structured_content: bool,

@@ -323,8 +323,13 @@ impl DaemonClient {
         Req: serde::Serialize + ?Sized,
         Resp: serde::de::DeserializeOwned,
     {
-        self.post_with_retry_policy(path, body, RpcRetryPolicy::None)
-            .await
+        self.post_with_retry_policy_and_timeout(
+            path,
+            body,
+            RpcRetryPolicy::None,
+            self.request_timeout,
+        )
+        .await
     }
 
     async fn post_with_timeout<Req, Resp>(
@@ -357,20 +362,6 @@ impl DaemonClient {
             self.request_timeout,
         )
         .await
-    }
-
-    async fn post_with_retry_policy<Req, Resp>(
-        &self,
-        path: &str,
-        body: &Req,
-        retry_policy: RpcRetryPolicy,
-    ) -> Result<Resp, DaemonClientError>
-    where
-        Req: serde::Serialize + ?Sized,
-        Resp: serde::de::DeserializeOwned,
-    {
-        self.post_with_retry_policy_and_timeout(path, body, retry_policy, self.request_timeout)
-            .await
     }
 
     async fn post_with_retry_policy_and_timeout<Req, Resp>(

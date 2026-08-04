@@ -105,7 +105,9 @@ async fn reconnect_listen_tunnel(
 }
 
 async fn reconnect_connect_epoch(runtime: &ForwardRuntime) -> anyhow::Result<Option<ForwardEpoch>> {
-    mark_connect_reconnecting(runtime, "connect-side transport loss").await?;
+    runtime
+        .mark_reconnecting(ForwardPortSideRole::Connect, "connect-side transport loss")
+        .await?;
     let generation = runtime.listen_session.advance_generation().await;
     runtime
         .store
@@ -233,12 +235,6 @@ async fn recover_connect_side_tunnel_after_listen_recovery(
     };
     runtime.mark_active(ForwardPortSideRole::Connect).await;
     Ok(Some(connect_tunnel))
-}
-
-async fn mark_connect_reconnecting(runtime: &ForwardRuntime, reason: &str) -> anyhow::Result<()> {
-    runtime
-        .mark_reconnecting(ForwardPortSideRole::Connect, reason)
-        .await
 }
 
 async fn retry_open_connect_tunnel(

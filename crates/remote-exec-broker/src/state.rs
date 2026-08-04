@@ -435,10 +435,6 @@ impl BrokerState {
         )
     }
 
-    async fn session_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
-        self.verified_target(name).await
-    }
-
     pub(crate) async fn register_exec_session(
         &self,
         target: &str,
@@ -483,7 +479,7 @@ impl BrokerState {
             );
         }
 
-        let target = self.session_target(&record.target).await?;
+        let target = self.verified_target(&record.target).await?;
         let request = ExecWriteRequest {
             daemon_session_id: record.daemon_session_id.clone(),
             chars,
@@ -584,7 +580,10 @@ impl BrokerState {
         &'a self,
         name: &'a str,
     ) -> anyhow::Result<RemoteTargetHandle<'a>> {
-        self.verified_remote_target(name).await
+        let target = self.verified_target(name).await?;
+        target
+            .as_remote()
+            .with_context(|| format!("target `{name}` is not a remote target"))
     }
 
     pub(crate) async fn transfer_remote_daemon_info(
@@ -620,16 +619,6 @@ impl BrokerState {
             handle.clone(),
             info.daemon_instance_id,
         ))
-    }
-
-    async fn verified_remote_target<'a>(
-        &'a self,
-        name: &'a str,
-    ) -> anyhow::Result<RemoteTargetHandle<'a>> {
-        let target = self.verified_target(name).await?;
-        target
-            .as_remote()
-            .with_context(|| format!("target `{name}` is not a remote target"))
     }
 }
 

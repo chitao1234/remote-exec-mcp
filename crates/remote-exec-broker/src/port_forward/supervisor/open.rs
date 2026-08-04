@@ -308,13 +308,8 @@ async fn open_listener_for_forward(
         &listen_tunnel,
         listener_stream_id,
         kind.listen_ok_frame_type,
+        listener_open_context.clone(),
         listener_open_context,
-        open_context(
-            kind,
-            ForwardSide::Listen,
-            listen_side.name(),
-            listen_endpoint,
-        ),
     )
     .await
     {

@@ -289,10 +289,6 @@ async fn periodic_target_refresh_loop(state: BrokerState, cancel: CancellationTo
             .remote_targets_due_for_health_refresh(SystemTime::now())
             .await;
         for name in names {
-            if cancel.is_cancelled() {
-                return;
-            }
-
             let refresh =
                 state.refresh_remote_target_health_and_dependents_with_configured_timeout(&name);
             let result = tokio::select! {

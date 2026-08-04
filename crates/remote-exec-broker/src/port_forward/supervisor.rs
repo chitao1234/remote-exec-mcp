@@ -51,26 +51,6 @@ impl ForwardIdentity {
             connect_endpoint,
         }
     }
-
-    pub(super) fn forward_id(&self) -> &ForwardId {
-        &self.forward_id
-    }
-
-    pub(super) fn listen_side(&self) -> &SideHandle {
-        &self.listen_side
-    }
-
-    pub(super) fn connect_side(&self) -> &SideHandle {
-        &self.connect_side
-    }
-
-    pub(super) fn protocol(&self) -> PublicForwardPortProtocol {
-        self.protocol
-    }
-
-    pub(super) fn connect_endpoint(&self) -> &str {
-        &self.connect_endpoint
-    }
 }
 
 #[derive(Clone)]
@@ -146,23 +126,23 @@ impl ForwardRuntime {
     }
 
     pub(super) fn forward_id(&self) -> &ForwardId {
-        self.identity.forward_id()
+        &self.identity.forward_id
     }
 
     pub(super) fn listen_side(&self) -> &SideHandle {
-        self.identity.listen_side()
+        &self.identity.listen_side
     }
 
     pub(super) fn connect_side(&self) -> &SideHandle {
-        self.identity.connect_side()
+        &self.identity.connect_side
     }
 
     pub(super) fn protocol(&self) -> PublicForwardPortProtocol {
-        self.identity.protocol()
+        self.identity.protocol
     }
 
     pub(super) fn connect_endpoint(&self) -> &str {
-        self.identity.connect_endpoint()
+        &self.identity.connect_endpoint
     }
 
     pub(super) fn initial_epoch(&self) -> &ForwardEpoch {
@@ -195,7 +175,7 @@ impl ForwardRuntime {
 
     pub(super) async fn record_dropped_active_stream(&self) {
         self.store
-            .record_dropped_active_tcp_stream(self.forward_id().as_str())
+            .record_dropped_tcp_streams_and_release_active(self.forward_id().as_str(), 1)
             .await;
     }
 
@@ -256,11 +236,8 @@ impl OpenedForward {
         Ok(())
     }
 
-    pub async fn close_unregistered(
-        self,
-        store: super::store::PortForwardStore,
-    ) -> ForwardPortEntry {
-        store.release_open_reservation(self.reservation);
+    pub async fn close_unregistered(self) -> ForwardPortEntry {
+        drop(self.reservation);
         close_record(self.record).await
     }
 }

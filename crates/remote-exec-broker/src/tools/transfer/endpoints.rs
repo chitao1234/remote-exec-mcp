@@ -188,30 +188,13 @@ pub(super) fn ensure_multi_source_basenames_are_unique(
         return Ok(());
     }
 
-    let destination_context = planning.endpoint_context(destination)?;
-    let destination_policy = planning.endpoint_policy(destination)?;
-    let mut seen_paths: Vec<String> = Vec::with_capacity(sources.len());
-    for source in sources {
-        let source_policy = planning.endpoint_policy(source)?;
-        let basename = source_policy.basename(&source.path).ok_or_else(|| {
-            anyhow::anyhow!(
-                "transfer source path `{}` has no usable basename for multi-source transfer",
-                source.path
-            )
-        })?;
-        let candidate = destination_policy.join(&destination.path, &basename);
-        anyhow::ensure!(
-            !seen_paths.iter().any(|existing| paths_match_for_preflight(
-                &destination_context,
-                destination_policy,
-                existing,
-                &candidate
-            )),
-            "multi-source transfer would create duplicate destination entry `{basename}`"
-        );
-        seen_paths.push(candidate);
-    }
-
+    collect_destination_collisions(
+        planning,
+        sources,
+        destination,
+        "multi-source transfer",
+        |_, policy, base, child| policy.join(base, child),
+    )?;
     Ok(())
 }
 
@@ -251,18 +234,44 @@ fn resolve_into_directory_destination(
     sources: &[TransferEndpoint],
     destination: &TransferEndpoint,
 ) -> anyhow::Result<String> {
+    let candidates = collect_destination_collisions(
+        planning,
+        sources,
+        destination,
+        "destination directory mode",
+        |context, _, base, child| join_child_for_context(context, base, child),
+    )?;
+
+    match candidates.as_slice() {
+        [candidate] => Ok(candidate.clone()),
+        _ => Ok(destination.path.clone()),
+    }
+}
+
+fn collect_destination_collisions(
+    planning: &TransferPlanningContext,
+    sources: &[TransferEndpoint],
+    destination: &TransferEndpoint,
+    mode_noun: &str,
+    join: impl Fn(&EndpointTargetContext, PathPolicy, &str, &str) -> String,
+) -> anyhow::Result<Vec<String>> {
     let destination_context = planning.endpoint_context(destination)?;
-    let destination_policy = destination_context.policy();
+    let destination_policy = planning.endpoint_policy(destination)?;
     let mut candidates: Vec<String> = Vec::with_capacity(sources.len());
     for source in sources {
         let source_policy = planning.endpoint_policy(source)?;
         let basename = source_policy.basename(&source.path).ok_or_else(|| {
             anyhow::anyhow!(
-                "transfer source path `{}` has no usable basename for destination directory mode",
+                "transfer source path `{}` has no usable basename for {mode_noun}",
                 source.path
             )
         })?;
-        let candidate = join_child_for_context(&destination_context, &destination.path, &basename);
+        let candidate = join(
+            &destination_context,
+            destination_policy,
+            &destination.path,
+            &basename,
+        );
         anyhow::ensure!(
             !candidates.iter().any(|existing| paths_match_for_preflight(
                 &destination_context,
@@ -270,15 +279,11 @@ fn resolve_into_directory_destination(
                 existing,
                 &candidate
             )),
-            "destination directory mode would create duplicate destination entry `{basename}`"
+            "{mode_noun} would create duplicate destination entry `{basename}`"
         );
         candidates.push(candidate);
     }
-
-    match candidates.as_slice() {
-        [candidate] => Ok(candidate.clone()),
-        _ => Ok(destination.path.clone()),
-    }
+    Ok(candidates)
 }
 
 fn paths_match_for_preflight(

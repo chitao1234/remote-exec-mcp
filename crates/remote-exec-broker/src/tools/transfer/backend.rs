@@ -25,7 +25,7 @@ pub(super) struct TransferArchiveStream {
 }
 
 impl TransferArchiveStream {
-    fn new(
+    pub(super) fn new(
         source_type: TransferSourceType,
         reader: impl tokio::io::AsyncRead + Send + Unpin + 'static,
     ) -> Self {
@@ -33,13 +33,6 @@ impl TransferArchiveStream {
             source_type,
             reader: Box::new(reader),
         }
-    }
-
-    pub(super) fn from_async_read(
-        source_type: TransferSourceType,
-        reader: impl tokio::io::AsyncRead + Send + Unpin + 'static,
-    ) -> Self {
-        Self::new(source_type, reader)
     }
 
     pub(super) fn source_type(&self) -> &TransferSourceType {
@@ -248,7 +241,6 @@ impl TransferBackend for RemoteTransferBackend<'_> {
             let exported = handle_remote_transfer_result(
                 self.state,
                 self.target_name,
-                self.target,
                 self.target.transfer_export_stream(request).await,
             )
             .await?;
@@ -269,7 +261,6 @@ impl TransferBackend for RemoteTransferBackend<'_> {
             handle_remote_transfer_result(
                 self.state,
                 self.target_name,
-                self.target,
                 self.target
                     .transfer_import_from_archive_stream(request, archive.into_archive_stream())
                     .await,
@@ -282,10 +273,8 @@ impl TransferBackend for RemoteTransferBackend<'_> {
 async fn handle_remote_transfer_result<T>(
     state: &crate::BrokerState,
     target_name: &str,
-    target: RemoteTargetHandle<'_>,
     result: Result<T, DaemonClientError>,
 ) -> anyhow::Result<T> {
-    let _ = target;
     if result.is_err() {
         state.trigger_remote_target_health_recheck(target_name);
     }

@@ -60,34 +60,31 @@ fn format_targets_text(targets: &[ListTargetEntry]) -> String {
         .iter()
         .map(
             |target| match (&target.health_status, &target.daemon_info) {
-                (TargetHealthStatus::Healthy, Some(info)) => format!(
-                    "- {}: healthy, {}/{}, host={}, version={}, pty={}, forward_ports={}",
-                    target.name,
-                    info.identity.platform.as_str(),
-                    info.identity.arch.as_str(),
-                    info.identity.hostname.as_str(),
-                    info.identity.daemon_version.as_str(),
-                    if info.supports_pty { "yes" } else { "no" },
-                    if info.supports_port_forward {
-                        "yes"
-                    } else {
-                        "no"
-                    },
-                ),
-                (TargetHealthStatus::MaybeUnhealthy, Some(info)) => format!(
-                    "- {}: maybe unhealthy, {}/{}, host={}, version={}, pty={}, forward_ports={}",
-                    target.name,
-                    info.identity.platform.as_str(),
-                    info.identity.arch.as_str(),
-                    info.identity.hostname.as_str(),
-                    info.identity.daemon_version.as_str(),
-                    if info.supports_pty { "yes" } else { "no" },
-                    if info.supports_port_forward {
-                        "yes"
-                    } else {
-                        "no"
-                    },
-                ),
+                (
+                    TargetHealthStatus::Healthy | TargetHealthStatus::MaybeUnhealthy,
+                    Some(info),
+                ) => {
+                    let status_label =
+                        if matches!(&target.health_status, TargetHealthStatus::Healthy) {
+                            "healthy"
+                        } else {
+                            "maybe unhealthy"
+                        };
+                    format!(
+                        "- {}: {status_label}, {}/{}, host={}, version={}, pty={}, forward_ports={}",
+                        target.name,
+                        info.identity.platform.as_str(),
+                        info.identity.arch.as_str(),
+                        info.identity.hostname.as_str(),
+                        info.identity.daemon_version.as_str(),
+                        if info.supports_pty { "yes" } else { "no" },
+                        if info.supports_port_forward {
+                            "yes"
+                        } else {
+                            "no"
+                        },
+                    )
+                }
                 (TargetHealthStatus::MaybeUnhealthy, None) => {
                     format!("- {}: maybe unhealthy (no cached daemon info)", target.name)
                 }

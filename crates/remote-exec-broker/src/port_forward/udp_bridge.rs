@@ -218,7 +218,7 @@ async fn handle_connect_udp_tunnel_event(
         FrameType::UdpBindOk => Ok(None),
         FrameType::Error => {
             runtime.record_dropped_datagram().await;
-            remove_udp_connector(connectors, frame.stream_id).await;
+            let _ = connectors.remove_by_stream_id(frame.stream_id).await;
             Ok(None)
         }
         FrameType::UdpDatagram => {
@@ -330,10 +330,6 @@ async fn udp_connector_stream_id(
 enum UdpConnectorError {
     LimitExceeded,
     Transport(anyhow::Error),
-}
-
-async fn remove_udp_connector(connectors: &UdpConnectorMap, stream_id: u32) {
-    let _ = connectors.remove_by_stream_id(stream_id).await;
 }
 
 async fn sweep_idle_udp_connectors(connect_tunnel: &Arc<PortTunnel>, connectors: &UdpConnectorMap) {

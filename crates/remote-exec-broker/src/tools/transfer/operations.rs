@@ -267,7 +267,7 @@ async fn import_streaming_multi_source(
         .map_err(anyhow::Error::from)
     });
 
-    let archive = TransferArchiveStream::from_async_read(TransferSourceType::Multiple, reader);
+    let archive = TransferArchiveStream::new(TransferSourceType::Multiple, reader);
     let import_result = import_single_source(state, destination, request, archive).await;
     let repack_result = repack.await?;
     repack_result?;

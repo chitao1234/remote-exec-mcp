@@ -212,8 +212,8 @@ macro_rules! define_broker_tool_impl {
         ) -> CallToolResult {
             match self {
                 $(Self::$variant => {
-                    crate::mcp_server::finish_scoped_tool_call(
-                        self,
+                    crate::mcp_server::finish_scoped_tool_call_named(
+                        self.name().to_string(),
                         include_structured_content,
                         Box::pin(async move {
                             let input = deserialize_direct_arguments::<$input>(self.name(), arguments)?;

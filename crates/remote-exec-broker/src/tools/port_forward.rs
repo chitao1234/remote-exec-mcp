@@ -115,11 +115,9 @@ async fn open_forwards(
                 state.trigger_remote_target_health_recheck_if_daemon_error(&listen_side_name, &err);
                 state
                     .trigger_remote_target_health_recheck_if_daemon_error(&connect_side_name, &err);
-                state.port_forwards.release_open_reservations(reservations);
+                drop(reservations);
                 for forward in opened {
-                    let _ = forward
-                        .close_unregistered(state.port_forwards.clone())
-                        .await;
+                    let _ = forward.close_unregistered().await;
                 }
                 return Err(err);
             }
@@ -137,9 +135,7 @@ async fn open_forwards(
             .await
         {
             for remaining in opened {
-                let _ = remaining
-                    .close_unregistered(state.port_forwards.clone())
-                    .await;
+                let _ = remaining.close_unregistered().await;
             }
             if !registered_ids.is_empty() {
                 let _ = state.port_forwards.close(&registered_ids).await;

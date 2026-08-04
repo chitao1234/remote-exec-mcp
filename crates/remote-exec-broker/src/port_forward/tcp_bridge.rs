@@ -434,8 +434,7 @@ async fn handle_connect_tcp_connect_ok(
         return Ok(None);
     };
     stream.ready = true;
-    let mut pending = Vec::new();
-    std::mem::swap(&mut pending, &mut stream.pending_frames);
+    let pending = std::mem::take(&mut stream.pending_frames);
     match flush_pending_tcp_connect_frames(
         runtime,
         connect_tunnel,
@@ -835,8 +834,7 @@ async fn close_tcp_pair_if_fully_eof(
     )
     .await
     else {
-        debug_assert!(false, "fully drained tcp stream exists");
-        return Ok(None);
+        unreachable!("fully drained tcp stream should still be present in the same task");
     };
     let listen_stream_id = stream.listen_stream_id;
     if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {

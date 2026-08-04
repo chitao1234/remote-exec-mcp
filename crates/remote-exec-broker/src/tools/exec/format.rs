@@ -1,21 +1,5 @@
 use remote_exec_proto::rpc::{ExecResponse, ExecWarning};
 
-pub(super) fn format_command_text(
-    cmd: &str,
-    response: &ExecResponse,
-    session_id: Option<&str>,
-) -> String {
-    format_exec_text(Some(cmd), response, session_id)
-}
-
-pub(super) fn format_poll_text(
-    cmd: Option<&str>,
-    response: &ExecResponse,
-    session_id: Option<&str>,
-) -> String {
-    format_exec_text(cmd, response, session_id)
-}
-
 pub(super) fn format_intercepted_patch_text(output: &str) -> String {
     format!("Wall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\n{output}")
 }
@@ -41,7 +25,7 @@ pub(super) fn prepend_warning_text(text: String, warnings: &[ExecWarning]) -> St
     format!("{warning_text}\n\n{text}")
 }
 
-fn format_exec_text(
+pub(super) fn format_exec_text(
     cmd: Option<&str>,
     response: &ExecResponse,
     session_id: Option<&str>,
@@ -70,30 +54,28 @@ fn format_exec_text(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        format_command_text, format_intercepted_patch_text, format_poll_text, prepend_warning_text,
-    };
+    use super::{format_exec_text, format_intercepted_patch_text, prepend_warning_text};
     use remote_exec_proto::rpc::{
         ExecCompletedResponse, ExecOutputResponse, ExecResponse, ExecWarning,
     };
 
     #[test]
     fn format_command_text_includes_original_token_count_when_present() {
-        let text = format_command_text("printf hi", &completed_response(), None);
+        let text = format_exec_text(Some("printf hi"), &completed_response(), None);
 
         assert!(text.contains("Original token count: 6"));
     }
 
     #[test]
     fn format_poll_text_includes_original_token_count_when_present() {
-        let text = format_poll_text(None, &completed_response(), None);
+        let text = format_exec_text(None, &completed_response(), None);
 
         assert!(text.contains("Original token count: 6"));
     }
 
     #[test]
     fn format_poll_text_includes_command_when_present() {
-        let text = format_poll_text(Some("printf hi"), &completed_response(), None);
+        let text = format_exec_text(Some("printf hi"), &completed_response(), None);
 
         assert!(text.starts_with("Command: printf hi\n"));
     }

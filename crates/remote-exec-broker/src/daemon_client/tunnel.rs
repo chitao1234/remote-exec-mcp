@@ -13,6 +13,18 @@ const PORT_TUNNEL_UPGRADE_TIMEOUT: std::time::Duration = std::time::Duration::fr
 const PORT_TUNNEL_PREFACE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl DaemonClient {
+    async fn recover_timeout(
+        &self,
+        operation: &str,
+        connection_generation: u64,
+        message: &str,
+    ) -> DaemonClientError {
+        let recovery = self
+            .recover_connection_after_timeout(operation, Some(connection_generation))
+            .await;
+        DaemonClientError::Transport(anyhow::anyhow!("{message}; {recovery}"))
+    }
+
     pub async fn port_tunnel(&self) -> Result<reqwest::Upgraded, DaemonClientError> {
         let started = std::time::Instant::now();
         let (request, connection_generation) = self.request_with_generation("/v1/port/tunnel");
@@ -25,29 +37,25 @@ impl DaemonClient {
         {
             Ok(Ok(response)) => response,
             Ok(Err(err)) if err.is_timeout() => {
-                let recovery = self
-                    .recover_connection_after_timeout(
+                return Err(self
+                    .recover_timeout(
                         "port tunnel upgrade",
-                        Some(connection_generation),
+                        connection_generation,
+                        "port tunnel upgrade timed out",
                     )
-                    .await;
-                return Err(DaemonClientError::Transport(anyhow::anyhow!(
-                    "port tunnel upgrade timed out; {recovery}"
-                )));
+                    .await);
             }
             Ok(Err(err)) => {
                 return Err(self.rpc_transport_error("/v1/port/tunnel", started, err));
             }
             Err(_) => {
-                let recovery = self
-                    .recover_connection_after_timeout(
+                return Err(self
+                    .recover_timeout(
                         "port tunnel upgrade",
-                        Some(connection_generation),
+                        connection_generation,
+                        "port tunnel upgrade timed out",
                     )
-                    .await;
-                return Err(DaemonClientError::Transport(anyhow::anyhow!(
-                    "port tunnel upgrade timed out; {recovery}"
-                )));
+                    .await);
             }
         };
         if response.status() != reqwest::StatusCode::SWITCHING_PROTOCOLS {
@@ -58,15 +66,13 @@ impl DaemonClient {
             match tokio::time::timeout(PORT_TUNNEL_UPGRADE_TIMEOUT, response.upgrade()).await {
                 Ok(upgraded) => upgraded,
                 Err(_) => {
-                    let recovery = self
-                        .recover_connection_after_timeout(
+                    return Err(self
+                        .recover_timeout(
                             "port tunnel upgrade",
-                            Some(connection_generation),
+                            connection_generation,
+                            "port tunnel upgrade timed out",
                         )
-                        .await;
-                    return Err(DaemonClientError::Transport(anyhow::anyhow!(
-                        "port tunnel upgrade timed out; {recovery}"
-                    )));
+                        .await);
                 }
             }
             .map_err(|err| DaemonClientError::Transport(err.into()))?;
@@ -74,15 +80,13 @@ impl DaemonClient {
         {
             Ok(result) => result,
             Err(_) => {
-                let recovery = self
-                    .recover_connection_after_timeout(
+                return Err(self
+                    .recover_timeout(
                         "port tunnel preface",
-                        Some(connection_generation),
+                        connection_generation,
+                        "port tunnel preface timed out",
                     )
-                    .await;
-                return Err(DaemonClientError::Transport(anyhow::anyhow!(
-                    "port tunnel preface timed out; {recovery}"
-                )));
+                    .await);
             }
         }
         .map_err(|err| DaemonClientError::Transport(err.into()))?;
