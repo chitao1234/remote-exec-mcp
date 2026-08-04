@@ -345,6 +345,21 @@ public:
         if (block) {
             drain_pty_after_exit = wait_for_output_readable(read_fd);
         }
+        // When a tty session's output may resume after a stall, either poll
+        // and retry (blocking mode) or stop without EOF (non-blocking mode).
+        // Returns true when the caller should continue reading; otherwise
+        // sets *eof as appropriate and returns false.
+        const auto continue_after_pty_output_stall = [this, &block, eof]() -> bool {
+            if (!tty_ || !output_may_resume()) {
+                *eof = true;
+                return false;
+            }
+            if (block) {
+                platform::sleep_ms(1UL);
+                return true;
+            }
+            return false;
+        };
         while (block || drain_pty_after_exit || readable_now(read_fd)) {
             const ssize_t read_count = posix_fd::read_retry(read_fd, buffer, sizeof(buffer));
             if (read_count > 0) {
@@ -353,14 +368,9 @@ public:
                 continue;
             }
             if (read_count == 0) {
-                if (tty_ && output_may_resume()) {
-                    if (block) {
-                        platform::sleep_ms(1UL);
-                        continue;
-                    }
-                    break;
+                if (continue_after_pty_output_stall()) {
+                    continue;
                 }
-                *eof = true;
                 break;
             }
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -370,14 +380,9 @@ public:
                 break;
             }
             if (errno == EIO) {
-                if (tty_ && output_may_resume()) {
-                    if (block) {
-                        platform::sleep_ms(1UL);
-                        continue;
-                    }
-                    break;
+                if (continue_after_pty_output_stall()) {
+                    continue;
                 }
-                *eof = true;
                 break;
             }
             throw std::runtime_error(errno_error::operation_failed("read(stdout)", errno));

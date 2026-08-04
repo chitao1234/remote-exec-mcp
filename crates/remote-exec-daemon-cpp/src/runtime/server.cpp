@@ -67,13 +67,8 @@ void wait_for_shutdown_signal() {
     pfd.fd = g_shutdown_pipe_read;
     pfd.events = POLLIN;
     pfd.revents = 0;
-    while (!g_shutdown_requested) {
-        const int result =
-            posix_eintr::poll_forever_until(&pfd, 1, []() { return g_shutdown_requested != 0; });
-        if (result > 0) {
-            return;
-        }
-        return;
+    if (!g_shutdown_requested) {
+        (void)posix_eintr::poll_forever_until(&pfd, 1, []() { return g_shutdown_requested != 0; });
     }
 }
 

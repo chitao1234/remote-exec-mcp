@@ -116,9 +116,10 @@ void PortTunnelSender::writer_loop() {
         }
 
         try {
-            send_all(
+            send_all_bytes(
                 *client_,
-                std::string(reinterpret_cast<const char*>(queued.bytes.data()), queued.bytes.size())
+                reinterpret_cast<const char*>(queued.bytes.data()),
+                queued.bytes.size()
             );
         } catch (const std::exception& ex) {
             log_tunnel_exception("send port tunnel frame", ex);
@@ -260,6 +261,32 @@ void PortTunnelSender::drain_queued_frame_reservations_locked() {
     writer_queue_.clear();
 }
 
+// Encodes and enqueues a data frame whose byte charge was already reserved.
+// Returns true when the frame was queued; otherwise releases the reservation.
+// Exceptions from encoding are logged and rethrown after releasing the charge.
+bool PortTunnelSender::enqueue_reserved_data_frame(
+    const PortTunnelFrame& frame,
+    unsigned long charge_value,
+    const char* operation
+) {
+    try {
+        std::vector<unsigned char> bytes = encode_port_tunnel_frame(frame);
+        if (enqueue_encoded_frame(std::move(bytes), QueueReservationKind::Data, charge_value)) {
+            return true;
+        }
+    } catch (const std::exception& ex) {
+        log_tunnel_exception(operation, ex);
+        release_data_frame_reservation(charge_value);
+        throw;
+    } catch (...) {
+        log_unknown_tunnel_exception(operation);
+        release_data_frame_reservation(charge_value);
+        throw;
+    }
+    release_data_frame_reservation(charge_value);
+    return false;
+}
+
 bool PortTunnelSender::send_data_frame_or_limit_error(
     PortTunnelConnection& connection,
     const PortTunnelFrame& frame
@@ -273,22 +300,7 @@ bool PortTunnelSender::send_data_frame_or_limit_error(
         );
         return false;
     }
-    try {
-        std::vector<unsigned char> bytes = encode_port_tunnel_frame(frame);
-        if (enqueue_encoded_frame(std::move(bytes), QueueReservationKind::Data, charge_value)) {
-            return true;
-        }
-    } catch (const std::exception& ex) {
-        log_tunnel_exception("queue limited port tunnel data frame", ex);
-        release_data_frame_reservation(charge_value);
-        throw;
-    } catch (...) {
-        log_unknown_tunnel_exception("queue limited port tunnel data frame");
-        release_data_frame_reservation(charge_value);
-        throw;
-    }
-    release_data_frame_reservation(charge_value);
-    return false;
+    return enqueue_reserved_data_frame(frame, charge_value, "queue limited port tunnel data frame");
 }
 
 bool PortTunnelSender::send_data_frame_or_drop_on_limit(
@@ -307,20 +319,9 @@ bool PortTunnelSender::send_data_frame_or_drop_on_limit(
         }
         return true;
     }
-    try {
-        std::vector<unsigned char> bytes = encode_port_tunnel_frame(frame);
-        if (enqueue_encoded_frame(std::move(bytes), QueueReservationKind::Data, charge_value)) {
-            return true;
-        }
-    } catch (const std::exception& ex) {
-        log_tunnel_exception("queue droppable port tunnel data frame", ex);
-        release_data_frame_reservation(charge_value);
-        throw;
-    } catch (...) {
-        log_unknown_tunnel_exception("queue droppable port tunnel data frame");
-        release_data_frame_reservation(charge_value);
-        throw;
-    }
-    release_data_frame_reservation(charge_value);
-    return false;
+    return enqueue_reserved_data_frame(
+        frame,
+        charge_value,
+        "queue droppable port tunnel data frame"
+    );
 }

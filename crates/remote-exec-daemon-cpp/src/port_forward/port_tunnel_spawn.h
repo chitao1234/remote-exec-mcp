@@ -3,25 +3,12 @@
 #include <memory>
 
 #include "port_tunnel_service.h"
+#include "runtime/start_gate.h"
 
 class PortTunnelConnection;
 class PortTunnelService;
 
-class TcpReadStartGate {
-public:
-    TcpReadStartGate();
-
-    void release();
-    void wait();
-
-private:
-    TcpReadStartGate(const TcpReadStartGate&);
-    TcpReadStartGate& operator=(const TcpReadStartGate&);
-
-    BasicMutex mutex_;
-    BasicCondVar cond_;
-    bool released_;
-};
+using TcpReadStartGate = StartGate;
 
 bool spawn_tcp_read_thread(
     const std::shared_ptr<PortTunnelService>& service,

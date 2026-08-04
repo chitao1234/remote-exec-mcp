@@ -4,38 +4,9 @@
 #include <utility>
 
 #include "runtime/daemon_thread.h"
+#include "runtime/start_gate.h"
 
-class PortTunnelWorkerStartGate {
-public:
-    PortTunnelWorkerStartGate() : released_(false), cancelled_(false) {}
-
-    void release() {
-        BasicLockGuard lock(mutex_);
-        released_ = true;
-        cond_.broadcast();
-    }
-
-    void cancel() {
-        BasicLockGuard lock(mutex_);
-        cancelled_ = true;
-        released_ = true;
-        cond_.broadcast();
-    }
-
-    bool wait() {
-        BasicLockGuard lock(mutex_);
-        while (!released_) {
-            cond_.wait(mutex_);
-        }
-        return !cancelled_;
-    }
-
-private:
-    BasicMutex mutex_;
-    BasicCondVar cond_;
-    bool released_;
-    bool cancelled_;
-};
+using PortTunnelWorkerStartGate = StartGate;
 
 PortTunnelService::WorkerGroup::WorkerGroup() : shutting_down(false) {
 }

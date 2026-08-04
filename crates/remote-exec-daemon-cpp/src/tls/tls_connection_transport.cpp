@@ -378,24 +378,28 @@ private:
     std::vector<unsigned char> pinned_peer_;
 };
 
-std::shared_ptr<TlsContext> make_tls_server_context(const DaemonConfig& config) {
+std::shared_ptr<TlsContext> make_tls_context(
+    const SSL_METHOD* (*method_fn)(void),
+    const std::string& cert_pem,
+    const std::string& key_pem,
+    const std::string& ca_pem,
+    int verify_mode,
+    const std::string& pinned_cert_pem,
+    const char* context_label
+) {
     openssl_compat::initialize();
-    SSL_CTX* context = SSL_CTX_new(openssl_compat::server_method());
+    SSL_CTX* context = SSL_CTX_new(method_fn());
     if (context == nullptr) {
-        throw std::runtime_error(openssl_compat::error_string("creating TLS server context"));
+        throw std::runtime_error(
+            openssl_compat::error_string(std::string("creating TLS ") + context_label + " context")
+        );
     }
     try {
-        configure_context_identity(
-            context,
-            config.tls_cert_pem,
-            config.tls_key_pem,
-            config.tls_ca_pem
-        );
-        SSL_CTX_set_verify(context, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
-        const std::vector<unsigned char> pin =
-            config.tls_pinned_client_cert_pem.empty()
-                ? std::vector<unsigned char>()
-                : load_certificate_der(config.tls_pinned_client_cert_pem);
+        configure_context_identity(context, cert_pem, key_pem, ca_pem);
+        SSL_CTX_set_verify(context, verify_mode, nullptr);
+        const std::vector<unsigned char> pin = pinned_cert_pem.empty()
+                                                   ? std::vector<unsigned char>()
+                                                   : load_certificate_der(pinned_cert_pem);
         return std::shared_ptr<TlsContext>(new TlsContext(context, pin));
     } catch (...) {
         SSL_CTX_free(context);
@@ -403,25 +407,28 @@ std::shared_ptr<TlsContext> make_tls_server_context(const DaemonConfig& config) 
     }
 }
 
+std::shared_ptr<TlsContext> make_tls_server_context(const DaemonConfig& config) {
+    return make_tls_context(
+        openssl_compat::server_method,
+        config.tls_cert_pem,
+        config.tls_key_pem,
+        config.tls_ca_pem,
+        SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+        config.tls_pinned_client_cert_pem,
+        "server"
+    );
+}
+
 std::shared_ptr<TlsContext> make_tls_client_context(const DaemonConfig& config) {
-    openssl_compat::initialize();
-    SSL_CTX* context = SSL_CTX_new(openssl_compat::client_method());
-    if (context == nullptr) {
-        throw std::runtime_error(openssl_compat::error_string("creating TLS client context"));
-    }
-    try {
-        configure_context_identity(
-            context,
-            config.reverse_tls_cert_pem,
-            config.reverse_tls_key_pem,
-            config.reverse_tls_ca_pem
-        );
-        SSL_CTX_set_verify(context, SSL_VERIFY_PEER, nullptr);
-        return std::shared_ptr<TlsContext>(new TlsContext(context, std::vector<unsigned char>()));
-    } catch (...) {
-        SSL_CTX_free(context);
-        throw;
-    }
+    return make_tls_context(
+        openssl_compat::client_method,
+        config.reverse_tls_cert_pem,
+        config.reverse_tls_key_pem,
+        config.reverse_tls_ca_pem,
+        SSL_VERIFY_PEER,
+        "",
+        "client"
+    );
 }
 
 std::shared_ptr<ConnectionTransport> make_tls_server_connection_transport(

@@ -316,7 +316,8 @@ void PortTunnelConnection::tcp_write_loop(
         try {
             send_all_socket(
                 stream->socket.get(),
-                std::string(reinterpret_cast<const char*>(data.data()), data.size())
+                reinterpret_cast<const char*>(data.data()),
+                data.size()
             );
         } catch (const std::exception& ex) {
             log_tunnel_exception("write tcp stream", ex);

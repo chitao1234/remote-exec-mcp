@@ -16,6 +16,7 @@
 
 #endif
 
+#include "platform/path_utils.h"
 #include "platform/platform.h"
 #include "policy/filesystem_sandbox.h"
 #include "policy/path_compare.h"
@@ -72,6 +73,10 @@ char policy_separator(PathPolicy policy) {
     return policy.style == PATH_STYLE_WINDOWS ? '\\' : '/';
 }
 
+std::string unable_to_resolve_ancestor_message(const std::string& path) {
+    return "unable to resolve an existing ancestor for `" + path + "`";
+}
+
 std::string join_components(
     PathPolicy policy,
     const std::string& prefix,
@@ -104,20 +109,10 @@ std::string lexical_normalize_for_policy(PathPolicy policy, const std::string& r
     std::string prefix;
     std::size_t start = 0;
 
-    if (policy.style == PATH_STYLE_POSIX) {
-        if (!normalized.empty() && normalized[0] == '/') {
-            prefix = "/";
-            start = 1;
-        }
-    } else if (normalized.size() >= 3
-               && std::isalpha(static_cast<unsigned char>(normalized[0])) != 0
-               && normalized[1] == ':' && is_separator(policy, normalized[2])) {
-        prefix = normalized.substr(0, 2);
-        prefix.push_back('\\');
-        start = 3;
-    } else if (normalized.rfind("\\\\", 0) == 0) {
-        prefix = "\\\\";
-        start = 2;
+    path_utils::AbsolutePathPrefix parsed_prefix;
+    if (path_utils::parse_absolute_path_prefix(policy.style, normalized, &parsed_prefix)) {
+        prefix = parsed_prefix.value;
+        start = parsed_prefix.start;
     }
 
     std::vector<std::string> parts;
@@ -353,7 +348,7 @@ std::string canonicalize_windows_for_sandbox(const std::string& path) {
 
         const std::string parent = parent_for_windows_path(probe);
         if (parent.empty() || parent == probe) {
-            throw SandboxError("unable to resolve an existing ancestor for `" + normalized + "`");
+            throw SandboxError(unable_to_resolve_ancestor_message(normalized));
         }
         probe = parent;
     }
@@ -417,13 +412,13 @@ std::string canonicalize_posix_for_sandbox(const std::string& path) {
 
         const std::string name = basename_for_posix_path(probe);
         if (name.empty()) {
-            throw SandboxError("unable to resolve an existing ancestor for `" + normalized + "`");
+            throw SandboxError(unable_to_resolve_ancestor_message(normalized));
         }
         missing_components.push_back(name);
 
         const std::string parent = parent_for_posix_path(probe);
         if (parent.empty() || parent == probe) {
-            throw SandboxError("unable to resolve an existing ancestor for `" + normalized + "`");
+            throw SandboxError(unable_to_resolve_ancestor_message(normalized));
         }
         probe = parent;
     }

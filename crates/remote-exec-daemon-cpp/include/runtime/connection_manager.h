@@ -7,6 +7,7 @@
 
 #include "platform/basic_mutex.h"
 #include "platform/socket.h"
+#include "runtime/start_gate.h"
 
 class ConnectionTransport;
 
@@ -33,7 +34,7 @@ public:
     ConnectionManager& operator=(const ConnectionManager&) = delete;
 
 private:
-    class ConnectionStartGate;
+    using ConnectionStartGate = StartGate;
     struct WorkerRecord;
     void run_worker(const std::shared_ptr<WorkerRecord>& record);
     static void close_worker_socket(const std::shared_ptr<WorkerRecord>& record);

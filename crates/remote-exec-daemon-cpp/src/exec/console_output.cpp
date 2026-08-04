@@ -16,6 +16,7 @@
 #include "platform/platform.h"
 #include "platform/win32_error.h"
 #include "platform/win32_utf8.h"
+#include "win32_pipe_io.h"
 
 namespace {
 
@@ -187,29 +188,12 @@ std::string decode_console_output_with_code_pages(
     }
 }
 
-std::string read_available_raw(HANDLE pipe) {
-    DWORD available = 0;
-    if (PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr) == 0 || available == 0) {
-        return "";
-    }
-
-    std::string buffer;
-    buffer.resize(available);
-    DWORD read = 0;
-    if (ReadFile(pipe, &buffer[0], available, &read, nullptr) == 0) {
-        return "";
-    }
-    buffer.resize(read);
-    return buffer;
-}
-
 std::string read_blocking_raw(HANDLE pipe, bool* eof) {
     char buffer[4096];
     DWORD read = 0;
     if (ReadFile(pipe, buffer, sizeof(buffer), &read, nullptr) == 0) {
         const DWORD error = GetLastError();
-        if (error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA
-            || error == ERROR_PIPE_NOT_CONNECTED) {
+        if (is_win32_pipe_closed_error(error)) {
             *eof = true;
             return "";
         }
@@ -327,7 +311,7 @@ std::string read_available_console_output(HANDLE pipe, std::string* carry) {
         primary_console_output_code_page(),
         CP_ACP,
         carry,
-        read_available_raw(pipe),
+        read_pipe_available_raw(pipe, nullptr, false),
         false
     );
 }
@@ -348,7 +332,7 @@ std::string read_console_output(HANDLE pipe, bool block, bool* eof, std::string*
         primary_console_output_code_page(),
         CP_ACP,
         carry,
-        read_available_raw(pipe),
+        read_pipe_available_raw(pipe, nullptr, false),
         false
     );
 }
@@ -603,9 +587,7 @@ void TerminalOutputFilter::write_cell_text(
 
 void TerminalOutputFilter::dispatch_csi(char action) {
     std::string params = csi_buffer_;
-    bool private_mode = false;
     if (!params.empty() && params[0] == '?') {
-        private_mode = true;
         params.erase(0, 1);
     }
 
@@ -645,9 +627,6 @@ void TerminalOutputFilter::dispatch_csi(char action) {
         return;
     case 'h':
     case 'l':
-        if (private_mode) {
-            return;
-        }
         return;
     default:
         return;
@@ -734,9 +713,6 @@ void TerminalOutputFilter::clear_cells_range(Line* line, int start_col, int end_
 
     int clear_start = start_col;
     int clear_end = end_col;
-    if (line->cells.size() < static_cast<std::size_t>(clear_end)) {
-        line->cells.resize(static_cast<std::size_t>(clear_end));
-    }
 
     while (clear_start > 0 && clear_start < static_cast<int>(line->cells.size())
            && line->cells[static_cast<std::size_t>(clear_start)].continuation) {
@@ -842,9 +818,6 @@ void TerminalOutputFilter::queue_touched_rows(std::uint64_t now_ms) {
 }
 
 bool TerminalOutputFilter::pending_row_due(const PendingRow& pending, std::uint64_t now_ms) const {
-    if (!debounce_enabled_) {
-        return true;
-    }
     if (pending.last_changed_at_ms == 0U || pending.first_pending_at_ms == 0U) {
         return true;
     }

@@ -84,6 +84,32 @@ SessionOutputDrainStopReason eof_stop_reason_locked(const LiveSession* session) 
     return SessionOutputDrainStopReason::OutputEof;
 }
 
+enum class DrainCycleOutcome { Continue, Eof, Closing };
+
+// Runs one drain cycle: moves buffered output into `output` (and, when
+// `note_output` is set, marks the session as still producing output), then
+// reports whether the drain must stop because the session reached EOF or is
+// closing. Returns Continue when the caller should re-check its deadline.
+DrainCycleOutcome run_drain_cycle_locked(
+    LiveSession* session,
+    std::string* output,
+    bool note_output
+) {
+    if (!session->output_.buffered_output.empty()) {
+        *output += take_session_output_locked(session);
+        if (note_output) {
+            note_session_drain_output_locked(session);
+        }
+    }
+    if (session->output_.eof) {
+        return DrainCycleOutcome::Eof;
+    }
+    if (session->closing) {
+        return DrainCycleOutcome::Closing;
+    }
+    return DrainCycleOutcome::Continue;
+}
+
 void append_session_output_locked(LiveSession* session, const std::string& chunk) {
     if (!chunk.empty()) {
         session->output_.buffered_output += chunk;
@@ -278,14 +304,11 @@ SessionOutputDrainResult drain_exited_session_output_locked(
 
     SessionOutputDrainStopReason grace_stop_reason = SessionOutputDrainStopReason::None;
     for (;;) {
-        if (!session->output_.buffered_output.empty()) {
-            *output += take_session_output_locked(session);
-            note_session_drain_output_locked(session);
-        }
-        if (session->output_.eof) {
+        const DrainCycleOutcome outcome = run_drain_cycle_locked(session, output, true);
+        if (outcome == DrainCycleOutcome::Eof) {
             return make_session_drain_result_locked(session, true, eof_stop_reason_locked(session));
         }
-        if (session->closing) {
+        if (outcome == DrainCycleOutcome::Closing) {
             return make_session_drain_result_locked(
                 session,
                 true,
@@ -319,13 +342,11 @@ SessionOutputDrainResult drain_exited_session_output_locked(
     }
 
     for (;;) {
-        if (!session->output_.buffered_output.empty()) {
-            *output += take_session_output_locked(session);
-        }
-        if (session->output_.eof) {
+        const DrainCycleOutcome outcome = run_drain_cycle_locked(session, output, false);
+        if (outcome == DrainCycleOutcome::Eof) {
             return make_session_drain_result_locked(session, true, eof_stop_reason_locked(session));
         }
-        if (session->closing) {
+        if (outcome == DrainCycleOutcome::Closing) {
             return make_session_drain_result_locked(
                 session,
                 true,

@@ -30,6 +30,16 @@ void log_unknown_tunnel_send_failure(const char* frame_kind) {
 
 } // namespace
 
+void PortTunnelConnection::send_frame_safely(const PortTunnelFrame& frame, const char* kind) {
+    try {
+        send_frame(frame);
+    } catch (const std::exception& ex) {
+        log_tunnel_send_failure(kind, ex);
+    } catch (...) {
+        log_unknown_tunnel_send_failure(kind);
+    }
+}
+
 void PortTunnelConnection::send_error(
     uint32_t stream_id,
     const std::string& code,
@@ -45,13 +55,7 @@ void PortTunnelConnection::send_error(
         {"fatal", false},
         {"generation", current_generation()}
     }.dump();
-    try {
-        send_frame(frame);
-    } catch (const std::exception& ex) {
-        log_tunnel_send_failure("error", ex);
-    } catch (...) {
-        log_unknown_tunnel_send_failure("error");
-    }
+    send_frame_safely(frame, "error");
 }
 
 void PortTunnelConnection::send_terminal_error(
@@ -69,13 +73,7 @@ void PortTunnelConnection::send_terminal_error(
         {"fatal", true},
         {"generation", current_generation()}
     }.dump();
-    try {
-        send_frame(frame);
-    } catch (const std::exception& ex) {
-        log_tunnel_send_failure("terminal error", ex);
-    } catch (...) {
-        log_unknown_tunnel_send_failure("terminal error");
-    }
+    send_frame_safely(frame, "terminal error");
 }
 
 void PortTunnelConnection::send_forward_drop(
@@ -90,13 +88,7 @@ void PortTunnelConnection::send_forward_drop(
     frame.stream_id = stream_id;
     frame.meta =
         Json{{"kind", kind}, {"count", 1U}, {"reason", reason}, {"message", message}}.dump();
-    try {
-        send_frame(frame);
-    } catch (const std::exception& ex) {
-        log_tunnel_send_failure("forward drop", ex);
-    } catch (...) {
-        log_unknown_tunnel_send_failure("forward drop");
-    }
+    send_frame_safely(frame, "forward drop");
 }
 
 void PortTunnelConnection::close_stream(uint32_t stream_id) {

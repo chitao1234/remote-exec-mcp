@@ -138,6 +138,12 @@ private:
     void finish_shutdown();
     bool is_running();
     bool is_running_locked() const;
+    bool try_acquire_budget_lease(
+        std::atomic<unsigned long>& counter,
+        unsigned long limit,
+        PortTunnelBudgetKind kind,
+        PortTunnelBudgetLease* lease
+    );
     void join_all_workers();
     void close_all_sessions_for_shutdown();
     bool schedule_session_expiry(const std::shared_ptr<PortTunnelSession>& session);

@@ -91,6 +91,12 @@ struct PortTunnelSession {
         uint32_t stream_id,
         const std::shared_ptr<TunnelUdpSocket>& socket_value
     );
+    SessionRetainedInstallResult install_retained_resource(
+        PortTunnelRetainedResourceKind kind,
+        uint32_t stream_id,
+        const std::shared_ptr<RetainedTcpListener>& listener,
+        const std::shared_ptr<TunnelUdpSocket>& socket_value
+    );
     std::shared_ptr<TunnelUdpSocket> udp_bind_for(uint32_t stream_id);
     PortTunnelRetainedResource remove_retained_resource(uint32_t stream_id, bool* removed);
     std::shared_ptr<PortTunnelSessionAttachment> wait_for_attachment(unsigned long wait_ms);

@@ -8,29 +8,6 @@
 #include "http/connection_transport.h"
 #include "runtime/daemon_thread.h"
 
-class ConnectionManager::ConnectionStartGate {
-public:
-    ConnectionStartGate() : released_(false) {}
-
-    void release() {
-        BasicLockGuard lock(mutex_);
-        released_ = true;
-        cond_.broadcast();
-    }
-
-    void wait() {
-        BasicLockGuard lock(mutex_);
-        while (!released_) {
-            cond_.wait(mutex_);
-        }
-    }
-
-private:
-    BasicMutex mutex_;
-    BasicCondVar cond_;
-    bool released_;
-};
-
 struct ConnectionManager::WorkerRecord {
     WorkerRecord(
         unsigned long worker_id_value,

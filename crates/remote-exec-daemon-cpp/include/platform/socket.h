@@ -115,3 +115,36 @@ int bind_socket(SOCKET socket, const sockaddr* address, socklen_t address_len);
 int listen_socket(SOCKET socket, int backlog);
 int socket_name(SOCKET socket, sockaddr* address, socklen_t* address_len);
 unsigned short socket_bound_port_or_zero(SOCKET socket);
+
+// Creates a socket for each resolved address in order and asks `attempt` to
+// use it. `attempt` returns true when the socket is ready, in which case the
+// socket is returned; a false result (or a thrown exception) closes the
+// socket and tries the next address. Returns INVALID_SOCKET when no address
+// succeeded.
+template <typename Attempt>
+SOCKET try_create_socket_for_addresses(
+    const std::vector<SocketAddress>& addresses,
+    Attempt attempt
+) {
+    SOCKET created = INVALID_SOCKET;
+    for (std::size_t i = 0; i < addresses.size(); ++i) {
+        const SocketAddress& current = addresses[i];
+        created = create_socket_cloexec(current.family, current.socktype, current.protocol);
+        if (created == INVALID_SOCKET) {
+            continue;
+        }
+        bool ready = false;
+        try {
+            ready = attempt(created, current);
+        } catch (...) {
+            close_socket(created);
+            throw;
+        }
+        if (ready) {
+            return created;
+        }
+        close_socket(created);
+        created = INVALID_SOCKET;
+    }
+    return created;
+}

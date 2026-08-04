@@ -1,5 +1,4 @@
 #include <cctype>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -10,6 +9,7 @@
 #endif
 
 #include "core/logging.h"
+#include "platform/path_utils.h"
 #include "policy/path_compare.h"
 #include "policy/path_policy.h"
 
@@ -19,10 +19,6 @@ struct ParsedPath {
     std::string prefix;
     std::vector<std::string> components;
 };
-
-bool is_ascii_alpha(char ch) {
-    return std::isalpha(static_cast<unsigned char>(ch)) != 0;
-}
 
 bool is_separator(PathStyle style, char ch) {
     if (style == PATH_STYLE_WINDOWS) {
@@ -37,19 +33,10 @@ ParsedPath parse_host_path(const std::string& raw) {
     ParsedPath parsed;
     std::size_t start = 0;
 
-    if (policy.style == PATH_STYLE_POSIX) {
-        if (!normalized.empty() && normalized[0] == '/') {
-            parsed.prefix = "/";
-            start = 1;
-        }
-    } else if (normalized.size() >= 3 && is_ascii_alpha(normalized[0]) && normalized[1] == ':'
-               && is_separator(policy.style, normalized[2])) {
-        parsed.prefix = normalized.substr(0, 2);
-        parsed.prefix.push_back('\\');
-        start = 3;
-    } else if (normalized.rfind("\\\\", 0) == 0) {
-        parsed.prefix = "\\\\";
-        start = 2;
+    path_utils::AbsolutePathPrefix parsed_prefix;
+    if (path_utils::parse_absolute_path_prefix(policy.style, normalized, &parsed_prefix)) {
+        parsed.prefix = parsed_prefix.value;
+        start = parsed_prefix.start;
     }
 
     std::string current;

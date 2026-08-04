@@ -5,7 +5,16 @@
 #include <string>
 #include <vector>
 
+#include "policy/path_policy.h"
+
 namespace path_utils {
+
+struct AbsolutePathPrefix {
+    AbsolutePathPrefix() : start(0) {}
+
+    std::string value;
+    std::size_t start;
+};
 
 struct PathMetadata {
     PathMetadata()
@@ -37,6 +46,15 @@ struct DirectoryEntryInfo {
 };
 
 char native_separator();
+// Detects the absolute prefix of a path: "/" for POSIX roots, "C:\" for
+// Windows drive letters, and "\\" for UNC paths. The path may be raw or
+// normalized; separators are matched per `style`. Returns true and fills
+// `prefix` when an absolute prefix is present, false otherwise.
+bool parse_absolute_path_prefix(
+    PathStyle style,
+    const std::string& path,
+    AbsolutePathPrefix* prefix
+);
 std::string parent_directory(const std::string& path);
 std::string join_path(const std::string& base, const std::string& child);
 void make_directory_if_missing(const std::string& path);

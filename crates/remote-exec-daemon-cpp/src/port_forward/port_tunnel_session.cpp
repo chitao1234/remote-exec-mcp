@@ -56,6 +56,23 @@ const char* retained_resource_kind_name(PortTunnelRetainedResourceKind kind) {
     return "unknown";
 }
 
+LogMessageBuilder session_resume_attach_rejected_log(
+    const PortTunnelSession* session,
+    const char* reason,
+    std::uint64_t generation_value
+) {
+    LogMessageBuilder message("session resume attach rejected");
+    message.quoted_field("session_id", session->session_id)
+        .raw(std::string("reason=") + reason)
+        .field("generation", session->generation)
+        .field("requested_generation", generation_value);
+    return message;
+}
+
+const char* retained_install_operation_name(PortTunnelRetainedResourceKind kind) {
+    return kind == PortTunnelRetainedResourceKind::TcpListener ? "tcp listener" : "udp bind";
+}
+
 // These transition helpers require PortTunnelSession::mutex to be held. They
 // return attachment/resource work to close after the caller releases the lock.
 std::shared_ptr<PortTunnelSessionAttachment> transition_session_to_attached_locked(
@@ -187,12 +204,7 @@ PortTunnelSessionResumeResult PortTunnelSession::attach_resumed(
         log_message(
             LOG_DEBUG,
             "port_tunnel",
-            LogMessageBuilder("session resume attach rejected")
-                .quoted_field("session_id", session_id)
-                .raw("reason=closed")
-                .field("generation", generation)
-                .field("requested_generation", generation_value)
-                .str()
+            session_resume_attach_rejected_log(this, "closed", generation_value).str()
         );
         return PortTunnelSessionResumeResult::Unknown;
     }
@@ -200,12 +212,7 @@ PortTunnelSessionResumeResult PortTunnelSession::attach_resumed(
         log_message(
             LOG_DEBUG,
             "port_tunnel",
-            LogMessageBuilder("session resume attach rejected")
-                .quoted_field("session_id", session_id)
-                .raw("reason=already_attached")
-                .field("generation", generation)
-                .field("requested_generation", generation_value)
-                .str()
+            session_resume_attach_rejected_log(this, "already_attached", generation_value).str()
         );
         return PortTunnelSessionResumeResult::AlreadyAttached;
     }
@@ -213,11 +220,7 @@ PortTunnelSessionResumeResult PortTunnelSession::attach_resumed(
         log_message(
             LOG_DEBUG,
             "port_tunnel",
-            LogMessageBuilder("session resume attach rejected")
-                .quoted_field("session_id", session_id)
-                .raw("reason=expired")
-                .field("generation", generation)
-                .field("requested_generation", generation_value)
+            session_resume_attach_rejected_log(this, "expired", generation_value)
                 .field("now_ms", now_ms)
                 .field("resume_deadline_ms", resume_deadline_ms)
                 .str()
@@ -228,12 +231,8 @@ PortTunnelSessionResumeResult PortTunnelSession::attach_resumed(
         log_message(
             LOG_DEBUG,
             "port_tunnel",
-            LogMessageBuilder("session resume attach rejected")
-                .quoted_field("session_id", session_id)
-                .raw("reason=not_detached")
+            session_resume_attach_rejected_log(this, "not_detached", generation_value)
                 .raw(std::string("state=") + session_state_name(state))
-                .field("generation", generation)
-                .field("requested_generation", generation_value)
                 .str()
         );
         return PortTunnelSessionResumeResult::Unknown;
@@ -354,16 +353,19 @@ bool PortTunnelSession::insert_tcp_stream_if_attached(
     return true;
 }
 
-SessionRetainedInstallResult PortTunnelSession::install_tcp_listener(
+SessionRetainedInstallResult PortTunnelSession::install_retained_resource(
+    PortTunnelRetainedResourceKind kind,
     uint32_t stream_id,
-    const std::shared_ptr<RetainedTcpListener>& listener
+    const std::shared_ptr<RetainedTcpListener>& listener,
+    const std::shared_ptr<TunnelUdpSocket>& socket_value
 ) {
+    const std::string operation = std::string("retain ") + retained_install_operation_name(kind);
     BasicLockGuard lock(mutex);
     if (!session_state_attached(state) || attachment.get() == nullptr) {
         log_message(
             LOG_DEBUG,
             "port_tunnel",
-            LogMessageBuilder("retain tcp listener rejected")
+            LogMessageBuilder(operation + " rejected")
                 .quoted_field("session_id", session_id)
                 .raw(std::string("state=") + session_state_name(state))
                 .field("stream_id", stream_id)
@@ -375,7 +377,7 @@ SessionRetainedInstallResult PortTunnelSession::install_tcp_listener(
         log_message(
             LOG_DEBUG,
             "port_tunnel",
-            LogMessageBuilder("retain tcp listener rejected")
+            LogMessageBuilder(operation + " rejected")
                 .quoted_field("session_id", session_id)
                 .raw("reason=conflict")
                 .raw(std::string("existing=") + retained_resource_kind_name(retained_resource.kind))
@@ -385,14 +387,14 @@ SessionRetainedInstallResult PortTunnelSession::install_tcp_listener(
         );
         return SessionRetainedInstallResult::Conflict;
     }
-    retained_resource.kind = PortTunnelRetainedResourceKind::TcpListener;
+    retained_resource.kind = kind;
     retained_resource.stream_id = stream_id;
     retained_resource.tcp_listener = listener;
-    retained_resource.udp_bind.reset();
+    retained_resource.udp_bind = socket_value;
     log_message(
         LOG_DEBUG,
         "port_tunnel",
-        LogMessageBuilder("retain tcp listener")
+        LogMessageBuilder(operation)
             .quoted_field("session_id", session_id)
             .field("stream_id", stream_id)
             .field("generation", generation)
@@ -401,51 +403,28 @@ SessionRetainedInstallResult PortTunnelSession::install_tcp_listener(
     return SessionRetainedInstallResult::Installed;
 }
 
+SessionRetainedInstallResult PortTunnelSession::install_tcp_listener(
+    uint32_t stream_id,
+    const std::shared_ptr<RetainedTcpListener>& listener
+) {
+    return install_retained_resource(
+        PortTunnelRetainedResourceKind::TcpListener,
+        stream_id,
+        listener,
+        std::shared_ptr<TunnelUdpSocket>()
+    );
+}
+
 SessionRetainedInstallResult PortTunnelSession::install_udp_bind(
     uint32_t stream_id,
     const std::shared_ptr<TunnelUdpSocket>& socket_value
 ) {
-    BasicLockGuard lock(mutex);
-    if (!session_state_attached(state) || attachment.get() == nullptr) {
-        log_message(
-            LOG_DEBUG,
-            "port_tunnel",
-            LogMessageBuilder("retain udp bind rejected")
-                .quoted_field("session_id", session_id)
-                .raw(std::string("state=") + session_state_name(state))
-                .field("stream_id", stream_id)
-                .str()
-        );
-        return SessionRetainedInstallResult::Unavailable;
-    }
-    if (retained_resource.kind != PortTunnelRetainedResourceKind::None) {
-        log_message(
-            LOG_DEBUG,
-            "port_tunnel",
-            LogMessageBuilder("retain udp bind rejected")
-                .quoted_field("session_id", session_id)
-                .raw("reason=conflict")
-                .raw(std::string("existing=") + retained_resource_kind_name(retained_resource.kind))
-                .field("stream_id", stream_id)
-                .field("existing_stream_id", retained_resource.stream_id)
-                .str()
-        );
-        return SessionRetainedInstallResult::Conflict;
-    }
-    retained_resource.kind = PortTunnelRetainedResourceKind::UdpBind;
-    retained_resource.stream_id = stream_id;
-    retained_resource.tcp_listener.reset();
-    retained_resource.udp_bind = socket_value;
-    log_message(
-        LOG_DEBUG,
-        "port_tunnel",
-        LogMessageBuilder("retain udp bind")
-            .quoted_field("session_id", session_id)
-            .field("stream_id", stream_id)
-            .field("generation", generation)
-            .str()
+    return install_retained_resource(
+        PortTunnelRetainedResourceKind::UdpBind,
+        stream_id,
+        std::shared_ptr<RetainedTcpListener>(),
+        socket_value
     );
-    return SessionRetainedInstallResult::Installed;
 }
 
 std::shared_ptr<TunnelUdpSocket> PortTunnelSession::udp_bind_for(uint32_t stream_id) {

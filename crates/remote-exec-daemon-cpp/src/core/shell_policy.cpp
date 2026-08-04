@@ -14,6 +14,7 @@
 #include <unistd.h>
 #endif
 
+#include "core/shell_policy_internal.h"
 #include "platform/path_utils.h"
 #include "platform/platform.h"
 #ifndef _WIN32
@@ -29,19 +30,9 @@ extern char** environ;
 namespace {
 
 #ifdef _WIN32
-std::string shell_basename_lower(const std::string& shell) {
-    const std::size_t slash = shell.find_last_of("/\\");
-    const std::string base = slash == std::string::npos ? shell : shell.substr(slash + 1);
-    return lowercase_ascii(base);
-}
-
-bool is_windows_cmd_family(const std::string& lower) {
-    return lower == "cmd.exe" || lower == "cmd";
-}
-
-bool is_windows_command_family(const std::string& lower) {
-    return lower == "command.com" || lower == "command";
-}
+using platform_detail::is_windows_cmd_family;
+using platform_detail::is_windows_command_family;
+using platform_detail::shell_basename_lower;
 
 bool is_windows_powershell_family(const std::string& lower) {
     return lower == "powershell.exe" || lower == "powershell" || lower == "pwsh.exe"

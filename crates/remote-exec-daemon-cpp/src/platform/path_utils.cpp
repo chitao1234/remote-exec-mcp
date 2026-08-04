@@ -1,6 +1,7 @@
 #include "platform/path_utils.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <stdexcept>
 #include <vector>
@@ -174,6 +175,41 @@ char native_separator() {
 #else
     return '/';
 #endif
+}
+
+bool parse_absolute_path_prefix(
+    PathStyle style,
+    const std::string& path,
+    AbsolutePathPrefix* prefix
+) {
+    if (prefix == nullptr) {
+        return false;
+    }
+    prefix->value.clear();
+    prefix->start = 0;
+
+    if (style == PATH_STYLE_POSIX) {
+        if (!path.empty() && path[0] == '/') {
+            prefix->value = "/";
+            prefix->start = 1;
+            return true;
+        }
+        return false;
+    }
+
+    if (path.size() >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) != 0 && path[1] == ':'
+        && (path[2] == '\\' || path[2] == '/')) {
+        prefix->value = path.substr(0, 2);
+        prefix->value.push_back('\\');
+        prefix->start = 3;
+        return true;
+    }
+    if (path.rfind("\\\\", 0) == 0 || path.rfind("//", 0) == 0) {
+        prefix->value = "\\\\";
+        prefix->start = 2;
+        return true;
+    }
+    return false;
 }
 
 std::string parent_directory(const std::string& path) {

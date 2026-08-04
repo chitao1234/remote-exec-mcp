@@ -22,18 +22,27 @@ static std::string unquote(const std::string& raw) {
     return raw;
 }
 
-static unsigned long parse_unsigned_long(const std::string& raw, const std::string& key) {
+template <typename ParseFn>
+static std::uint64_t parse_numeric_value(
+    const std::string& raw,
+    const std::string& key,
+    ParseFn parse
+) {
     if (raw.empty()) {
         throw std::runtime_error("missing numeric value for " + key);
     }
 
     errno = 0;
     char* end = nullptr;
-    const unsigned long value = std::strtoul(raw.c_str(), &end, 10);
+    const unsigned long long value = parse(raw.c_str(), &end, 10);
     if (errno == ERANGE || end == raw.c_str() || (end != nullptr && *end != '\0')) {
         throw std::runtime_error("invalid numeric value for " + key + ": " + raw);
     }
-    return value;
+    return static_cast<std::uint64_t>(value);
+}
+
+static unsigned long parse_unsigned_long(const std::string& raw, const std::string& key) {
+    return static_cast<unsigned long>(parse_numeric_value(raw, key, std::strtoul));
 }
 
 static unsigned long read_optional_unsigned_long(
@@ -49,17 +58,7 @@ static unsigned long read_optional_unsigned_long(
 }
 
 static std::uint64_t parse_uint64(const std::string& raw, const std::string& key) {
-    if (raw.empty()) {
-        throw std::runtime_error("missing numeric value for " + key);
-    }
-
-    errno = 0;
-    char* end = nullptr;
-    const unsigned long long value = std::strtoull(raw.c_str(), &end, 10);
-    if (errno == ERANGE || end == raw.c_str() || (end != nullptr && *end != '\0')) {
-        throw std::runtime_error("invalid numeric value for " + key + ": " + raw);
-    }
-    return static_cast<std::uint64_t>(value);
+    return parse_numeric_value(raw, key, std::strtoull);
 }
 
 static std::uint64_t read_optional_uint64(

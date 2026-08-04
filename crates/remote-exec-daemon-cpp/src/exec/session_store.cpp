@@ -125,6 +125,11 @@ std::size_t protected_recent_count(std::size_t open_sessions) {
     return std::min<std::size_t>(RECENT_PROTECTED_SESSION_COUNT, open_sessions - 1U);
 }
 
+void throw_unknown_daemon_session(const std::string& daemon_session_id) {
+    log_message(LOG_WARN, "session_store", "unknown daemon session `" + daemon_session_id + "`");
+    throw UnknownSessionError("Unknown daemon session");
+}
+
 std::shared_ptr<LiveSession> launch_live_session(
     const std::string& command,
     const std::string& workdir,
@@ -439,7 +444,7 @@ bool SessionStore::prune_one_session_for_start(unsigned long max_open_sessions) 
             return false;
         }
 
-        PruneCandidate victim = snapshot[0];
+        PruneCandidate victim;
         bool found_exited = false;
         for (std::size_t i = 0; i < prunable_count; ++i) {
             BasicLockGuard session_lock(snapshot[i].session->mutex_);
@@ -593,12 +598,7 @@ ExecSessionResult SessionStore::write_stdin(
         std::map<std::string, std::shared_ptr<LiveSession>>::iterator it =
             sessions_.find(daemon_session_id);
         if (it == sessions_.end()) {
-            log_message(
-                LOG_WARN,
-                "session_store",
-                "unknown daemon session `" + daemon_session_id + "`"
-            );
-            throw UnknownSessionError("Unknown daemon session");
+            throw_unknown_daemon_session(daemon_session_id);
         }
         session = it->second;
         session->last_touched_order.store(make_touch_order());
@@ -617,12 +617,7 @@ ExecSessionResult SessionStore::write_stdin(
         {
             BasicLockGuard session_lock(session->mutex_);
             if (session->retired) {
-                log_message(
-                    LOG_WARN,
-                    "session_store",
-                    "unknown daemon session `" + daemon_session_id + "`"
-                );
-                throw UnknownSessionError("Unknown daemon session");
+                throw_unknown_daemon_session(daemon_session_id);
             }
             apply_write_stdin_request_locked(
                 session.get(),

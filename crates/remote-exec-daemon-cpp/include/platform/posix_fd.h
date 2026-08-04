@@ -50,10 +50,6 @@ inline bool set_nonblocking(int fd, bool enabled = true) {
     return posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFL, updated); }) == 0;
 }
 
-inline bool set_cloexec_nonblocking(int fd) {
-    return set_cloexec(fd) && set_nonblocking(fd);
-}
-
 // close() consumes descriptor ownership even when it reports EINTR; do not retry it.
 inline int close_consuming(int fd) {
     return ::close(fd);

@@ -126,6 +126,11 @@ std::string action_description(const PlannedAction& action) {
     return "update `" + action.summary_path + "`";
 }
 
+template <typename Action>
+std::string action_failure_message(const Action& action, const std::string& error_what) {
+    return "failed to " + action_description(action) + ": " + error_what;
+}
+
 std::string unique_atomic_write_temp_path(const std::string& path) {
     static std::atomic<unsigned long> next_suffix(1UL);
 
@@ -148,28 +153,13 @@ NormalizedPathPrefix normalized_path_prefix(const std::string& raw, NormalizedPa
         return prefix;
     }
 
-#ifdef _WIN32
-    if (raw.size() >= 3 && std::isalpha(static_cast<unsigned char>(raw[0])) != 0 && raw[1] == ':'
-        && (raw[2] == '\\' || raw[2] == '/')) {
-        prefix.value = raw.substr(0, 2);
-        prefix.value.push_back(path_utils::native_separator());
-        prefix.start = 3;
-        return prefix;
+    path_utils::AbsolutePathPrefix parsed_prefix;
+    if (!path_utils::parse_absolute_path_prefix(host_path_policy().style, raw, &parsed_prefix)) {
+        throw std::runtime_error("absolute patch path is not supported");
     }
-    if (raw.rfind("\\\\", 0) == 0 || raw.rfind("//", 0) == 0) {
-        prefix.value = "\\\\";
-        prefix.start = 2;
-        return prefix;
-    }
-#else
-    if (!raw.empty() && raw[0] == '/') {
-        prefix.value = "/";
-        prefix.start = 1;
-        return prefix;
-    }
-#endif
-
-    throw std::runtime_error("absolute patch path is not supported");
+    prefix.value = parsed_prefix.value;
+    prefix.start = parsed_prefix.start;
+    return prefix;
 }
 
 void push_normalized_segment(
@@ -916,6 +906,27 @@ PlannedFile require_planned_file(const std::string& path, const PathOverlay& ove
     return file;
 }
 
+void require_deletable_file_target(const std::string& path, const PathOverlay& overlay) {
+    if (overlay_contains_directory(overlay, path)) {
+        throw std::runtime_error("patch target is not a file: " + path);
+    }
+
+    const PlannedPathEntry* planned = find_overlay_entry(overlay, path);
+    if (planned != nullptr) {
+        if (planned->state.deleted) {
+            throw std::runtime_error("unable to read " + path);
+        }
+        return;
+    }
+
+    path_utils::PathMetadata metadata;
+    bool exists = false;
+    require_metadata_or_missing(path, &metadata, &exists);
+    if (!exists || !metadata.is_regular_file) {
+        throw std::runtime_error("unable to read " + path);
+    }
+}
+
 PlannedAction plan_add_action(
     const std::string& root,
     const PatchAction& action,
@@ -952,7 +963,7 @@ PlannedAction plan_delete_action(
     if (authorizer) {
         authorizer(source_path);
     }
-    (void)require_planned_file(source_path, *overlay);
+    require_deletable_file_target(source_path, *overlay);
     set_overlay_state(overlay, source_path, planned_deleted_state());
 
     PlannedAction planned;
@@ -1003,36 +1014,26 @@ PlannedAction plan_update_action(
     return planned;
 }
 
-std::vector<PlannedAction> plan_patch_actions(
+std::vector<PlannedAction> plan_patch_action(
     const std::string& root,
-    const std::vector<PatchAction>& actions,
+    const PatchAction& action,
     const PatchPathAuthorizer& authorizer
 ) {
     PathOverlay overlay;
     std::vector<PlannedAction> planned;
-    planned.reserve(actions.size());
-
-    for (std::size_t i = 0; i < actions.size(); ++i) {
-        const PatchAction& action = actions[i];
-        try {
-            if (action.kind == PatchKind::Add) {
-                planned.push_back(plan_add_action(root, action, authorizer, &overlay));
-                continue;
-            }
-            if (action.kind == PatchKind::Delete) {
-                planned.push_back(plan_delete_action(root, action, authorizer, &overlay));
-                continue;
-            }
+    try {
+        if (action.kind == PatchKind::Add) {
+            planned.push_back(plan_add_action(root, action, authorizer, &overlay));
+        } else if (action.kind == PatchKind::Delete) {
+            planned.push_back(plan_delete_action(root, action, authorizer, &overlay));
+        } else {
             planned.push_back(plan_update_action(root, action, authorizer, &overlay));
-        } catch (const SandboxError& error) {
-            throw SandboxError("failed to " + action_description(action) + ": " + error.what());
-        } catch (const std::exception& error) {
-            throw std::runtime_error(
-                "failed to " + action_description(action) + ": " + error.what()
-            );
         }
+    } catch (const SandboxError& error) {
+        throw SandboxError(action_failure_message(action, error.what()));
+    } catch (const std::exception& error) {
+        throw std::runtime_error(action_failure_message(action, error.what()));
     }
-
     return planned;
 }
 
@@ -1060,8 +1061,7 @@ std::vector<std::string> execute_planned_actions(const std::vector<PlannedAction
             }
             summary.push_back("M " + action.summary_path);
         } catch (const std::exception& error) {
-            const std::string message =
-                "failed to " + action_description(action) + ": " + error.what();
+            const std::string message = action_failure_message(action, error.what());
             if (summary.empty()) {
                 throw std::runtime_error(message);
             }
@@ -1085,8 +1085,8 @@ PatchApplyResult apply_patch(
 
     for (std::size_t i = 0; i < parsed.actions.size(); ++i) {
         try {
-            const std::vector<PatchAction> action(1U, parsed.actions[i]);
-            const std::vector<PlannedAction> planned = plan_patch_actions(root, action, authorizer);
+            const std::vector<PlannedAction> planned =
+                plan_patch_action(root, parsed.actions[i], authorizer);
             const std::vector<std::string> updated = execute_planned_actions(planned);
             summary.insert(summary.end(), updated.begin(), updated.end());
         } catch (const std::exception& error) {

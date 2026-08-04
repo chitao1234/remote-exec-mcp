@@ -216,29 +216,18 @@ std::string socket_local_endpoint(SOCKET socket) {
 SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& protocol) {
     const std::vector<SocketAddress> addresses =
         resolve_endpoint(endpoint, protocol, true, "invalid_endpoint");
-    SOCKET bound_socket = INVALID_SOCKET;
-
-    for (std::size_t i = 0; i < addresses.size(); ++i) {
-        const SocketAddress& current = addresses[i];
-        bound_socket = create_socket_cloexec(current.family, current.socktype, current.protocol);
-        if (bound_socket == INVALID_SOCKET) {
-            continue;
-        }
-
-        (void)set_socket_reuseaddr(bound_socket);
+    SOCKET bound_socket = try_create_socket_for_addresses(
+        addresses,
+        [](SOCKET created, const SocketAddress& current) {
+            (void)set_socket_reuseaddr(created);
 #ifndef REMOTE_EXEC_CPP_WINSOCK1
-        if (current.family == AF_INET6) {
-            (void)set_socket_ipv6_only(bound_socket);
-        }
+            if (current.family == AF_INET6) {
+                (void)set_socket_ipv6_only(created);
+            }
 #endif
-
-        if (bind_socket(bound_socket, current.sockaddr_ptr(), current.address_len) == 0) {
-            break;
+            return bind_socket(created, current.sockaddr_ptr(), current.address_len) == 0;
         }
-
-        close_socket(bound_socket);
-        bound_socket = INVALID_SOCKET;
-    }
+    );
 
     if (bound_socket == INVALID_SOCKET) {
         throw PortForwardError(400, "port_bind_failed", socket_error_message("bind"));
@@ -260,41 +249,20 @@ SOCKET connect_port_forward_socket(
 ) {
     const std::vector<SocketAddress> addresses =
         resolve_endpoint(endpoint, protocol, false, "invalid_endpoint");
-    SOCKET connected_socket = INVALID_SOCKET;
-
-    for (std::size_t i = 0; i < addresses.size(); ++i) {
-        const SocketAddress& current = addresses[i];
-        connected_socket =
-            create_socket_cloexec(current.family, current.socktype, current.protocol);
-        if (connected_socket == INVALID_SOCKET) {
-            continue;
-        }
-
-        bool connected = false;
-        try {
+    SOCKET connected_socket = try_create_socket_for_addresses(
+        addresses,
+        [&](SOCKET created, const SocketAddress& current) {
             if (protocol == "tcp") {
-                connected = tcp_connect_with_timeout(
-                    connected_socket,
+                return tcp_connect_with_timeout(
+                    created,
                     current.sockaddr_ptr(),
                     current.address_len,
                     timeout_ms
                 );
-            } else {
-                connected =
-                    connect_socket(connected_socket, current.sockaddr_ptr(), current.address_len)
-                    == 0;
             }
-        } catch (...) {
-            close_socket(connected_socket);
-            throw;
+            return connect_socket(created, current.sockaddr_ptr(), current.address_len) == 0;
         }
-        if (connected) {
-            return connected_socket;
-        }
-
-        close_socket(connected_socket);
-        connected_socket = INVALID_SOCKET;
-    }
+    );
 
     if (connected_socket == INVALID_SOCKET) {
         throw PortForwardError(400, "port_connect_failed", socket_error_message("connect"));
@@ -303,15 +271,19 @@ SOCKET connect_port_forward_socket(
     return connected_socket;
 }
 
-void send_all_socket(SOCKET socket, const std::string& data) {
+void send_all_socket(SOCKET socket, const char* data, std::size_t size) {
     std::size_t offset = 0;
-    while (offset < data.size()) {
-        const int sent = send_bounded(socket, data.data() + offset, data.size() - offset, 0);
+    while (offset < size) {
+        const int sent = send_bounded(socket, data + offset, size - offset, 0);
         if (sent <= 0) {
             throw PortForwardError(400, "port_write_failed", socket_error_message("send"));
         }
         offset += static_cast<std::size_t>(sent);
     }
+}
+
+void send_all_socket(SOCKET socket, const std::string& data) {
+    send_all_socket(socket, data.data(), data.size());
 }
 
 SocketAddress parse_port_forward_peer(const std::string& peer) {

@@ -38,5 +38,6 @@ int send_port_forward_datagram(
 void shutdown_port_forward_send(SOCKET socket);
 std::string printable_port_forward_endpoint(const sockaddr* address, socklen_t address_len);
 std::string socket_local_endpoint(SOCKET socket);
+void send_all_socket(SOCKET socket, const char* data, std::size_t size);
 void send_all_socket(SOCKET socket, const std::string& data);
 SocketAddress parse_port_forward_peer(const std::string& peer);

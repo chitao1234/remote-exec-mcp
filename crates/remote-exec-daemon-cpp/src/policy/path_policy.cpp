@@ -3,6 +3,7 @@
 #include <string>
 
 #include "core/text_utils.h"
+#include "platform/path_utils.h"
 #include "policy/path_policy.h"
 
 namespace {
@@ -99,11 +100,8 @@ bool is_absolute_for_policy(PathPolicy policy, const std::string& raw) {
         return !raw.empty() && raw[0] == '/';
     }
 
-    if (raw.size() >= 3 && is_ascii_alpha(raw[0]) && raw[1] == ':'
-        && (raw[2] == '\\' || raw[2] == '/')) {
-        return true;
-    }
-    if (raw.rfind("\\\\", 0) == 0 || raw.rfind("//", 0) == 0) {
+    path_utils::AbsolutePathPrefix parsed_prefix;
+    if (path_utils::parse_absolute_path_prefix(policy.style, raw, &parsed_prefix)) {
         return true;
     }
 

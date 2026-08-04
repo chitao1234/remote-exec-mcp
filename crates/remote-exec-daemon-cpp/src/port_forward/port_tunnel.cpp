@@ -78,6 +78,25 @@ static void release_counter(std::atomic<unsigned long>& counter, const char* cou
     std::abort();
 }
 
+bool PortTunnelService::try_acquire_budget_lease(
+    std::atomic<unsigned long>& counter,
+    unsigned long limit,
+    PortTunnelBudgetKind kind,
+    PortTunnelBudgetLease* lease
+) {
+    BasicLockGuard lock(mutex_);
+    if (!is_running_locked()) {
+        return false;
+    }
+    if (!try_acquire_counter(counter, limit)) {
+        return false;
+    }
+    if (lease != nullptr) {
+        *lease = PortTunnelBudgetLease::adopt(budget_state_, kind);
+    }
+    return true;
+}
+
 bool PortTunnelService::try_acquire_worker() {
     BasicLockGuard lock(mutex_);
     if (!is_running_locked()) {
@@ -175,76 +194,75 @@ const PortForwardLimitConfig& PortTunnelService::limits() const {
 }
 
 bool PortTunnelService::try_acquire_retained_session() {
-    BasicLockGuard lock(mutex_);
-    if (!is_running_locked()) {
-        return false;
-    }
-    return try_acquire_counter(budget_state_->retained_sessions, limits_.max_retained_sessions);
+    return try_acquire_budget_lease(
+        budget_state_->retained_sessions,
+        limits_.max_retained_sessions,
+        PortTunnelBudgetKind::RetainedSession,
+        nullptr
+    );
 }
 
 bool PortTunnelService::try_acquire_retained_session(PortTunnelBudgetLease* lease) {
-    if (!try_acquire_retained_session()) {
-        return false;
-    }
-    if (lease != nullptr) {
-        *lease = PortTunnelBudgetLease::adopt(budget_state_, PortTunnelBudgetKind::RetainedSession);
-    }
-    return true;
+    return try_acquire_budget_lease(
+        budget_state_->retained_sessions,
+        limits_.max_retained_sessions,
+        PortTunnelBudgetKind::RetainedSession,
+        lease
+    );
 }
 
 bool PortTunnelService::try_acquire_retained_listener() {
-    BasicLockGuard lock(mutex_);
-    if (!is_running_locked()) {
-        return false;
-    }
-    return try_acquire_counter(budget_state_->retained_listeners, limits_.max_retained_listeners);
+    return try_acquire_budget_lease(
+        budget_state_->retained_listeners,
+        limits_.max_retained_listeners,
+        PortTunnelBudgetKind::RetainedListener,
+        nullptr
+    );
 }
 
 bool PortTunnelService::try_acquire_retained_listener(PortTunnelBudgetLease* lease) {
-    if (!try_acquire_retained_listener()) {
-        return false;
-    }
-    if (lease != nullptr) {
-        *lease =
-            PortTunnelBudgetLease::adopt(budget_state_, PortTunnelBudgetKind::RetainedListener);
-    }
-    return true;
+    return try_acquire_budget_lease(
+        budget_state_->retained_listeners,
+        limits_.max_retained_listeners,
+        PortTunnelBudgetKind::RetainedListener,
+        lease
+    );
 }
 
 bool PortTunnelService::try_acquire_udp_bind() {
-    BasicLockGuard lock(mutex_);
-    if (!is_running_locked()) {
-        return false;
-    }
-    return try_acquire_counter(budget_state_->udp_binds, limits_.max_udp_binds);
+    return try_acquire_budget_lease(
+        budget_state_->udp_binds,
+        limits_.max_udp_binds,
+        PortTunnelBudgetKind::UdpBind,
+        nullptr
+    );
 }
 
 bool PortTunnelService::try_acquire_udp_bind(PortTunnelBudgetLease* lease) {
-    if (!try_acquire_udp_bind()) {
-        return false;
-    }
-    if (lease != nullptr) {
-        *lease = PortTunnelBudgetLease::adopt(budget_state_, PortTunnelBudgetKind::UdpBind);
-    }
-    return true;
+    return try_acquire_budget_lease(
+        budget_state_->udp_binds,
+        limits_.max_udp_binds,
+        PortTunnelBudgetKind::UdpBind,
+        lease
+    );
 }
 
 bool PortTunnelService::try_acquire_active_tcp_stream() {
-    BasicLockGuard lock(mutex_);
-    if (!is_running_locked()) {
-        return false;
-    }
-    return try_acquire_counter(budget_state_->active_tcp_streams, limits_.max_active_tcp_streams);
+    return try_acquire_budget_lease(
+        budget_state_->active_tcp_streams,
+        limits_.max_active_tcp_streams,
+        PortTunnelBudgetKind::ActiveTcpStream,
+        nullptr
+    );
 }
 
 bool PortTunnelService::try_acquire_active_tcp_stream(PortTunnelBudgetLease* lease) {
-    if (!try_acquire_active_tcp_stream()) {
-        return false;
-    }
-    if (lease != nullptr) {
-        *lease = PortTunnelBudgetLease::adopt(budget_state_, PortTunnelBudgetKind::ActiveTcpStream);
-    }
-    return true;
+    return try_acquire_budget_lease(
+        budget_state_->active_tcp_streams,
+        limits_.max_active_tcp_streams,
+        PortTunnelBudgetKind::ActiveTcpStream,
+        lease
+    );
 }
 
 PortTunnelWorkerLease::PortTunnelWorkerLease() : budget_state_() {

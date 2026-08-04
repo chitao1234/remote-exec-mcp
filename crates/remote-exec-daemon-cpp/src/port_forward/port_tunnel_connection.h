@@ -38,6 +38,7 @@ public:
         const std::string& reason,
         const std::string& message
     );
+    void send_frame_safely(const PortTunnelFrame& frame, const char* kind);
     bool owns_attachment(const std::shared_ptr<PortTunnelSessionAttachment>& attachment);
     bool accept_session_tcp_stream(
         const std::shared_ptr<PortTunnelSession>& session,
@@ -94,6 +95,7 @@ private:
     void ensure_generation(std::uint64_t frame_generation) const;
     void close_current_session(PortTunnelCloseMode mode);
     void close_connection_local_state();
+    void reset_session_attachment_if_current(const std::shared_ptr<PortTunnelSession>& session);
     std::shared_ptr<PortTunnelSession> current_session();
     std::shared_ptr<PortTunnelSessionAttachment> current_session_attachment();
     std::shared_ptr<PortTunnelSessionAttachment> session_attachment_for(

@@ -86,6 +86,11 @@ private:
         unsigned long charge_value
     );
     void drain_queued_frame_reservations_locked();
+    bool enqueue_reserved_data_frame(
+        const PortTunnelFrame& frame,
+        unsigned long charge_value,
+        const char* operation
+    );
 
     std::shared_ptr<ConnectionTransport> client_;
     std::shared_ptr<PortTunnelService> service_;

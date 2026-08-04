@@ -36,22 +36,6 @@ static void maybe_apply_forced_tcp_write_thread_start_delay() {
 }
 #endif
 
-TcpReadStartGate::TcpReadStartGate() : released_(false) {
-}
-
-void TcpReadStartGate::release() {
-    BasicLockGuard lock(mutex_);
-    released_ = true;
-    cond_.broadcast();
-}
-
-void TcpReadStartGate::wait() {
-    BasicLockGuard lock(mutex_);
-    while (!released_) {
-        cond_.wait(mutex_);
-    }
-}
-
 bool spawn_tcp_read_thread(
     const std::shared_ptr<PortTunnelService>& service,
     const std::shared_ptr<PortTunnelConnection>& tunnel,

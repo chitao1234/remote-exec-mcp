@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <limits>
 
 #include "rpc/server_contract.h"
 #include "rpc/transfer_stream_codec.h"
@@ -110,12 +109,6 @@ bool TransferStreamArchiveReader::read_next_data_frame_or_terminal() {
                                         ? server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES
                                         : server_contract::TRANSFER_STREAM_CONTROL_FRAME_MAX_BYTES;
         if (payload_len > limit) {
-            throw TransferFailure(
-                TransferRpcCode::BadRequest,
-                "transfer stream frame payload is too large"
-            );
-        }
-        if (payload_len > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
             throw TransferFailure(
                 TransferRpcCode::BadRequest,
                 "transfer stream frame payload is too large"

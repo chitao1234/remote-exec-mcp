@@ -36,6 +36,30 @@ enum class PortTunnelResourceState { Open, Closing, Closed };
 
 const char* port_tunnel_resource_state_name(PortTunnelResourceState state);
 
+// Shared resource-state plumbing for tunnel resources: each resource owns a
+// state (open/closing/closed) guarded by its mutex and exposes the same
+// is_closed / is_closing_or_closed_locked / resource_state_snapshot surface.
+struct PortTunnelResourceStateOwner {
+    PortTunnelResourceStateOwner() : resource_state(PortTunnelResourceState::Open) {}
+
+    bool is_closed() {
+        BasicLockGuard lock(mutex);
+        return is_closing_or_closed_locked();
+    }
+
+    bool is_closing_or_closed_locked() const {
+        return resource_state != PortTunnelResourceState::Open;
+    }
+
+    PortTunnelResourceState resource_state_snapshot() {
+        BasicLockGuard lock(mutex);
+        return resource_state;
+    }
+
+    BasicMutex mutex;
+    PortTunnelResourceState resource_state;
+};
+
 class PortTunnelBudgetLease {
 public:
     PortTunnelBudgetLease();
@@ -60,65 +84,47 @@ private:
     PortTunnelBudgetKind kind_;
 };
 
-struct TunnelTcpStream {
+struct TunnelTcpStream : PortTunnelResourceStateOwner {
     TunnelTcpStream(SOCKET socket_value, PortTunnelBudgetLease active_stream_budget_value)
         : socket(socket_value), active_stream_budget(std::move(active_stream_budget_value)),
-          resource_state(PortTunnelResourceState::Open), writer_closed(false),
-          writer_shutdown_requested(false) {}
+          writer_closed(false), writer_shutdown_requested(false) {}
 
     void close();
-    bool is_closed();
-    bool is_closing_or_closed_locked() const;
-    PortTunnelResourceState resource_state_snapshot();
 
     UniqueSocket socket;
     PortTunnelBudgetLease active_stream_budget;
-    BasicMutex mutex;
     BasicCondVar writer_cond;
     std::vector<std::vector<unsigned char>> write_queue;
-    PortTunnelResourceState resource_state;
     bool writer_closed;
     bool writer_shutdown_requested;
 };
 
-struct TunnelUdpSocket {
+struct TunnelUdpSocket : PortTunnelResourceStateOwner {
     TunnelUdpSocket(SOCKET socket_value, PortTunnelBudgetLease udp_bind_budget_value)
-        : socket(socket_value), udp_bind_budget(std::move(udp_bind_budget_value)),
-          resource_state(PortTunnelResourceState::Open) {}
+        : socket(socket_value), udp_bind_budget(std::move(udp_bind_budget_value)) {}
 
     void close();
-    bool is_closed();
-    bool is_closing_or_closed_locked() const;
-    PortTunnelResourceState resource_state_snapshot();
 
     UniqueSocket socket;
     PortTunnelBudgetLease udp_bind_budget;
-    BasicMutex mutex;
     WakeupPipe wakeup;
-    PortTunnelResourceState resource_state;
 };
 
-struct RetainedTcpListener {
+struct RetainedTcpListener : PortTunnelResourceStateOwner {
     RetainedTcpListener(
         uint32_t stream_id_value,
         SOCKET listener_socket,
         PortTunnelBudgetLease retained_listener_budget_value
     )
         : stream_id(stream_id_value), listener(listener_socket),
-          retained_listener_budget(std::move(retained_listener_budget_value)),
-          resource_state(PortTunnelResourceState::Open) {}
+          retained_listener_budget(std::move(retained_listener_budget_value)) {}
 
     void close();
-    bool is_closed();
-    bool is_closing_or_closed_locked() const;
-    PortTunnelResourceState resource_state_snapshot();
 
     uint32_t stream_id;
     UniqueSocket listener;
     PortTunnelBudgetLease retained_listener_budget;
-    BasicMutex mutex;
     WakeupPipe wakeup;
-    PortTunnelResourceState resource_state;
 };
 
 class ConnectionLocalStreams {

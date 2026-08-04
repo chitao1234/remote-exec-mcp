@@ -8,6 +8,20 @@
 
 using Json = nlohmann::json;
 
+namespace {
+
+LogMessageBuilder tunnel_read_stopped_log(
+    const char* reason,
+    std::size_t offset,
+    std::size_t size
+) {
+    LogMessageBuilder message("tunnel read stopped");
+    message.raw(std::string("reason=") + reason).field("offset", offset).field("size", size);
+    return message;
+}
+
+} // namespace
+
 struct TunnelOpenMetadata {
     std::string role;
     std::uint64_t generation;
@@ -119,11 +133,7 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
             log_message(
                 LOG_DEBUG,
                 "port_tunnel",
-                LogMessageBuilder("tunnel read stopped")
-                    .raw("reason=connection_closed")
-                    .field("offset", offset)
-                    .field("size", size)
-                    .str()
+                tunnel_read_stopped_log("connection_closed", offset, size).str()
             );
             mark_closed();
             return false;
@@ -132,10 +142,7 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
             log_message(
                 LOG_DEBUG,
                 "port_tunnel",
-                LogMessageBuilder("tunnel read stopped")
-                    .raw("reason=timeout")
-                    .field("offset", offset)
-                    .field("size", size)
+                tunnel_read_stopped_log("timeout", offset, size)
                     .field("timeout_ms", deadline.timeout_ms())
                     .str()
             );
@@ -149,11 +156,7 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
             log_message(
                 LOG_DEBUG,
                 "port_tunnel",
-                LogMessageBuilder("tunnel read stopped")
-                    .raw("reason=socket_wait_failed")
-                    .field("offset", offset)
-                    .field("size", size)
-                    .str()
+                tunnel_read_stopped_log("socket_wait_failed", offset, size).str()
             );
             mark_closed();
             return false;
@@ -166,11 +169,7 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
             log_message(
                 LOG_DEBUG,
                 "port_tunnel",
-                LogMessageBuilder("tunnel read stopped")
-                    .raw("reason=peer_eof")
-                    .field("offset", offset)
-                    .field("size", size)
-                    .str()
+                tunnel_read_stopped_log("peer_eof", offset, size).str()
             );
             return false;
         }
@@ -178,11 +177,7 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
             log_message(
                 LOG_DEBUG,
                 "port_tunnel",
-                LogMessageBuilder("tunnel read stopped")
-                    .raw("reason=recv_failed")
-                    .field("offset", offset)
-                    .field("size", size)
-                    .str()
+                tunnel_read_stopped_log("recv_failed", offset, size).str()
             );
             return false;
         }
@@ -400,14 +395,7 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
                 platform::monotonic_ms()
             );
             if (resume_result != PortTunnelSessionResumeResult::Ready) {
-                {
-                    BasicLockGuard lock(state_mutex_);
-                    if (session_.get() == session.get()) {
-                        session_.reset();
-                        mode_ = PortTunnelMode::Unopened;
-                        protocol_ = PortTunnelProtocol::None;
-                    }
-                }
+                reset_session_attachment_if_current(session);
                 if (resume_result == PortTunnelSessionResumeResult::Unknown) {
                     throw PortForwardError(
                         400,
@@ -432,14 +420,7 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
                 }
             }
         } else if (!service_->attach_new_session(session, shared_from_this(), generation)) {
-            {
-                BasicLockGuard lock(state_mutex_);
-                if (session_.get() == session.get()) {
-                    session_.reset();
-                    mode_ = PortTunnelMode::Unopened;
-                    protocol_ = PortTunnelProtocol::None;
-                }
-            }
+            reset_session_attachment_if_current(session);
             service_->close_session(session);
             throw PortForwardError(
                 400,
@@ -496,4 +477,15 @@ void PortTunnelConnection::tunnel_heartbeat(const PortTunnelFrame& frame) {
     PortTunnelFrame ack = make_empty_frame(PortTunnelFrameType::TunnelHeartbeatAck, 0U);
     ack.meta = frame.meta;
     send_frame(ack);
+}
+
+void PortTunnelConnection::reset_session_attachment_if_current(
+    const std::shared_ptr<PortTunnelSession>& session
+) {
+    BasicLockGuard lock(state_mutex_);
+    if (session_.get() == session.get()) {
+        session_.reset();
+        mode_ = PortTunnelMode::Unopened;
+        protocol_ = PortTunnelProtocol::None;
+    }
 }

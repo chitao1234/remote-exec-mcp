@@ -106,16 +106,30 @@ bool wait_for_controlled_read(
 
 } // namespace
 
-bool try_read_http_request_head(
+bool try_read_http_request_head_impl(
     ConnectionTransport& client,
     std::size_t max_header_bytes,
+    const HttpReadControl* read_control,
     HttpRequestHead* head
 ) {
     std::string data;
     char buffer[HTTP_READ_BUFFER_SIZE];
     std::size_t search_offset = 0;
+    std::uint64_t deadline_ms = read_deadline_after(read_control);
 
     for (;;) {
+        if (read_control != nullptr) {
+            if (!wait_for_controlled_read(client, *read_control, deadline_ms)) {
+                return false;
+            }
+            if (read_deadline_expired(*read_control, deadline_ms)) {
+                if (data.empty()) {
+                    return false;
+                }
+                throw BadHttpRequest("incomplete http request");
+            }
+        }
+
         const int received = client.read(buffer, sizeof(buffer));
         if (received == 0) {
             if (data.empty()) {
@@ -126,14 +140,23 @@ bool try_read_http_request_head(
         if (received < 0) {
             const int error = last_socket_error();
             if (receive_timeout_error(error)) {
-                if (data.empty()) {
-                    return false;
+                if (read_control == nullptr) {
+                    if (data.empty()) {
+                        return false;
+                    }
+                    throw BadHttpRequest("incomplete http request");
                 }
-                throw BadHttpRequest("incomplete http request");
+                continue;
+            }
+            if (read_control != nullptr && read_control->should_stop()) {
+                return false;
             }
             throw std::runtime_error(socket_error_message("recv"));
         }
 
+        if (read_control != nullptr) {
+            reset_read_deadline(read_control, &deadline_ms);
+        }
         data.append(buffer, received);
         const std::size_t header_end = data.find("\r\n\r\n", search_offset);
         if (header_end == std::string::npos) {
@@ -156,67 +179,21 @@ bool try_read_http_request_head(
     throw BadHttpRequest("incomplete http request");
 }
 
+bool try_read_http_request_head(
+    ConnectionTransport& client,
+    std::size_t max_header_bytes,
+    HttpRequestHead* head
+) {
+    return try_read_http_request_head_impl(client, max_header_bytes, nullptr, head);
+}
+
 bool try_read_http_request_head_controlled(
     ConnectionTransport& client,
     std::size_t max_header_bytes,
     const HttpReadControl& read_control,
     HttpRequestHead* head
 ) {
-    std::string data;
-    char buffer[HTTP_READ_BUFFER_SIZE];
-    std::size_t search_offset = 0;
-    std::uint64_t deadline_ms = read_deadline_after(&read_control);
-
-    for (;;) {
-        if (!wait_for_controlled_read(client, read_control, deadline_ms)) {
-            return false;
-        }
-        if (read_deadline_expired(read_control, deadline_ms)) {
-            if (data.empty()) {
-                return false;
-            }
-            throw BadHttpRequest("incomplete http request");
-        }
-
-        const int received = client.read(buffer, sizeof(buffer));
-        if (received == 0) {
-            if (data.empty()) {
-                return false;
-            }
-            break;
-        }
-        if (received < 0) {
-            const int error = last_socket_error();
-            if (receive_timeout_error(error)) {
-                continue;
-            }
-            if (read_control.should_stop()) {
-                return false;
-            }
-            throw std::runtime_error(socket_error_message("recv"));
-        }
-
-        reset_read_deadline(&read_control, &deadline_ms);
-        data.append(buffer, received);
-        const std::size_t header_end = data.find("\r\n\r\n", search_offset);
-        if (header_end == std::string::npos) {
-            if (data.size() > max_header_bytes) {
-                throw BadHttpRequest("http request headers too large");
-            }
-            search_offset = data.size() > 3U ? data.size() - 3U : 0U;
-            continue;
-        }
-
-        if (header_end + 4U > max_header_bytes) {
-            throw BadHttpRequest("http request headers too large");
-        }
-
-        head->raw_headers = data.substr(0, header_end);
-        head->initial_body = data.substr(header_end + 4U);
-        return true;
-    }
-
-    throw BadHttpRequest("incomplete http request");
+    return try_read_http_request_head_impl(client, max_header_bytes, &read_control, head);
 }
 
 HttpRequestHead read_http_request_head(ConnectionTransport& client, std::size_t max_header_bytes) {
@@ -758,23 +735,13 @@ SOCKET create_listener(const DaemonConfig& config) {
         throw std::runtime_error("resolve listen address failed: " + resolve_error);
     }
 
-    SOCKET listener = INVALID_SOCKET;
-    for (std::size_t i = 0; i < addresses.size(); ++i) {
-        const SocketAddress& current = addresses[i];
-        listener = create_socket_cloexec(current.family, current.socktype, current.protocol);
-        if (listener == INVALID_SOCKET) {
-            continue;
+    SOCKET listener = try_create_socket_for_addresses(
+        addresses,
+        [](SOCKET created, const SocketAddress& current) {
+            (void)set_socket_reuseaddr(created);
+            return bind_socket(created, current.sockaddr_ptr(), current.address_len) == 0;
         }
-
-        (void)set_socket_reuseaddr(listener);
-
-        if (bind_socket(listener, current.sockaddr_ptr(), current.address_len) == 0) {
-            break;
-        }
-
-        close_socket(listener);
-        listener = INVALID_SOCKET;
-    }
+    );
 
     if (listener == INVALID_SOCKET) {
         throw std::runtime_error(socket_error_message("bind"));

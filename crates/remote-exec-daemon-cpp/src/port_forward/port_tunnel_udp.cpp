@@ -361,7 +361,7 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
         }
         throw PortForwardError(400, "port_write_failed", socket_error_message("sendto"));
     }
-    if (sent < 0 || static_cast<std::size_t>(sent) != frame.data.size()) {
+    if (static_cast<std::size_t>(sent) != frame.data.size()) {
         throw PortForwardError(400, "port_write_failed", socket_error_message("sendto"));
     }
 }

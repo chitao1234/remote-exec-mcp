@@ -14,6 +14,7 @@
 #endif
 
 #include "core/logging.h"
+#include "core/shell_policy_internal.h"
 #include "exec/console_output.h"
 #include "exec/process_session.h"
 #include "exec/utf8_stream_decode.h"
@@ -24,8 +25,13 @@
 #include "platform/win32_process_tree.h"
 #include "platform/win32_scoped.h"
 #include "platform/win32_utf8.h"
+#include "win32_pipe_io.h"
 
 namespace {
+
+using platform_detail::is_windows_cmd_family;
+using platform_detail::is_windows_command_family;
+using platform_detail::shell_basename_lower;
 
 std::string windows_quote_arg(const std::string& arg) {
     if (arg.empty()) {
@@ -75,25 +81,6 @@ std::string command_line_from_argv(const std::vector<std::string>& argv) {
         out << windows_quote_arg(argv[i]);
     }
     return out.str();
-}
-
-std::string shell_basename_lower(const std::string& shell) {
-    const std::size_t slash = shell.find_last_of("/\\");
-    std::string base = slash == std::string::npos ? shell : shell.substr(slash + 1U);
-    for (std::size_t i = 0; i < base.size(); ++i) {
-        if (base[i] >= 'A' && base[i] <= 'Z') {
-            base[i] = static_cast<char>(base[i] - 'A' + 'a');
-        }
-    }
-    return base;
-}
-
-bool is_windows_cmd_family(const std::string& lower) {
-    return lower == "cmd.exe" || lower == "cmd";
-}
-
-bool is_windows_command_family(const std::string& lower) {
-    return lower == "command.com" || lower == "command";
 }
 
 std::string windows_process_command_line(
@@ -167,9 +154,40 @@ void make_handle_non_inheritable(UniqueHandle* handle, const char* label) {
     handle->reset(duplicate.release());
 }
 
-bool is_stdin_closed_error(DWORD error) {
-    return error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA
-           || error == ERROR_PIPE_NOT_CONNECTED;
+void write_stdin_to_pipe(const UniqueHandle& stdin_write, const std::string& chars) {
+    const char* data = chars.data();
+    std::size_t remaining = chars.size();
+    while (remaining > 0U) {
+        DWORD written = 0;
+        if (WriteFile(stdin_write.get(), data, static_cast<DWORD>(remaining), &written, nullptr)
+            == 0) {
+            const DWORD error = GetLastError();
+            if (is_win32_pipe_closed_error(error)) {
+                throw ProcessStdinClosedError("stdin is closed for this session; rerun "
+                                              "exec_command with tty=true to keep stdin open");
+            }
+            throw std::runtime_error(last_error_message("WriteFile"));
+        }
+        if (written == 0U) {
+            throw std::runtime_error("WriteFile wrote zero bytes");
+        }
+        data += written;
+        remaining -= static_cast<std::size_t>(written);
+    }
+}
+
+bool process_has_exited(const UniqueHandle& process_handle, int* exit_code) {
+    if (!process_handle.valid()) {
+        *exit_code = 1;
+        return true;
+    }
+    if (WaitForSingleObject(process_handle.get(), 0) != WAIT_OBJECT_0) {
+        return false;
+    }
+    DWORD raw_exit_code = 0;
+    GetExitCodeProcess(process_handle.get(), &raw_exit_code);
+    *exit_code = static_cast<int>(raw_exit_code);
+    return true;
 }
 
 class Win32ProcessSession : public ProcessSession {
@@ -185,31 +203,7 @@ public:
     ~Win32ProcessSession() override { terminate(); }
 
     void write_stdin(const std::string& chars) override {
-        const char* data = chars.data();
-        std::size_t remaining = chars.size();
-        while (remaining > 0U) {
-            DWORD written = 0;
-            if (WriteFile(
-                    stdin_write_.get(),
-                    data,
-                    static_cast<DWORD>(remaining),
-                    &written,
-                    nullptr
-                )
-                == 0) {
-                const DWORD error = GetLastError();
-                if (is_stdin_closed_error(error)) {
-                    throw ProcessStdinClosedError("stdin is closed for this session; rerun "
-                                                  "exec_command with tty=true to keep stdin open");
-                }
-                throw std::runtime_error(last_error_message("WriteFile"));
-            }
-            if (written == 0U) {
-                throw std::runtime_error("WriteFile wrote zero bytes");
-            }
-            data += written;
-            remaining -= static_cast<std::size_t>(written);
-        }
+        write_stdin_to_pipe(stdin_write_, chars);
     }
 
     void resize_pty(unsigned short rows, unsigned short cols) override {
@@ -227,17 +221,7 @@ public:
     }
 
     bool has_exited(int* exit_code) override {
-        if (!process_handle_.valid()) {
-            *exit_code = 1;
-            return true;
-        }
-        if (WaitForSingleObject(process_handle_.get(), 0) != WAIT_OBJECT_0) {
-            return false;
-        }
-        DWORD raw_exit_code = 0;
-        GetExitCodeProcess(process_handle_.get(), &raw_exit_code);
-        *exit_code = static_cast<int>(raw_exit_code);
-        return true;
+        return process_has_exited(process_handle_, exit_code);
     }
 
     void terminate() override {
@@ -260,11 +244,6 @@ const DWORD WINPTY_OPEN_TIMEOUT_MS = 10UL * 1000UL;
 const unsigned long WINPTY_OUTPUT_DEBOUNCE_MS = 150UL;
 const unsigned long WINPTY_OUTPUT_MAX_HOLD_MS = 500UL;
 const unsigned long WINPTY_READ_POLL_MS = 25UL;
-
-bool is_output_closed_error(DWORD error) {
-    return error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA
-           || error == ERROR_PIPE_NOT_CONNECTED;
-}
 
 bool is_wine_runtime() {
     const HMODULE ntdll = GetModuleHandleA("ntdll.dll");
@@ -353,122 +332,48 @@ std::string winpty_error_message(const char* prefix, WinptyErrorHandle* error) {
     return out.str();
 }
 
-class UniqueWinptyConfig {
+template <typename T, void (*FreeFn)(T*)> class UniqueWinptyPtr {
 public:
-    UniqueWinptyConfig() : config_(nullptr) {}
-    explicit UniqueWinptyConfig(winpty_config_t* config) : config_(config) {}
-    ~UniqueWinptyConfig() { reset(); }
+    UniqueWinptyPtr() : ptr_(nullptr) {}
+    explicit UniqueWinptyPtr(T* ptr) : ptr_(ptr) {}
+    ~UniqueWinptyPtr() { reset(); }
 
-    UniqueWinptyConfig(UniqueWinptyConfig&& other) : config_(other.release()) {}
+    UniqueWinptyPtr(UniqueWinptyPtr&& other) : ptr_(other.release()) {}
 
-    UniqueWinptyConfig& operator=(UniqueWinptyConfig&& other) {
+    UniqueWinptyPtr& operator=(UniqueWinptyPtr&& other) {
         if (this != &other) {
             reset(other.release());
         }
         return *this;
     }
 
-    UniqueWinptyConfig(const UniqueWinptyConfig&) = delete;
-    UniqueWinptyConfig& operator=(const UniqueWinptyConfig&) = delete;
+    UniqueWinptyPtr(const UniqueWinptyPtr&) = delete;
+    UniqueWinptyPtr& operator=(const UniqueWinptyPtr&) = delete;
 
-    winpty_config_t* get() const { return config_; }
+    T* get() const { return ptr_; }
 
-    bool valid() const { return config_ != nullptr; }
+    bool valid() const { return ptr_ != nullptr; }
 
-    winpty_config_t* release() {
-        winpty_config_t* released = config_;
-        config_ = nullptr;
+    T* release() {
+        T* released = ptr_;
+        ptr_ = nullptr;
         return released;
     }
 
-    void reset(winpty_config_t* config = nullptr) {
-        if (config_ != nullptr) {
-            winpty_config_free(config_);
+    void reset(T* ptr = nullptr) {
+        if (ptr_ != nullptr) {
+            FreeFn(ptr_);
         }
-        config_ = config;
+        ptr_ = ptr;
     }
 
 private:
-    winpty_config_t* config_;
+    T* ptr_;
 };
 
-class UniqueWinptySpawnConfig {
-public:
-    UniqueWinptySpawnConfig() : config_(nullptr) {}
-    explicit UniqueWinptySpawnConfig(winpty_spawn_config_t* config) : config_(config) {}
-    ~UniqueWinptySpawnConfig() { reset(); }
-
-    UniqueWinptySpawnConfig(UniqueWinptySpawnConfig&& other) : config_(other.release()) {}
-
-    UniqueWinptySpawnConfig& operator=(UniqueWinptySpawnConfig&& other) {
-        if (this != &other) {
-            reset(other.release());
-        }
-        return *this;
-    }
-
-    UniqueWinptySpawnConfig(const UniqueWinptySpawnConfig&) = delete;
-    UniqueWinptySpawnConfig& operator=(const UniqueWinptySpawnConfig&) = delete;
-
-    winpty_spawn_config_t* get() const { return config_; }
-
-    bool valid() const { return config_ != nullptr; }
-
-    winpty_spawn_config_t* release() {
-        winpty_spawn_config_t* released = config_;
-        config_ = nullptr;
-        return released;
-    }
-
-    void reset(winpty_spawn_config_t* config = nullptr) {
-        if (config_ != nullptr) {
-            winpty_spawn_config_free(config_);
-        }
-        config_ = config;
-    }
-
-private:
-    winpty_spawn_config_t* config_;
-};
-
-class UniqueWinpty {
-public:
-    UniqueWinpty() : handle_(nullptr) {}
-    explicit UniqueWinpty(winpty_t* handle) : handle_(handle) {}
-    ~UniqueWinpty() { reset(); }
-
-    UniqueWinpty(UniqueWinpty&& other) : handle_(other.release()) {}
-
-    UniqueWinpty& operator=(UniqueWinpty&& other) {
-        if (this != &other) {
-            reset(other.release());
-        }
-        return *this;
-    }
-
-    UniqueWinpty(const UniqueWinpty&) = delete;
-    UniqueWinpty& operator=(const UniqueWinpty&) = delete;
-
-    winpty_t* get() const { return handle_; }
-
-    bool valid() const { return handle_ != nullptr; }
-
-    winpty_t* release() {
-        winpty_t* released = handle_;
-        handle_ = nullptr;
-        return released;
-    }
-
-    void reset(winpty_t* handle = nullptr) {
-        if (handle_ != nullptr) {
-            winpty_free(handle_);
-        }
-        handle_ = handle;
-    }
-
-private:
-    winpty_t* handle_;
-};
+typedef UniqueWinptyPtr<winpty_config_t, winpty_config_free> UniqueWinptyConfig;
+typedef UniqueWinptyPtr<winpty_spawn_config_t, winpty_spawn_config_free> UniqueWinptySpawnConfig;
+typedef UniqueWinptyPtr<winpty_t, winpty_free> UniqueWinpty;
 
 UniqueWinptyConfig create_winpty_config() {
     WinptyErrorHandle error;
@@ -567,39 +472,7 @@ SpawnedWinptyProcess spawn_winpty_process(
 }
 
 std::string read_winpty_available_raw(HANDLE pipe, bool* eof) {
-    DWORD available = 0;
-    if (PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr) == 0) {
-        const DWORD error = GetLastError();
-        if (is_output_closed_error(error)) {
-            *eof = true;
-            return "";
-        }
-        throw std::runtime_error(last_error_message("PeekNamedPipe"));
-    }
-
-    if (available == 0) {
-        return "";
-    }
-
-    std::string buffer;
-    buffer.resize(static_cast<std::size_t>(available));
-    DWORD read = 0;
-    if (ReadFile(pipe, &buffer[0], available, &read, nullptr) == 0) {
-        const DWORD error = GetLastError();
-        if (is_output_closed_error(error)) {
-            *eof = true;
-            return "";
-        }
-        throw std::runtime_error(last_error_message("ReadFile"));
-    }
-
-    if (read == 0U) {
-        *eof = true;
-        return "";
-    }
-
-    buffer.resize(static_cast<std::size_t>(read));
-    return buffer;
+    return read_pipe_available_raw(pipe, eof, true);
 }
 
 class WinptyProcessSession : public ProcessSession {
@@ -619,31 +492,7 @@ public:
     ~WinptyProcessSession() override { terminate(); }
 
     void write_stdin(const std::string& chars) override {
-        const char* data = chars.data();
-        std::size_t remaining = chars.size();
-        while (remaining > 0U) {
-            DWORD written = 0;
-            if (WriteFile(
-                    stdin_write_.get(),
-                    data,
-                    static_cast<DWORD>(remaining),
-                    &written,
-                    nullptr
-                )
-                == 0) {
-                const DWORD error = GetLastError();
-                if (is_stdin_closed_error(error)) {
-                    throw ProcessStdinClosedError("stdin is closed for this session; rerun "
-                                                  "exec_command with tty=true to keep stdin open");
-                }
-                throw std::runtime_error(last_error_message("WriteFile"));
-            }
-            if (written == 0U) {
-                throw std::runtime_error("WriteFile wrote zero bytes");
-            }
-            data += written;
-            remaining -= static_cast<std::size_t>(written);
-        }
+        write_stdin_to_pipe(stdin_write_, chars);
     }
 
     void resize_pty(unsigned short rows, unsigned short cols) override {
@@ -697,17 +546,7 @@ public:
     }
 
     bool has_exited(int* exit_code) override {
-        if (!process_handle_.valid()) {
-            *exit_code = 1;
-            return true;
-        }
-        if (WaitForSingleObject(process_handle_.get(), 0) != WAIT_OBJECT_0) {
-            return false;
-        }
-        DWORD raw_exit_code = 0;
-        GetExitCodeProcess(process_handle_.get(), &raw_exit_code);
-        *exit_code = static_cast<int>(raw_exit_code);
-        return true;
+        return process_has_exited(process_handle_, exit_code);
     }
 
     void terminate() override {
