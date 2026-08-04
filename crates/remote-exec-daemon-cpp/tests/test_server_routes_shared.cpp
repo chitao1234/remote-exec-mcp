@@ -18,10 +18,13 @@
 #include "test_contract_fixtures.h"
 #include "test_filesystem.h"
 #include "test_server_routes_shared.h"
+#include "test_tar_helpers.h"
 #include "test_text_file.h"
 #include "transfer/transfer_ops.h"
 
 namespace fs = test_fs;
+
+namespace tar = test_tar;
 
 namespace {
 
@@ -38,184 +41,10 @@ bool path_can_be_opened_for_read(const fs::path& path) {
 
 } // namespace
 
-fs::path make_server_routes_test_root(const std::string& directory_name) {
-    return make_daemon_test_root(directory_name);
-}
-
-DaemonConfig make_server_routes_test_config(const fs::path& root) {
-    return make_test_daemon_config(root);
-}
-
-#ifndef _WIN32
-static std::string octal_field(std::size_t width, std::uint64_t value) {
-    char buffer[64];
-    std::snprintf(
-        buffer,
-        sizeof(buffer),
-        "%0*llo",
-        static_cast<int>(width - 1),
-        static_cast<unsigned long long>(value)
-    );
-    std::string field(width, '\0');
-    const std::string digits(buffer);
-    const std::size_t start = width - 1 - std::min(width - 1, digits.size());
-    field.replace(
-        start,
-        std::min(width - 1, digits.size()),
-        digits.substr(digits.size() - std::min(width - 1, digits.size()))
-    );
-    field[width - 1] = ' ';
-    return field;
-}
-
-static void set_bytes(
-    std::string* header,
-    std::size_t offset,
-    std::size_t width,
-    const std::string& value
-) {
-    header->replace(offset, std::min(width, value.size()), value.substr(0, width));
-}
-
-static void write_checksum(std::string* header) {
-    std::fill(header->begin() + 148, header->begin() + 156, ' ');
-    unsigned int checksum = 0;
-    for (std::string::const_iterator it = header->begin(); it != header->end(); ++it) {
-        checksum += static_cast<unsigned char>(*it);
-    }
-    const std::string field = octal_field(8, checksum);
-    header->replace(148, 8, field);
-}
-
-static void append_tar_directory(std::string* archive, const std::string& path) {
-    std::string header(512, '\0');
-    set_bytes(&header, 0, 100, path);
-    header.replace(100, 8, octal_field(8, 0755));
-    header.replace(108, 8, octal_field(8, 0));
-    header.replace(116, 8, octal_field(8, 0));
-    header.replace(124, 12, octal_field(12, 0));
-    header.replace(136, 12, octal_field(12, 0));
-    header[156] = '5';
-    set_bytes(&header, 257, 6, "ustar ");
-    set_bytes(&header, 263, 2, " \0");
-    write_checksum(&header);
-    archive->append(header);
-}
-
-static void append_tar_symlink(
-    std::string* archive,
-    const std::string& path,
-    const std::string& target
-) {
-    std::string header(512, '\0');
-    set_bytes(&header, 0, 100, path);
-    header.replace(100, 8, octal_field(8, 0777));
-    header.replace(108, 8, octal_field(8, 0));
-    header.replace(116, 8, octal_field(8, 0));
-    header.replace(124, 12, octal_field(12, 0));
-    header.replace(136, 12, octal_field(12, 0));
-    header[156] = '2';
-    set_bytes(&header, 157, 100, target);
-    set_bytes(&header, 257, 6, "ustar ");
-    set_bytes(&header, 263, 2, " \0");
-    write_checksum(&header);
-    archive->append(header);
-}
-
-static void finalize_tar(std::string* archive) {
-    archive->append(1024, '\0');
-}
-#endif
-
-static std::string read_text_file(const fs::path& path) {
-    return fs::read_file_bytes(path);
-}
-
-static std::string read_binary_file(const fs::path& path) {
-    return read_text_file(path);
-}
-
-static void write_binary_file(const fs::path& path, const std::string& value) {
-    fs::write_file_bytes(path, value);
-}
-
 static std::string decode_data_url_bytes(const std::string& image_url) {
     const std::size_t comma = image_url.find(',');
     TEST_ASSERT(comma != std::string::npos);
     return base64_decode_bytes(image_url.substr(comma + 1));
-}
-
-static std::string encoded_destination_path_header(const fs::path& destination) {
-    return base64_encode_bytes(destination.string());
-}
-
-static void append_u64_be(std::string* output, std::uint64_t value) {
-    for (std::size_t i = 0; i < 8U; ++i) {
-        output->push_back(static_cast<char>((value >> ((7U - i) * 8U)) & 0xffU));
-    }
-}
-
-static std::uint64_t read_u64_be(const std::string& value, std::size_t offset) {
-    std::uint64_t output = 0U;
-    for (std::size_t i = 0; i < 8U; ++i) {
-        output = (output << 8U) | static_cast<unsigned char>(value[offset + i]);
-    }
-    return output;
-}
-
-static std::string transfer_frame(unsigned char frame_type, const std::string& payload) {
-    std::string output;
-    output.push_back(static_cast<char>(frame_type));
-    output.append(3, '\0');
-    append_u64_be(&output, static_cast<std::uint64_t>(payload.size()));
-    output.append(payload);
-    return output;
-}
-
-static std::string framed_transfer_body(const std::string& archive) {
-    std::string output(
-        server_contract::TRANSFER_STREAM_PREFACE,
-        server_contract::TRANSFER_STREAM_PREFACE_LEN
-    );
-    output += transfer_frame(0x01, archive);
-    output += transfer_frame(0x02, Json{{"archive_bytes", archive.size()}}.dump());
-    return output;
-}
-
-static std::string decode_framed_transfer_archive(const std::string& body) {
-    TEST_ASSERT(
-        body.compare(
-            0,
-            server_contract::TRANSFER_STREAM_PREFACE_LEN,
-            server_contract::TRANSFER_STREAM_PREFACE
-        )
-        == 0
-    );
-    std::size_t offset = server_contract::TRANSFER_STREAM_PREFACE_LEN;
-    std::string archive;
-    for (;;) {
-        TEST_ASSERT(offset + server_contract::TRANSFER_STREAM_FRAME_HEADER_LEN <= body.size());
-        const unsigned char frame_type = static_cast<unsigned char>(body[offset]);
-        TEST_ASSERT(body[offset + 1U] == '\0');
-        TEST_ASSERT(body[offset + 2U] == '\0');
-        TEST_ASSERT(body[offset + 3U] == '\0');
-        const std::uint64_t payload_len = read_u64_be(body, offset + 4U);
-        offset += server_contract::TRANSFER_STREAM_FRAME_HEADER_LEN;
-        TEST_ASSERT(payload_len <= static_cast<std::uint64_t>(body.size() - offset));
-        const std::string payload = body.substr(offset, static_cast<std::size_t>(payload_len));
-        offset += static_cast<std::size_t>(payload_len);
-        if (frame_type == 0x01U) {
-            archive += payload;
-            continue;
-        }
-        if (frame_type == 0x02U) {
-            TEST_ASSERT(
-                Json::parse(payload).at("archive_bytes").get<std::uint64_t>() == archive.size()
-            );
-            return archive;
-        }
-        TEST_ASSERT(false);
-    }
 }
 
 static HttpRequest transfer_export_request(const Json& body) {
@@ -239,12 +68,12 @@ static HttpRequest transfer_import_request(
         server_contract::TRANSFER_STREAM_VERSION_VALUE;
     request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = source_type;
     request.headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] =
-        encoded_destination_path_header(destination);
+        tar::encoded_destination_path_header(destination);
     request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = overwrite;
     request.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "true";
     request.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "preserve";
     request.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
-    request.body = framed_transfer_body(archive);
+    request.body = tar::framed_transfer_body(archive);
     return request;
 }
 
@@ -373,12 +202,12 @@ static void assert_transfer_export_errors(TestRouteHarness& harness, const fs::p
 
 static void assert_image_routes(TestRouteHarness& harness, const fs::path& root) {
     const fs::path image_file = root / "tiny.png";
-    write_binary_file(
+    fs::write_file_bytes(
         image_file,
         base64_decode_bytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
                             "x8AAwMCAO+aL9sAAAAASUVORK5CYII=")
     );
-    const std::string original_image = read_binary_file(image_file);
+    const std::string original_image = fs::read_file_bytes(image_file);
 
     const HttpResponse image_response = route_request(
         harness,
@@ -419,7 +248,7 @@ static void assert_image_routes(TestRouteHarness& harness, const fs::path& root)
     TEST_ASSERT(missing_image.at("code").get<std::string>() == "image_missing");
 
     const fs::path gif_file = root / "tiny.gif";
-    write_binary_file(
+    fs::write_file_bytes(
         gif_file,
         base64_decode_bytes("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==")
     );
@@ -438,7 +267,7 @@ static void assert_image_routes(TestRouteHarness& harness, const fs::path& root)
 #ifndef _WIN32
     const fs::path blocked_image_dir = root / "blocked-image";
     fs::create_directories(blocked_image_dir);
-    write_binary_file(
+    fs::write_file_bytes(
         blocked_image_dir / "blocked.png",
         base64_decode_bytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////"
                             "fwAJ+wP9KobjigAAAABJRU5ErkJggg==")
@@ -493,7 +322,7 @@ static void assert_patch_route_audit_fields(TestRouteHarness& harness, const fs:
     );
     TEST_ASSERT(body.at("updated_paths").size() == 1);
     TEST_ASSERT(body.at("updated_paths")[0].get<std::string>() == "A patch-audit.txt");
-    TEST_ASSERT(read_text_file(patch_file) == "audit\n");
+    TEST_ASSERT(fs::read_file_bytes(patch_file) == "audit\n");
 }
 
 static void assert_transfer_path_info_routes(TestRouteHarness& harness, const fs::path& root) {
@@ -573,7 +402,7 @@ static std::string assert_transfer_export_and_exclude_routes(
     TEST_ASSERT(export_response.headers.at(server_contract::TRANSFER_SOURCE_TYPE_HEADER) == "file");
     TEST_ASSERT(export_response.headers.at(server_contract::TRANSFER_COMPRESSION_HEADER) == "none");
     TEST_ASSERT(!export_response.body.empty());
-    const std::string export_archive = decode_framed_transfer_archive(export_response.body);
+    const std::string export_archive = tar::decode_framed_transfer_archive(export_response.body);
 
     const fs::path exclude_source = root / "transfer-exclude-source";
     fs::create_directories(exclude_source / ".git");
@@ -594,15 +423,17 @@ static std::string assert_transfer_export_and_exclude_routes(
     );
     TEST_ASSERT(export_excluded_response.status == 200);
     const ImportSummary excluded_import = import_path(
-        decode_framed_transfer_archive(export_excluded_response.body),
+        tar::decode_framed_transfer_archive(export_excluded_response.body),
         TransferSourceType::Directory,
         (root / "transfer-exclude-dest").string(),
         TransferOverwrite::Replace,
         true
     );
     TEST_ASSERT(excluded_import.warnings.empty());
-    TEST_ASSERT(read_text_file(root / "transfer-exclude-dest" / "keep.txt") == "keep");
-    TEST_ASSERT(read_text_file(root / "transfer-exclude-dest" / "logs" / "readme.txt") == "keep");
+    TEST_ASSERT(fs::read_file_bytes(root / "transfer-exclude-dest" / "keep.txt") == "keep");
+    TEST_ASSERT(
+        fs::read_file_bytes(root / "transfer-exclude-dest" / "logs" / "readme.txt") == "keep"
+    );
     TEST_ASSERT(!fs::exists(root / "transfer-exclude-dest" / "top.log"));
     TEST_ASSERT(!fs::exists(root / "transfer-exclude-dest" / ".git"));
     TEST_ASSERT(!fs::exists(root / "transfer-exclude-dest" / "logs" / "app.log"));
@@ -641,7 +472,7 @@ static void assert_transfer_import_success(
     TEST_ASSERT(imported.at("bytes_copied").get<std::uint64_t>() == 22);
     TEST_ASSERT(imported.at("replaced").get<bool>() == false);
     TEST_ASSERT(imported.at("warnings").empty());
-    TEST_ASSERT(read_text_file(root / "transfer-dest.txt") == "route transfer payload");
+    TEST_ASSERT(fs::read_file_bytes(root / "transfer-dest.txt") == "route transfer payload");
 }
 
 static void assert_transfer_import_optional_defaults(
@@ -656,7 +487,7 @@ static void assert_transfer_import_optional_defaults(
     const HttpResponse optional_defaults_response =
         route_request(harness, optional_defaults_import);
     TEST_ASSERT(optional_defaults_response.status == 200);
-    TEST_ASSERT(read_text_file(root / "transfer-defaults.txt") == "route transfer payload");
+    TEST_ASSERT(fs::read_file_bytes(root / "transfer-defaults.txt") == "route transfer payload");
 }
 
 static void assert_transfer_import_header_validation(
@@ -789,7 +620,7 @@ static std::string assert_sandbox_export_allowed(
         transfer_export_request(Json{{"path", (read_allowed / "source.txt").string()}})
     );
     TEST_ASSERT(sandbox_export_allowed.status == 200);
-    return decode_framed_transfer_archive(sandbox_export_allowed.body);
+    return tar::decode_framed_transfer_archive(sandbox_export_allowed.body);
 }
 
 static void assert_sandbox_import_denied(
@@ -810,9 +641,13 @@ static void assert_sandbox_symlink_target_denied(
     const fs::path& write_allowed
 ) {
     std::string denied_symlink_archive;
-    append_tar_directory(&denied_symlink_archive, ".");
-    append_tar_symlink(&denied_symlink_archive, "allowed-link", "denied-link-target/secret.txt");
-    finalize_tar(&denied_symlink_archive);
+    tar::append_tar_directory(denied_symlink_archive, ".");
+    tar::append_tar_symlink(
+        denied_symlink_archive,
+        "allowed-link",
+        "denied-link-target/secret.txt"
+    );
+    tar::finalize_tar(denied_symlink_archive);
 
     HttpRequest sandbox_symlink_target_denied_request =
         transfer_import_request(write_allowed, denied_symlink_archive, "directory", "merge");

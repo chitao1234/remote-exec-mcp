@@ -9,6 +9,9 @@
 #include "codec/base64_codec.h"
 #include "policy/path_policy.h"
 #include "test_socket_pair.h"
+#include "test_tar_helpers.h"
+
+namespace tar = test_tar;
 
 static std::size_t response_content_length(const std::string& header_block) {
     const std::string marker = "\r\nContent-Length: ";
@@ -46,27 +49,6 @@ static std::string read_content_length_response_from_socket(SOCKET socket) {
     return response;
 }
 
-static std::string read_text_file(const fs::path& path) {
-    return fs::read_file_bytes(path);
-}
-
-static void write_text_file(const fs::path& path, const std::string& value) {
-    fs::write_file_bytes(path, value);
-}
-
-static std::string read_all_from_socket(SOCKET socket) {
-    std::string output;
-    char buffer[4096];
-    for (;;) {
-        const int received = recv(socket, buffer, sizeof(buffer), 0);
-        if (received <= 0) {
-            break;
-        }
-        output.append(buffer, static_cast<std::size_t>(received));
-    }
-    return output;
-}
-
 static void send_request_and_close_writer(SOCKET socket, const std::string& request) {
     send_all(socket, request);
 #ifdef _WIN32
@@ -99,7 +81,7 @@ void assert_first_request_callback_waits_for_request(TestHttpConnectionHarness& 
         "Content-Length: 0\r\n"
         "\r\n"
     );
-    TEST_ASSERT(wait_until_true(first_request, 1000UL));
+    TEST_ASSERT(test_assert::wait_until_true(first_request, 1000UL));
     const std::string response = read_all_from_socket(client_socket.get());
     TEST_ASSERT(response.find("HTTP/1.1 200 OK\r\n") == 0);
     server_thread.join();
@@ -143,36 +125,6 @@ static std::string decode_chunked_response_body(const std::string& response) {
     }
 }
 
-static std::string octal_field(std::size_t width, std::uint64_t value) {
-    char buffer[64];
-    std::snprintf(
-        buffer,
-        sizeof(buffer),
-        "%0*llo",
-        static_cast<int>(width - 1),
-        static_cast<unsigned long long>(value)
-    );
-    std::string field(width, '\0');
-    const std::string digits(buffer);
-    const std::size_t used = std::min(width - 1, digits.size());
-    field.replace(width - 1 - used, used, digits.substr(digits.size() - used));
-    field[width - 1] = ' ';
-    return field;
-}
-
-static std::uint64_t parse_octal_value(const char* data, std::size_t size) {
-    std::size_t index = 0;
-    while (index < size && (data[index] == ' ' || data[index] == '\0')) {
-        ++index;
-    }
-    std::uint64_t value = 0;
-    while (index < size && data[index] >= '0' && data[index] <= '7') {
-        value = (value * 8) + static_cast<std::uint64_t>(data[index] - '0');
-        ++index;
-    }
-    return value;
-}
-
 static std::string single_file_tar_body(const std::string& archive) {
     TEST_ASSERT(archive.size() >= 512);
     const char* header = archive.data();
@@ -182,49 +134,15 @@ static std::string single_file_tar_body(const std::string& archive) {
     }
     TEST_ASSERT(std::string(header, path_length) == ".remote-exec-file");
     TEST_ASSERT(header[156] == '0');
-    const std::uint64_t size = parse_octal_value(header + 124, 12);
+    const std::uint64_t size = tar::parse_octal_value(header + 124, 12);
     TEST_ASSERT(512 + static_cast<std::size_t>(size) <= archive.size());
     return archive.substr(512, static_cast<std::size_t>(size));
 }
 
-static void set_bytes(
-    std::string* header,
-    std::size_t offset,
-    std::size_t width,
-    const std::string& value
-) {
-    header->replace(offset, std::min(width, value.size()), value.substr(0, width));
-}
-
-static void write_checksum(std::string* header) {
-    std::fill(header->begin() + 148, header->begin() + 156, ' ');
-    unsigned int checksum = 0;
-    for (std::size_t i = 0; i < header->size(); ++i) {
-        checksum += static_cast<unsigned char>((*header)[i]);
-    }
-    header->replace(148, 8, octal_field(8, checksum));
-}
-
 static std::string tar_with_single_file(const std::string& body) {
     std::string archive;
-    std::string header(512, '\0');
-    set_bytes(&header, 0, 100, ".remote-exec-file");
-    header.replace(100, 8, octal_field(8, 0644));
-    header.replace(108, 8, octal_field(8, 0));
-    header.replace(116, 8, octal_field(8, 0));
-    header.replace(124, 12, octal_field(12, body.size()));
-    header.replace(136, 12, octal_field(12, 0));
-    header[156] = '0';
-    set_bytes(&header, 257, 6, "ustar ");
-    set_bytes(&header, 263, 2, " \0");
-    write_checksum(&header);
-    archive.append(header);
-    archive.append(body);
-    const std::size_t remainder = body.size() % 512;
-    if (remainder != 0) {
-        archive.append(512 - remainder, '\0');
-    }
-    archive.append(1024, '\0');
+    tar::append_tar_file(archive, ".remote-exec-file", body);
+    tar::finalize_tar(archive);
     return archive;
 }
 
@@ -250,73 +168,21 @@ static std::string chunked_data_only(const std::string& body) {
     return out.str();
 }
 
-static void append_u64_be(std::string* output, std::uint64_t value) {
-    for (std::size_t i = 0; i < 8U; ++i) {
-        output->push_back(static_cast<char>((value >> ((7U - i) * 8U)) & 0xffU));
-    }
-}
-
-static std::uint64_t read_u64_be(const std::string& value, std::size_t offset) {
-    std::uint64_t output = 0U;
-    for (std::size_t i = 0; i < 8U; ++i) {
-        output = (output << 8U) | static_cast<unsigned char>(value[offset + i]);
-    }
-    return output;
-}
-
-static std::string transfer_frame(unsigned char frame_type, const std::string& payload) {
-    std::string output;
-    output.push_back(static_cast<char>(frame_type));
-    output.append(3, '\0');
-    append_u64_be(&output, static_cast<std::uint64_t>(payload.size()));
-    output.append(payload);
-    return output;
-}
-
-static std::string framed_transfer_body(const std::string& archive) {
-    std::string output = "REXFER2\n";
-    output += transfer_frame(0x01, archive);
-    output += transfer_frame(0x02, Json{{"archive_bytes", archive.size()}}.dump());
-    return output;
-}
-
-static std::string decode_framed_transfer_archive(const std::string& body) {
-    TEST_ASSERT(body.compare(0, 8, "REXFER2\n") == 0);
-    std::size_t offset = 8U;
-    std::string archive;
-    for (;;) {
-        TEST_ASSERT(offset + 12U <= body.size());
-        const unsigned char frame_type = static_cast<unsigned char>(body[offset]);
-        TEST_ASSERT(body[offset + 1U] == '\0');
-        TEST_ASSERT(body[offset + 2U] == '\0');
-        TEST_ASSERT(body[offset + 3U] == '\0');
-        const std::uint64_t payload_len = read_u64_be(body, offset + 4U);
-        offset += 12U;
-        TEST_ASSERT(payload_len <= static_cast<std::uint64_t>(body.size() - offset));
-        const std::string payload = body.substr(offset, static_cast<std::size_t>(payload_len));
-        offset += static_cast<std::size_t>(payload_len);
-        if (frame_type == 0x01U) {
-            archive += payload;
-            continue;
-        }
-        if (frame_type == 0x02U) {
-            TEST_ASSERT(
-                Json::parse(payload).at("archive_bytes").get<std::uint64_t>() == archive.size()
-            );
-            return archive;
-        }
-        TEST_ASSERT(false);
-    }
-}
-
 static Json decode_framed_transfer_error(const std::string& body) {
-    TEST_ASSERT(body.compare(0, 8, "REXFER2\n") == 0);
-    std::size_t offset = 8U;
+    TEST_ASSERT(
+        body.compare(
+            0,
+            server_contract::TRANSFER_STREAM_PREFACE_LEN,
+            server_contract::TRANSFER_STREAM_PREFACE
+        )
+        == 0
+    );
+    std::size_t offset = server_contract::TRANSFER_STREAM_PREFACE_LEN;
     for (;;) {
-        TEST_ASSERT(offset + 12U <= body.size());
+        TEST_ASSERT(offset + server_contract::TRANSFER_STREAM_FRAME_HEADER_LEN <= body.size());
         const unsigned char frame_type = static_cast<unsigned char>(body[offset]);
-        const std::uint64_t payload_len = read_u64_be(body, offset + 4U);
-        offset += 12U;
+        const std::uint64_t payload_len = tar::read_u64_be(body, offset + 4U);
+        offset += server_contract::TRANSFER_STREAM_FRAME_HEADER_LEN;
         TEST_ASSERT(payload_len <= static_cast<std::uint64_t>(body.size() - offset));
         const std::string payload = body.substr(offset, static_cast<std::size_t>(payload_len));
         offset += static_cast<std::size_t>(payload_len);
@@ -324,10 +190,6 @@ static Json decode_framed_transfer_error(const std::string& body) {
             return Json::parse(payload);
         }
     }
-}
-
-static std::string encoded_destination_path_header(const fs::path& destination) {
-    return base64_encode_bytes(destination.string());
 }
 
 static std::string run_single_request(
@@ -363,6 +225,39 @@ static std::string json_post_request_with_extra_headers(
             << "Content-Length: " << payload.size() << "\r\n"
             << extra_headers << "\r\n"
             << payload;
+    return request.str();
+}
+
+static std::string streaming_import_request(
+    const fs::path& destination,
+    const std::string& archive
+) {
+    std::ostringstream request;
+    request << "POST /v1/transfer/import HTTP/1.1\r\n"
+            << "Transfer-Encoding: chunked\r\n"
+            << "Content-Type: " << server_contract::TRANSFER_STREAM_CONTENT_TYPE << "\r\n"
+            << server_contract::TRANSFER_STREAM_VERSION_HEADER << ": "
+            << server_contract::TRANSFER_STREAM_VERSION_VALUE << "\r\n"
+            << server_contract::TRANSFER_SOURCE_TYPE_HEADER << ": file\r\n"
+            << server_contract::TRANSFER_DESTINATION_PATH_HEADER << ": "
+            << tar::encoded_destination_path_header(destination) << "\r\n"
+            << server_contract::TRANSFER_OVERWRITE_HEADER << ": replace\r\n"
+            << server_contract::TRANSFER_CREATE_PARENT_HEADER << ": true\r\n"
+            << server_contract::TRANSFER_SYMLINK_MODE_HEADER << ": preserve\r\n"
+            << server_contract::TRANSFER_COMPRESSION_HEADER << ": none\r\n"
+            << "\r\n"
+            << chunked_body(tar::framed_transfer_body(archive));
+    return request.str();
+}
+
+static std::string streaming_export_request(const std::string& body) {
+    std::ostringstream request;
+    request << "POST /v1/transfer/export HTTP/1.1\r\n"
+            << "Content-Length: " << body.size() << "\r\n"
+            << server_contract::TRANSFER_STREAM_VERSION_HEADER << ": "
+            << server_contract::TRANSFER_STREAM_VERSION_VALUE << "\r\n"
+            << "\r\n"
+            << body;
     return request.str();
 }
 
@@ -530,27 +425,16 @@ static void assert_streaming_import_ignores_generic_http_body_limit(const fs::pa
     harness.refresh_context();
 
     const std::string archive = tar_with_single_file("stream body exceeds generic http limit");
-    TEST_ASSERT(framed_transfer_body(archive).size() > harness.state.config.max_request_body_bytes);
+    TEST_ASSERT(
+        tar::framed_transfer_body(archive).size() > harness.state.config.max_request_body_bytes
+    );
 
     const fs::path imported_path = root / "small-http-limit-import.txt";
-    std::ostringstream request;
-    request << "POST /v1/transfer/import HTTP/1.1\r\n"
-            << "Transfer-Encoding: chunked\r\n"
-            << "Content-Type: application/vnd.remote-exec.transfer-stream.v2\r\n"
-            << "x-remote-exec-transfer-stream-version: 2\r\n"
-            << "x-remote-exec-source-type: file\r\n"
-            << "x-remote-exec-destination-path: " << encoded_destination_path_header(imported_path)
-            << "\r\n"
-            << "x-remote-exec-overwrite: replace\r\n"
-            << "x-remote-exec-create-parent: true\r\n"
-            << "x-remote-exec-symlink-mode: preserve\r\n"
-            << "x-remote-exec-compression: none\r\n"
-            << "\r\n"
-            << chunked_body(framed_transfer_body(archive));
+    const std::string request = streaming_import_request(imported_path, archive);
 
-    const std::string response = run_single_request(harness, request.str());
+    const std::string response = run_single_request(harness, request);
     TEST_ASSERT(response.find("HTTP/1.1 200 OK\r\n") == 0);
-    TEST_ASSERT(read_text_file(imported_path) == "stream body exceeds generic http limit");
+    TEST_ASSERT(fs::read_file_bytes(imported_path) == "stream body exceeds generic http limit");
 }
 
 static void assert_streaming_import_failure_closes_connection_with_unread_body(const fs::path& root
@@ -561,22 +445,12 @@ static void assert_streaming_import_failure_closes_connection_with_unread_body(c
     harness.refresh_context();
 
     const std::string archive = tar_with_single_file(std::string(128U, 'x'));
-    const std::string framed = framed_transfer_body(archive);
+    const std::string framed = tar::framed_transfer_body(archive);
     const fs::path imported_path = root / "failed-import.txt";
 
-    std::ostringstream request_head;
-    request_head << "POST /v1/transfer/import HTTP/1.1\r\n"
-                 << "Transfer-Encoding: chunked\r\n"
-                 << "Content-Type: application/vnd.remote-exec.transfer-stream.v2\r\n"
-                 << "x-remote-exec-transfer-stream-version: 2\r\n"
-                 << "x-remote-exec-source-type: file\r\n"
-                 << "x-remote-exec-destination-path: "
-                 << encoded_destination_path_header(imported_path) << "\r\n"
-                 << "x-remote-exec-overwrite: replace\r\n"
-                 << "x-remote-exec-create-parent: true\r\n"
-                 << "x-remote-exec-symlink-mode: preserve\r\n"
-                 << "x-remote-exec-compression: none\r\n"
-                 << "\r\n";
+    const std::string full_request = streaming_import_request(imported_path, archive);
+    const std::size_t request_head_end = full_request.find("\r\n\r\n") + 4U;
+    const std::string request_head = full_request.substr(0, request_head_end);
 
     ConnectedSocketPair sockets = make_connected_socket_pair();
     UniqueSocket server_socket(std::move(sockets.first));
@@ -589,7 +463,7 @@ static void assert_streaming_import_failure_closes_connection_with_unread_body(c
         server_socket.release()
     );
 
-    send_all(client_socket.get(), request_head.str());
+    send_all(client_socket.get(), request_head);
 
     const std::size_t split_offset = 24U;
     send_all(client_socket.get(), chunked_data_only(framed.substr(0U, split_offset)));
@@ -617,36 +491,18 @@ void assert_http_streaming_routes(TestHttpConnectionHarness& harness, const fs::
 
     const std::string archive = tar_with_single_file("streamed import");
     const fs::path imported_path = root / "imported.txt";
-    std::ostringstream import_request;
-    import_request << "POST /v1/transfer/import HTTP/1.1\r\n"
-                   << "Transfer-Encoding: chunked\r\n"
-                   << "Content-Type: application/vnd.remote-exec.transfer-stream.v2\r\n"
-                   << "x-remote-exec-transfer-stream-version: 2\r\n"
-                   << "x-remote-exec-source-type: file\r\n"
-                   << "x-remote-exec-destination-path: "
-                   << encoded_destination_path_header(imported_path) << "\r\n"
-                   << "x-remote-exec-overwrite: replace\r\n"
-                   << "x-remote-exec-create-parent: true\r\n"
-                   << "x-remote-exec-symlink-mode: preserve\r\n"
-                   << "x-remote-exec-compression: none\r\n"
-                   << "\r\n"
-                   << chunked_body(framed_transfer_body(archive));
+    const std::string import_request = streaming_import_request(imported_path, archive);
 
-    const std::string import_response = run_single_request(harness, import_request.str());
+    const std::string import_response = run_single_request(harness, import_request);
     TEST_ASSERT(import_response.find("HTTP/1.1 200 OK\r\n") == 0);
-    TEST_ASSERT(read_text_file(imported_path) == "streamed import");
+    TEST_ASSERT(fs::read_file_bytes(imported_path) == "streamed import");
 
     const fs::path export_path = root / "export.txt";
-    write_text_file(export_path, "streamed export");
+    fs::write_file_bytes(export_path, "streamed export");
     const std::string export_body = Json{{"path", export_path.string()}}.dump();
-    std::ostringstream export_request;
-    export_request << "POST /v1/transfer/export HTTP/1.1\r\n"
-                   << "Content-Length: " << export_body.size() << "\r\n"
-                   << "x-remote-exec-transfer-stream-version: 2\r\n"
-                   << "\r\n"
-                   << export_body;
+    const std::string export_request = streaming_export_request(export_body);
 
-    const std::string export_response = run_single_request(harness, export_request.str());
+    const std::string export_response = run_single_request(harness, export_request);
     TEST_ASSERT(export_response.find("HTTP/1.1 200 OK\r\n") == 0);
     TEST_ASSERT(export_response.find("Transfer-Encoding: chunked\r\n") != std::string::npos);
     TEST_ASSERT(export_response.find("Connection: close\r\n") == std::string::npos);
@@ -654,7 +510,7 @@ void assert_http_streaming_routes(TestHttpConnectionHarness& harness, const fs::
     TEST_ASSERT(export_response.find("x-remote-exec-source-type: file\r\n") != std::string::npos);
     TEST_ASSERT(
         single_file_tar_body(
-            decode_framed_transfer_archive(decode_chunked_response_body(export_response))
+            tar::decode_framed_transfer_archive(decode_chunked_response_body(export_response))
         )
         == "streamed export"
     );
@@ -666,25 +522,19 @@ void assert_http_streaming_routes(TestHttpConnectionHarness& harness, const fs::
     fs::create_directories(read_allowed);
     fs::create_directories(write_allowed);
     fs::create_directories(outside);
-    write_text_file(outside / "outside.txt", "outside");
+    fs::write_file_bytes(outside / "outside.txt", "outside");
 
     TestHttpConnectionHarness sandbox(root);
     sandbox.state.config.sandbox_configured = true;
     sandbox.state.config.sandbox.read.allow.push_back(read_allowed.string());
     sandbox.state.config.sandbox.write.allow.push_back(write_allowed.string());
-    enable_sandbox(sandbox.state);
+    enable_test_daemon_sandbox(sandbox.state);
     sandbox.refresh_context();
 
     const std::string denied_export_body =
         Json{{"path", (outside / "outside.txt").string()}}.dump();
-    std::ostringstream denied_export_request;
-    denied_export_request << "POST /v1/transfer/export HTTP/1.1\r\n"
-                          << "Content-Length: " << denied_export_body.size() << "\r\n"
-                          << "x-remote-exec-transfer-stream-version: 2\r\n"
-                          << "\r\n"
-                          << denied_export_body;
     const std::string denied_export_response =
-        run_single_request(sandbox, denied_export_request.str());
+        run_single_request(sandbox, streaming_export_request(denied_export_body));
     TEST_ASSERT(denied_export_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
     TEST_ASSERT(
         Json::parse(response_body(denied_export_response)).at("code").get<std::string>()
@@ -694,25 +544,19 @@ void assert_http_streaming_routes(TestHttpConnectionHarness& harness, const fs::
     const fs::path recursive_read_root = read_allowed / "recursive";
     const fs::path recursive_denied = recursive_read_root / "secret";
     fs::create_directories(recursive_denied);
-    write_text_file(recursive_read_root / "visible.txt", "visible");
-    write_text_file(recursive_denied / "hidden.txt", "hidden");
+    fs::write_file_bytes(recursive_read_root / "visible.txt", "visible");
+    fs::write_file_bytes(recursive_denied / "hidden.txt", "hidden");
 
     TestHttpConnectionHarness recursive_deny(root);
     recursive_deny.state.config.sandbox_configured = true;
     recursive_deny.state.config.sandbox.read.allow.push_back(read_allowed.string());
     recursive_deny.state.config.sandbox.read.deny.push_back(recursive_denied.string());
-    enable_sandbox(recursive_deny.state);
+    enable_test_daemon_sandbox(recursive_deny.state);
     recursive_deny.refresh_context();
 
     const std::string recursive_deny_body = Json{{"path", recursive_read_root.string()}}.dump();
-    std::ostringstream recursive_deny_request;
-    recursive_deny_request << "POST /v1/transfer/export HTTP/1.1\r\n"
-                           << "Content-Length: " << recursive_deny_body.size() << "\r\n"
-                           << "x-remote-exec-transfer-stream-version: 2\r\n"
-                           << "\r\n"
-                           << recursive_deny_body;
     const std::string recursive_deny_response =
-        run_single_request(recursive_deny, recursive_deny_request.str());
+        run_single_request(recursive_deny, streaming_export_request(recursive_deny_body));
     TEST_ASSERT(recursive_deny_response.find("HTTP/1.1 200 OK\r\n") == 0);
     TEST_ASSERT(
         recursive_deny_response.find("Transfer-Encoding: chunked\r\n") != std::string::npos
@@ -724,22 +568,8 @@ void assert_http_streaming_routes(TestHttpConnectionHarness& harness, const fs::
         == "sandbox_denied"
     );
 
-    std::ostringstream denied_import_request;
-    denied_import_request << "POST /v1/transfer/import HTTP/1.1\r\n"
-                          << "Transfer-Encoding: chunked\r\n"
-                          << "Content-Type: application/vnd.remote-exec.transfer-stream.v2\r\n"
-                          << "x-remote-exec-transfer-stream-version: 2\r\n"
-                          << "x-remote-exec-source-type: file\r\n"
-                          << "x-remote-exec-destination-path: "
-                          << encoded_destination_path_header(outside / "imported.txt") << "\r\n"
-                          << "x-remote-exec-overwrite: replace\r\n"
-                          << "x-remote-exec-create-parent: true\r\n"
-                          << "x-remote-exec-symlink-mode: preserve\r\n"
-                          << "x-remote-exec-compression: none\r\n"
-                          << "\r\n"
-                          << chunked_body(framed_transfer_body(archive));
     const std::string denied_import_response =
-        run_single_request(sandbox, denied_import_request.str());
+        run_single_request(sandbox, streaming_import_request(outside / "imported.txt", archive));
     TEST_ASSERT(denied_import_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
     TEST_ASSERT(
         Json::parse(response_body(denied_import_response)).at("code").get<std::string>()

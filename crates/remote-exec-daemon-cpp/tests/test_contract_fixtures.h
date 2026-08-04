@@ -4,15 +4,97 @@
 #include <string>
 
 #include "http/http_helpers.h"
+#include "test_assert.h"
 #include "test_filesystem.h"
 
 #ifdef _WIN32
 #include <direct.h>
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
 namespace test_contract {
+
+inline std::string replace_all(
+    std::string value,
+    const std::string& needle,
+    const std::string& replacement
+) {
+    std::string::size_type position = 0;
+    while ((position = value.find(needle, position)) != std::string::npos) {
+        value.replace(position, needle.size(), replacement);
+        position += replacement.size();
+    }
+    return value;
+}
+
+inline std::string apply_template(const std::string& raw, const test_fs::path& root) {
+    return replace_all(raw, "{root}", root.string());
+}
+
+inline bool case_applies_to_host(const Json& case_json) {
+    if (!case_json.contains("platforms")) {
+        return true;
+    }
+#ifdef _WIN32
+    const std::string platform = "windows";
+#else
+    const std::string platform = "posix";
+#endif
+    const Json& platforms = case_json.at("platforms");
+    for (Json::const_iterator it = platforms.begin(); it != platforms.end(); ++it) {
+        if (it->get<std::string>() == platform) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline void apply_setup(const test_fs::path& root, const Json& setup) {
+    if (setup.is_null()) {
+        return;
+    }
+
+    if (setup.contains("dirs")) {
+        const Json& dirs = setup.at("dirs");
+        for (Json::const_iterator it = dirs.begin(); it != dirs.end(); ++it) {
+            test_fs::create_directories(apply_template(it->get<std::string>(), root));
+        }
+    }
+
+    if (setup.contains("files")) {
+        const Json& files = setup.at("files");
+        for (Json::const_iterator it = files.begin(); it != files.end(); ++it) {
+            const test_fs::path path = apply_template(it->at("path").get<std::string>(), root);
+            test_fs::create_directories(path.parent_path());
+            test_fs::write_file_bytes(path, it->at("contents").get<std::string>());
+        }
+    }
+
+#ifndef _WIN32
+    if (setup.contains("symlinks")) {
+        const Json& symlinks = setup.at("symlinks");
+        for (Json::const_iterator it = symlinks.begin(); it != symlinks.end(); ++it) {
+            const test_fs::path path = apply_template(it->at("path").get<std::string>(), root);
+            test_fs::create_directories(path.parent_path());
+            test_fs::create_symlink(
+                apply_template(it->at("target").get<std::string>(), root),
+                path
+            );
+        }
+    }
+
+    if (setup.contains("fifos")) {
+        const Json& fifos = setup.at("fifos");
+        for (Json::const_iterator it = fifos.begin(); it != fifos.end(); ++it) {
+            const test_fs::path path = apply_template(it->get<std::string>(), root);
+            test_fs::create_directories(path.parent_path());
+            TEST_ASSERT(mkfifo(path.c_str(), 0600) == 0);
+        }
+    }
+#endif
+}
 
 inline test_fs::path current_working_directory() {
     char buffer[4096];

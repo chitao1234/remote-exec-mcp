@@ -2,6 +2,7 @@
 
 #include "test_assert.h"
 #include <cstring>
+#include <string>
 #include <utility>
 
 #ifdef _WIN32
@@ -24,6 +25,19 @@ struct ConnectedSocketPair {
 inline NetworkSession& test_network_session() {
     static NetworkSession session;
     return session;
+}
+
+inline std::string read_all_from_socket(SOCKET socket) {
+    std::string output;
+    char buffer[4096];
+    for (;;) {
+        const int received = recv(socket, buffer, sizeof(buffer), 0);
+        if (received <= 0) {
+            break;
+        }
+        output.append(buffer, static_cast<std::size_t>(received));
+    }
+    return output;
 }
 
 inline ConnectedSocketPair make_connected_socket_pair() {

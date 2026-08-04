@@ -26,21 +26,7 @@ static const unsigned long kTunnelFrameReadTimeoutMs = 30000UL;
 
 fs::path make_test_root();
 
-bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms);
 void wait_past_resume_timeout(unsigned long resume_timeout_ms);
-
-void initialize_state_with_port_forward_limits(
-    TestDaemonState& state,
-    const fs::path& root,
-    const PortForwardLimitConfig& limits
-);
-void initialize_state_with_worker_limit(
-    TestDaemonState& state,
-    const fs::path& root,
-    unsigned long max_workers
-);
-void initialize_state(TestDaemonState& state, const fs::path& root);
-void enable_sandbox(TestDaemonState& state);
 
 const char* tunnel_frame_type_name(PortTunnelFrameType type);
 PortTunnelFrame read_tunnel_frame(SOCKET socket);
@@ -86,7 +72,12 @@ Json tunnel_open_meta(
     const std::string& resume_session_id = std::string()
 );
 
-void open_tunnel(TestDaemonState& state, UniqueSocket* client_socket, std::thread* server_thread);
+void open_tunnel(
+    TestDaemonState& state,
+    UniqueSocket* client_socket,
+    std::thread* server_thread,
+    std::atomic<bool>* server_exited = nullptr
+);
 PortTunnelFrame open_v4_tunnel(
     TestDaemonState& state,
     UniqueSocket* client_socket,
@@ -97,7 +88,27 @@ PortTunnelFrame open_v4_tunnel(
     const std::string& resume_session_id = std::string()
 );
 void close_tunnel(UniqueSocket* client_socket, std::thread* server_thread);
-void wait_until_bindable(const std::string& endpoint);
+void wait_until_bindable(const std::string& endpoint, const char* protocol = "tcp");
+std::string open_listen_session(
+    TestDaemonState& state,
+    UniqueSocket* client_socket,
+    std::thread* server_thread,
+    const std::string& protocol = "tcp",
+    uint64_t generation = 1ULL
+);
+std::string request_tcp_listener(UniqueSocket* client_socket, uint32_t stream_id = 1U);
+std::string request_udp_bind(UniqueSocket* client_socket, uint32_t stream_id = 1U);
+std::string open_tcp_listener(
+    TestDaemonState& state,
+    UniqueSocket* client_socket,
+    std::thread* server_thread
+);
+std::string open_udp_bind(
+    TestDaemonState& state,
+    UniqueSocket* client_socket,
+    std::thread* server_thread
+);
+void send_operator_close(SOCKET socket, uint64_t generation);
 
 void assert_http_streaming_routes(TestHttpConnectionHarness& harness, const fs::path& root);
 void assert_first_request_callback_waits_for_request(TestHttpConnectionHarness& harness);

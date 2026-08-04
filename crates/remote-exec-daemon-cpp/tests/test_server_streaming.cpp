@@ -5,7 +5,7 @@ int main() {
     const fs::path root = make_test_root();
     TestHttpConnectionHarness connection(root);
     TestDaemonState state;
-    initialize_state(state, root);
+    initialize_test_daemon_state(state, root);
 
     assert_http_streaming_routes(connection, root);
     assert_first_request_callback_waits_for_request(connection);

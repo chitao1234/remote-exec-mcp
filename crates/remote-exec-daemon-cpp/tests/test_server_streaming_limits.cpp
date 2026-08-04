@@ -4,7 +4,7 @@ static const unsigned long TCP_PAYLOAD_DRAIN_MARGIN_MS = 100UL;
 
 static void assert_tcp_connect_worker_limit_errors_before_success(const fs::path& root) {
     TestDaemonState state;
-    initialize_state_with_worker_limit(state, root, 1UL);
+    initialize_test_daemon_state_with_worker_limit(state, root, 1UL);
 
     UniqueSocket listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
     const std::string endpoint = socket_local_endpoint(listener.get());
@@ -40,7 +40,7 @@ static void assert_tcp_connect_worker_limit_errors_before_success(const fs::path
 
 static void assert_tcp_connect_read_thread_failure_errors_before_success(const fs::path& root) {
     TestDaemonState state;
-    initialize_state(state, root);
+    initialize_test_daemon_state(state, root);
 
     UniqueSocket listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
     const std::string endpoint = socket_local_endpoint(listener.get());
@@ -66,47 +66,11 @@ static void assert_tcp_connect_read_thread_failure_errors_before_success(const f
 
 static void assert_tcp_accept_read_thread_failure_drops_before_accept(const fs::path& root) {
     TestDaemonState state;
-    initialize_state(state, root);
+    initialize_test_daemon_state(state, root);
 
     UniqueSocket client_socket;
     std::thread server_thread;
-    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
-    send_tunnel_frame(
-        client_socket.get(),
-        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
-    );
-    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
-    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
-
-    set_forced_tcp_read_thread_failures(1UL);
-    UniqueSocket dropped_peer(connect_port_forward_socket(endpoint, "tcp"));
-    PortTunnelFrame unexpected;
-    TEST_ASSERT(!try_read_tunnel_frame_with_timeout(client_socket.get(), 100UL, &unexpected));
-
-    UniqueSocket accepted_peer(connect_port_forward_socket(endpoint, "tcp"));
-    const PortTunnelFrame accepted = read_tunnel_frame(client_socket.get());
-    TEST_ASSERT(accepted.type == PortTunnelFrameType::TcpAccept);
-
-    close_tunnel(&client_socket, &server_thread);
-}
-
-static void assert_retained_tcp_accept_read_thread_failure_drops_before_accept(const fs::path& root
-) {
-    TestDaemonState state;
-    initialize_state(state, root);
-
-    UniqueSocket client_socket;
-    std::thread server_thread;
-    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
-
-    send_tunnel_frame(
-        client_socket.get(),
-        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
-    );
-    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
-    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+    const std::string endpoint = open_tcp_listener(state, &client_socket, &server_thread);
 
     set_forced_tcp_read_thread_failures(1UL);
     UniqueSocket dropped_peer(connect_port_forward_socket(endpoint, "tcp"));
@@ -122,19 +86,11 @@ static void assert_retained_tcp_accept_read_thread_failure_drops_before_accept(c
 
 static void assert_retained_tcp_accept_worker_pressure_is_local_drop(const fs::path& root) {
     TestDaemonState state;
-    initialize_state_with_worker_limit(state, root, 1UL);
+    initialize_test_daemon_state_with_worker_limit(state, root, 1UL);
 
     UniqueSocket client_socket;
     std::thread server_thread;
-    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
-
-    send_tunnel_frame(
-        client_socket.get(),
-        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
-    );
-    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
-    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+    const std::string endpoint = open_tcp_listener(state, &client_socket, &server_thread);
 
     UniqueSocket peer(connect_port_forward_socket(endpoint, "tcp"));
     PortTunnelFrame drop_report;
@@ -150,7 +106,7 @@ static void assert_retained_udp_bind_worker_failure_releases_udp_budget(const fs
     limits.max_udp_binds = 1UL;
 
     TestDaemonState state;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
     std::thread server_thread;
@@ -177,19 +133,11 @@ static void assert_retained_tcp_accept_pressure_is_local_drop(const fs::path& ro
     limits.max_active_tcp_streams = 1UL;
 
     TestDaemonState state;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
     std::thread server_thread;
-    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
-
-    send_tunnel_frame(
-        client_socket.get(),
-        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
-    );
-    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
-    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+    const std::string endpoint = open_tcp_listener(state, &client_socket, &server_thread);
 
     UniqueSocket listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
     const std::string hold_endpoint = socket_local_endpoint(listener.get());
@@ -243,7 +191,7 @@ static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::pa
     limits.max_active_tcp_streams = 1UL;
 
     TestDaemonState state;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket echo_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
     const std::string endpoint = socket_local_endpoint(echo_listener.get());
@@ -297,18 +245,11 @@ static void assert_active_tcp_accept_limit_is_enforced_and_released(const fs::pa
     limits.max_active_tcp_streams = 1UL;
 
     TestDaemonState state;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
     std::thread server_thread;
-    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
-    send_tunnel_frame(
-        client_socket.get(),
-        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
-    );
-    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
-    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+    const std::string endpoint = open_tcp_listener(state, &client_socket, &server_thread);
 
     UniqueSocket first_peer(connect_port_forward_socket(endpoint, "tcp"));
     const PortTunnelFrame first_accept = read_tunnel_frame(client_socket.get());
@@ -338,7 +279,7 @@ static void assert_tunnel_queued_byte_limit_is_enforced(const fs::path& root) {
     limits.max_tunnel_queued_bytes = 128UL;
 
     TestDaemonState state;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket payload_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
     const std::string endpoint = socket_local_endpoint(payload_listener.get());
@@ -366,18 +307,11 @@ static void assert_udp_queued_byte_pressure_reports_drop(const fs::path& root) {
     limits.max_tunnel_queued_bytes = 128UL;
 
     TestDaemonState state;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
     std::thread server_thread;
-    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
-    send_tunnel_frame(
-        client_socket.get(),
-        json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}})
-    );
-    const PortTunnelFrame bind_ok = read_tunnel_frame(client_socket.get());
-    TEST_ASSERT(bind_ok.type == PortTunnelFrameType::UdpBindOk);
-    const std::string endpoint = Json::parse(bind_ok.meta).at("endpoint").get<std::string>();
+    const std::string endpoint = open_udp_bind(state, &client_socket, &server_thread);
 
     UniqueSocket peer(bind_port_forward_socket("127.0.0.1:0", "udp"));
     const SocketAddress destination = parse_port_forward_peer(endpoint);
@@ -406,11 +340,12 @@ static void assert_partial_tunnel_frame_times_out(const fs::path& root) {
     limits.tunnel_io_timeout_ms = 50UL;
 
     TestDaemonState state;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
     std::thread server_thread;
-    open_tunnel(state, &client_socket, &server_thread);
+    std::atomic<bool> server_exited(false);
+    open_tunnel(state, &client_socket, &server_thread, &server_exited);
 
     const unsigned char partial_header[2] = {
         static_cast<unsigned char>(PortTunnelFrameType::TcpData),
@@ -422,6 +357,9 @@ static void assert_partial_tunnel_frame_times_out(const fs::path& root) {
         sizeof(partial_header)
     );
 
+    // The tunnel read timeout must make the server thread exit instead of
+    // leaving the test hanging on an unterminated connection.
+    TEST_ASSERT(test_assert::wait_until_true(server_exited, limits.tunnel_io_timeout_ms + 1000UL));
     server_thread.join();
     client_socket.reset();
 }
@@ -431,7 +369,7 @@ static void assert_control_frame_queue_limit_closes_tunnel(const fs::path& root)
     limits.max_tunnel_queued_bytes = 1024UL;
 
     TestDaemonState state;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
     std::thread server_thread;
@@ -477,7 +415,7 @@ static void assert_tcp_data_write_pressure_does_not_block_control_frames(TestDae
         json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", hold_endpoint}})
     );
     TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
-    TEST_ASSERT(wait_until_true(receiver_ready, 1000UL));
+    TEST_ASSERT(test_assert::wait_until_true(receiver_ready, 1000UL));
 
     std::vector<unsigned char> payload(PORT_TUNNEL_MAX_DATA_LEN, 0x51U);
     PortTunnelFrame heartbeat = empty_frame(PortTunnelFrameType::TunnelHeartbeat, 0U);
@@ -517,7 +455,6 @@ void assert_tunnel_limit_and_pressure_paths(TestDaemonState& state) {
     assert_tcp_connect_worker_limit_errors_before_success(root);
     assert_tcp_connect_read_thread_failure_errors_before_success(root);
     assert_tcp_accept_read_thread_failure_drops_before_accept(root);
-    assert_retained_tcp_accept_read_thread_failure_drops_before_accept(root);
     assert_retained_tcp_accept_worker_pressure_is_local_drop(root);
     assert_retained_udp_bind_worker_failure_releases_udp_budget(root);
     assert_retained_tcp_accept_pressure_is_local_drop(root);

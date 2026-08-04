@@ -38,6 +38,7 @@ struct TestHttpConnectionHarness {
 };
 
 test_fs::path make_daemon_test_root(const std::string& directory_name);
+std::string stable_test_shell();
 DaemonConfig make_test_daemon_config(const test_fs::path& root);
 void initialize_test_daemon_state(TestDaemonState& state, const test_fs::path& root);
 void initialize_test_daemon_state_with_port_forward_limits(

@@ -17,46 +17,9 @@ fs::path make_test_root() {
     return make_daemon_test_root("remote-exec-cpp-server-streaming-test");
 }
 
-bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms) {
-    const std::uint64_t started = platform::monotonic_ms();
-    while (platform::monotonic_ms() - started < timeout_ms) {
-        if (value.load()) {
-            return true;
-        }
-        platform::sleep_ms(10UL);
-    }
-    return value.load();
-}
-
 void wait_past_resume_timeout(unsigned long resume_timeout_ms) {
     const unsigned long RESUME_TIMEOUT_EXPIRY_MARGIN_MS = 200UL;
     platform::sleep_ms(resume_timeout_ms + RESUME_TIMEOUT_EXPIRY_MARGIN_MS);
-}
-
-void initialize_state_with_port_forward_limits(
-    TestDaemonState& state,
-    const fs::path& root,
-    const PortForwardLimitConfig& limits
-) {
-    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
-}
-
-void initialize_state_with_worker_limit(
-    TestDaemonState& state,
-    const fs::path& root,
-    unsigned long max_workers
-) {
-    PortForwardLimitConfig limits;
-    limits.max_worker_threads = max_workers;
-    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
-}
-
-void initialize_state(TestDaemonState& state, const fs::path& root) {
-    initialize_test_daemon_state(state, root);
-}
-
-void enable_sandbox(TestDaemonState& state) {
-    enable_test_daemon_sandbox(state);
 }
 
 static std::string socket_label(SOCKET socket) {
@@ -347,21 +310,33 @@ void assert_forward_drop(
     TEST_ASSERT(meta.at("reason").get<std::string>() == reason);
 }
 
-static std::thread start_server_thread(TestDaemonState& state, UniqueSocket* server_socket) {
+static std::thread start_server_thread(
+    TestDaemonState& state,
+    UniqueSocket* server_socket,
+    std::atomic<bool>* server_exited
+) {
     return std::thread(
-        [&state](SOCKET socket) {
+        [&state, server_exited](SOCKET socket) {
             UniqueSocket owned_socket(socket);
             handle_client(make_test_http_connection_context(state), std::move(owned_socket));
+            if (server_exited != nullptr) {
+                server_exited->store(true);
+            }
         },
         server_socket->release()
     );
 }
 
-void open_tunnel(TestDaemonState& state, UniqueSocket* client_socket, std::thread* server_thread) {
+void open_tunnel(
+    TestDaemonState& state,
+    UniqueSocket* client_socket,
+    std::thread* server_thread,
+    std::atomic<bool>* server_exited
+) {
     ConnectedSocketPair sockets = make_connected_socket_pair();
     UniqueSocket server_socket(std::move(sockets.first));
     client_socket->reset(sockets.second.release());
-    *server_thread = start_server_thread(state, &server_socket);
+    *server_thread = start_server_thread(state, &server_socket, server_exited);
 
     send_all(
         client_socket->get(),
@@ -459,10 +434,75 @@ void close_tunnel(UniqueSocket* client_socket, std::thread* server_thread) {
     server_thread->join();
 }
 
-void wait_until_bindable(const std::string& endpoint) {
+std::string open_listen_session(
+    TestDaemonState& state,
+    UniqueSocket* client_socket,
+    std::thread* server_thread,
+    const std::string& protocol,
+    uint64_t generation
+) {
+    const PortTunnelFrame ready =
+        open_v4_tunnel(state, client_socket, server_thread, "listen", protocol, generation);
+    return Json::parse(ready.meta).at("session_id").get<std::string>();
+}
+
+std::string request_tcp_listener(UniqueSocket* client_socket, uint32_t stream_id) {
+    send_tunnel_frame(
+        client_socket->get(),
+        json_frame(PortTunnelFrameType::TcpListen, stream_id, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket->get());
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    return Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+}
+
+std::string request_udp_bind(UniqueSocket* client_socket, uint32_t stream_id) {
+    send_tunnel_frame(
+        client_socket->get(),
+        json_frame(PortTunnelFrameType::UdpBind, stream_id, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    const PortTunnelFrame bind_ok = read_tunnel_frame(client_socket->get());
+    TEST_ASSERT(bind_ok.type == PortTunnelFrameType::UdpBindOk);
+    return Json::parse(bind_ok.meta).at("endpoint").get<std::string>();
+}
+
+std::string open_tcp_listener(
+    TestDaemonState& state,
+    UniqueSocket* client_socket,
+    std::thread* server_thread
+) {
+    open_listen_session(state, client_socket, server_thread, "tcp", 1ULL);
+    return request_tcp_listener(client_socket);
+}
+
+std::string open_udp_bind(
+    TestDaemonState& state,
+    UniqueSocket* client_socket,
+    std::thread* server_thread
+) {
+    open_listen_session(state, client_socket, server_thread, "udp", 1ULL);
+    return request_udp_bind(client_socket);
+}
+
+void send_operator_close(SOCKET socket, uint64_t generation) {
+    send_tunnel_frame(
+        socket,
+        json_frame(
+            PortTunnelFrameType::TunnelClose,
+            0U,
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", generation},
+                {"reason", kTunnelCloseReasonOperatorClose}
+            }
+        )
+    );
+}
+
+void wait_until_bindable(const std::string& endpoint, const char* protocol) {
     for (int attempt = 0; attempt < 40; ++attempt) {
         try {
-            UniqueSocket rebound(bind_port_forward_socket(endpoint, "tcp"));
+            UniqueSocket rebound(bind_port_forward_socket(endpoint, protocol));
             if (rebound.valid()) {
                 return;
             }

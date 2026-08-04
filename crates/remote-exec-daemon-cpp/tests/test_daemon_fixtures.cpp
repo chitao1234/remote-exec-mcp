@@ -4,8 +4,6 @@
 #include "platform/platform.h"
 #include "port_forward/port_tunnel.h"
 
-namespace {
-
 std::string stable_test_shell() {
 #ifdef _WIN32
     return platform::resolve_default_shell("");
@@ -13,8 +11,6 @@ std::string stable_test_shell() {
     return platform::resolve_default_shell("/bin/sh");
 #endif
 }
-
-} // namespace
 
 ServerRouteContext make_test_server_route_context(TestDaemonState& state) {
     return make_server_route_context(state.config, state.metadata, state.sandbox, state.services);

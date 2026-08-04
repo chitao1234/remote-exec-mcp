@@ -15,7 +15,9 @@
 #include "http/server_transport.h"
 #include "platform/platform.h"
 #include "runtime/server_runtime.h"
+#include "test_daemon_fixtures.h"
 #include "test_filesystem.h"
+#include "test_socket_pair.h"
 #include "tls/tls_connection_transport.h"
 
 namespace fs = test_fs;
@@ -28,31 +30,9 @@ static std::unique_ptr<ServerRuntime> start_runtime(
 );
 
 static DaemonConfig make_runtime_test_config(const fs::path& root) {
-    DaemonConfig config;
-    config.target = "cpp-test";
-    config.listen_host = "127.0.0.1";
-    config.listen_port = 0;
-    config.default_workdir = root.string();
-    config.default_shell.clear();
-    config.allow_login_shell = true;
-    config.max_request_header_bytes = DEFAULT_MAX_REQUEST_HEADER_BYTES;
-    config.max_request_body_bytes = DEFAULT_MAX_REQUEST_BODY_BYTES;
-    config.max_open_sessions = DEFAULT_MAX_OPEN_SESSIONS;
+    DaemonConfig config = make_test_daemon_config(root);
     config.port_forward_limits.tunnel_io_timeout_ms = 100UL;
     return config;
-}
-
-static std::string read_all_from_socket(SOCKET socket) {
-    std::string output;
-    char buffer[4096];
-    for (;;) {
-        const int received = recv(socket, buffer, sizeof(buffer), 0);
-        if (received <= 0) {
-            break;
-        }
-        output.append(buffer, static_cast<std::size_t>(received));
-    }
-    return output;
 }
 
 static std::string read_http_head_from_socket(SOCKET socket) {

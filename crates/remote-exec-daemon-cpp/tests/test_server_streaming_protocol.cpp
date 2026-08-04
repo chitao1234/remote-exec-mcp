@@ -38,7 +38,7 @@ static void assert_tunnel_open_ready_and_close_round_trip(TestDaemonState& state
 
 static void assert_port_tunnel_worker_limit_is_reported(const fs::path& root) {
     TestDaemonState state;
-    initialize_state_with_worker_limit(state, root, 1UL);
+    initialize_test_daemon_state_with_worker_limit(state, root, 1UL);
 
     UniqueSocket worker_holder;
     std::thread worker_holder_thread;
@@ -92,7 +92,7 @@ static void assert_tunnel_ready_reports_configured_limits(const fs::path& root) 
     limits.tunnel_io_timeout_ms = 6000UL;
 
     TestDaemonState state;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
     std::thread server_thread;
@@ -232,7 +232,7 @@ static void assert_retained_session_limit_is_enforced(const fs::path& root) {
     limits.max_retained_sessions = 1UL;
 
     TestDaemonState state;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket first_client;
     std::thread first_thread;
@@ -257,7 +257,7 @@ static void assert_retained_listener_limit_is_enforced_and_released(const fs::pa
     limits.max_retained_listeners = 1UL;
 
     TestDaemonState state;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket first_client;
     std::thread first_thread;

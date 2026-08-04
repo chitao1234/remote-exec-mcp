@@ -3,28 +3,9 @@
 static void assert_tunnel_close_releases_tcp_listener(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
-    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+    const std::string endpoint = open_tcp_listener(state, &client_socket, &server_thread);
 
-    send_tunnel_frame(
-        client_socket.get(),
-        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
-    );
-    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
-    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
-
-    send_tunnel_frame(
-        client_socket.get(),
-        json_frame(
-            PortTunnelFrameType::TunnelClose,
-            0U,
-            Json{
-                {"forward_id", "fwd_cpp_test"},
-                {"generation", 1ULL},
-                {"reason", kTunnelCloseReasonOperatorClose}
-            }
-        )
-    );
+    send_operator_close(client_socket.get(), 1ULL);
     TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TunnelClosed);
     close_tunnel(&client_socket, &server_thread);
 
@@ -35,15 +16,7 @@ static void assert_tunnel_close_releases_tcp_listener(TestDaemonState& state) {
 static void assert_terminal_tunnel_error_releases_tcp_listener_immediately(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
-    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
-
-    send_tunnel_frame(
-        client_socket.get(),
-        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
-    );
-    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
-    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+    const std::string endpoint = open_tcp_listener(state, &client_socket, &server_thread);
 
     const unsigned char invalid_frame[PORT_TUNNEL_HEADER_LEN] = {
         static_cast<unsigned char>(PortTunnelFrameType::TcpData),
@@ -91,26 +64,9 @@ static void assert_tunnel_close_releases_retained_listener_immediately(TestDaemo
     );
     TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TunnelReady);
 
-    send_tunnel_frame(
-        client_socket.get(),
-        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
-    );
-    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
-    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+    const std::string endpoint = request_tcp_listener(&client_socket);
 
-    send_tunnel_frame(
-        client_socket.get(),
-        json_frame(
-            PortTunnelFrameType::TunnelClose,
-            0U,
-            Json{
-                {"forward_id", "fwd_cpp_test"},
-                {"generation", 1ULL},
-                {"reason", kTunnelCloseReasonOperatorClose}
-            }
-        )
-    );
+    send_operator_close(client_socket.get(), 1ULL);
     const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
     TEST_ASSERT(closed.type == PortTunnelFrameType::TunnelClosed);
     TEST_ASSERT(closed.stream_id == 0U);

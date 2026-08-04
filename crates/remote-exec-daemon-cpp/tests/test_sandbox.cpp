@@ -90,70 +90,6 @@ SandboxAccess access_for_label(const std::string& label) {
     throw std::runtime_error("unknown sandbox access `" + label + "`");
 }
 
-std::string replace_all(
-    std::string value,
-    const std::string& needle,
-    const std::string& replacement
-) {
-    std::string::size_type position = 0;
-    while ((position = value.find(needle, position)) != std::string::npos) {
-        value.replace(position, needle.size(), replacement);
-        position += replacement.size();
-    }
-    return value;
-}
-
-std::string apply_template(const std::string& raw, const fs::path& root) {
-    return replace_all(raw, "{root}", root.string());
-}
-
-bool case_applies_to_host(const Json& case_json) {
-    if (!case_json.contains("platforms")) {
-        return true;
-    }
-    const std::string platform = host_platform_label();
-    const Json& platforms = case_json.at("platforms");
-    for (Json::const_iterator it = platforms.begin(); it != platforms.end(); ++it) {
-        if (it->get<std::string>() == platform) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void apply_setup(const fs::path& root, const Json& setup) {
-    if (setup.is_null()) {
-        return;
-    }
-
-    if (setup.contains("dirs")) {
-        const Json& dirs = setup.at("dirs");
-        for (Json::const_iterator it = dirs.begin(); it != dirs.end(); ++it) {
-            fs::create_directories(apply_template(it->get<std::string>(), root));
-        }
-    }
-
-    if (setup.contains("files")) {
-        const Json& files = setup.at("files");
-        for (Json::const_iterator it = files.begin(); it != files.end(); ++it) {
-            const fs::path path = apply_template(it->at("path").get<std::string>(), root);
-            fs::create_directories(path.parent_path());
-            fs::write_file_bytes(path, it->at("contents").get<std::string>());
-        }
-    }
-
-#ifndef _WIN32
-    if (setup.contains("symlinks")) {
-        const Json& symlinks = setup.at("symlinks");
-        for (Json::const_iterator it = symlinks.begin(); it != symlinks.end(); ++it) {
-            const fs::path link = apply_template(it->at("path").get<std::string>(), root);
-            fs::create_directories(link.parent_path());
-            fs::create_symlink(apply_template(it->at("target").get<std::string>(), root), link);
-        }
-    }
-#endif
-}
-
 void assign_sandbox_list(
     FilesystemSandbox* sandbox,
     SandboxAccess access,
@@ -176,11 +112,11 @@ FilesystemSandbox sandbox_for_case(const Json& case_json, const fs::path& root) 
     SandboxPathList list;
     const Json& allow = case_json.at("allow");
     for (Json::const_iterator it = allow.begin(); it != allow.end(); ++it) {
-        list.allow.push_back(apply_template(it->get<std::string>(), root));
+        list.allow.push_back(test_contract::apply_template(it->get<std::string>(), root));
     }
     const Json& deny = case_json.at("deny");
     for (Json::const_iterator it = deny.begin(); it != deny.end(); ++it) {
-        list.deny.push_back(apply_template(it->get<std::string>(), root));
+        list.deny.push_back(test_contract::apply_template(it->get<std::string>(), root));
     }
 
     FilesystemSandbox sandbox;
@@ -303,7 +239,7 @@ void run_shared_sandbox_cases() {
     const Json& compile_cases = cases.at("compile");
     for (Json::const_iterator it = compile_cases.begin(); it != compile_cases.end(); ++it) {
         const fs::path root = make_test_root();
-        apply_setup(root, it->contains("setup") ? it->at("setup") : Json());
+        test_contract::apply_setup(root, it->contains("setup") ? it->at("setup") : Json());
         const FilesystemSandbox sandbox = sandbox_for_case(*it, root);
         const std::string expected = it->at("expected").get<std::string>();
 
@@ -331,15 +267,16 @@ void run_shared_sandbox_cases() {
 
     const Json& authorize_cases = cases.at("authorize");
     for (Json::const_iterator it = authorize_cases.begin(); it != authorize_cases.end(); ++it) {
-        if (!case_applies_to_host(*it)) {
+        if (!test_contract::case_applies_to_host(*it)) {
             continue;
         }
 
         const fs::path root = make_test_root();
-        apply_setup(root, it->contains("setup") ? it->at("setup") : Json());
+        test_contract::apply_setup(root, it->contains("setup") ? it->at("setup") : Json());
         const FilesystemSandbox sandbox = sandbox_for_case(*it, root);
         const CompiledFilesystemSandbox compiled = compile_filesystem_sandbox(sandbox);
-        const std::string path = apply_template(it->at("path").get<std::string>(), root);
+        const std::string path =
+            test_contract::apply_template(it->at("path").get<std::string>(), root);
         const SandboxAccess access = access_for_label(it->at("access").get<std::string>());
         const std::string expected = it->at("expected").get<std::string>();
 

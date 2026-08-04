@@ -7,7 +7,7 @@ static void assert_udp_bind_limit_is_enforced_and_released(const fs::path& root)
     limits.max_udp_binds = 1UL;
 
     TestDaemonState state;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 
     UniqueSocket client_socket;
     std::thread server_thread;
@@ -37,14 +37,7 @@ static void assert_udp_bind_limit_is_enforced_and_released(const fs::path& root)
 static void assert_tunnel_udp_bind_emits_two_peer_datagrams(TestDaemonState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
-    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
-    send_tunnel_frame(
-        client_socket.get(),
-        json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}})
-    );
-    const PortTunnelFrame bind_ok = read_tunnel_frame(client_socket.get());
-    TEST_ASSERT(bind_ok.type == PortTunnelFrameType::UdpBindOk);
-    const std::string endpoint = Json::parse(bind_ok.meta).at("endpoint").get<std::string>();
+    const std::string endpoint = open_udp_bind(state, &client_socket, &server_thread);
 
     UniqueSocket peer_a(bind_port_forward_socket("127.0.0.1:0", "udp"));
     UniqueSocket peer_b(bind_port_forward_socket("127.0.0.1:0", "udp"));

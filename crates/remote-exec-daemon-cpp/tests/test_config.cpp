@@ -32,45 +32,42 @@ static bool config_rejected(const fs::path& path) {
     return false;
 }
 
-int main() {
-    const DaemonConfig default_config = DaemonConfig();
-    TEST_ASSERT(default_config.max_request_header_bytes == DEFAULT_MAX_REQUEST_HEADER_BYTES);
-    TEST_ASSERT(default_config.max_request_body_bytes == DEFAULT_MAX_REQUEST_BODY_BYTES);
-    TEST_ASSERT(default_config.max_open_sessions == DEFAULT_MAX_OPEN_SESSIONS);
+static void assert_default_config_values(const DaemonConfig& config) {
+    TEST_ASSERT(config.max_request_header_bytes == DEFAULT_MAX_REQUEST_HEADER_BYTES);
+    TEST_ASSERT(config.max_request_body_bytes == DEFAULT_MAX_REQUEST_BODY_BYTES);
+    TEST_ASSERT(config.max_open_sessions == DEFAULT_MAX_OPEN_SESSIONS);
+    TEST_ASSERT(config.http_connection_idle_timeout_ms == DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS);
     TEST_ASSERT(
-        default_config.http_connection_idle_timeout_ms == DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS
+        config.port_forward_limits.max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS
     );
     TEST_ASSERT(
-        default_config.port_forward_limits.max_worker_threads
-        == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS
-    );
-    TEST_ASSERT(
-        default_config.port_forward_limits.max_retained_sessions
+        config.port_forward_limits.max_retained_sessions
         == DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS
     );
     TEST_ASSERT(
-        default_config.port_forward_limits.max_retained_listeners
+        config.port_forward_limits.max_retained_listeners
         == DEFAULT_PORT_FORWARD_MAX_RETAINED_LISTENERS
     );
+    TEST_ASSERT(config.port_forward_limits.max_udp_binds == DEFAULT_PORT_FORWARD_MAX_UDP_BINDS);
     TEST_ASSERT(
-        default_config.port_forward_limits.max_udp_binds == DEFAULT_PORT_FORWARD_MAX_UDP_BINDS
-    );
-    TEST_ASSERT(
-        default_config.port_forward_limits.max_active_tcp_streams
+        config.port_forward_limits.max_active_tcp_streams
         == DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS
     );
     TEST_ASSERT(
-        default_config.port_forward_limits.max_tunnel_queued_bytes
+        config.port_forward_limits.max_tunnel_queued_bytes
         == DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES
     );
     TEST_ASSERT(
-        default_config.port_forward_limits.tunnel_io_timeout_ms
-        == DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS
+        config.port_forward_limits.tunnel_io_timeout_ms == DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS
     );
     TEST_ASSERT(
-        default_config.port_forward_limits.connect_timeout_ms
-        == DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS
+        config.port_forward_limits.connect_timeout_ms == DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS
     );
+}
+
+int main() {
+    const DaemonConfig default_config = DaemonConfig();
+    assert_default_config_values(default_config);
     TEST_ASSERT(
         default_config.yield_time.exec_command.default_ms
         == DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS
@@ -279,40 +276,7 @@ int main() {
             + "\n"
     );
     const DaemonConfig sandbox_config = load_config(sandbox_config_path.string());
-    TEST_ASSERT(
-        sandbox_config.port_forward_limits.max_worker_threads
-        == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS
-    );
-    TEST_ASSERT(
-        sandbox_config.port_forward_limits.max_retained_sessions
-        == DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS
-    );
-    TEST_ASSERT(
-        sandbox_config.port_forward_limits.max_retained_listeners
-        == DEFAULT_PORT_FORWARD_MAX_RETAINED_LISTENERS
-    );
-    TEST_ASSERT(
-        sandbox_config.port_forward_limits.max_udp_binds == DEFAULT_PORT_FORWARD_MAX_UDP_BINDS
-    );
-    TEST_ASSERT(
-        sandbox_config.port_forward_limits.max_active_tcp_streams
-        == DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS
-    );
-    TEST_ASSERT(
-        sandbox_config.port_forward_limits.max_tunnel_queued_bytes
-        == DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES
-    );
-    TEST_ASSERT(
-        sandbox_config.port_forward_limits.tunnel_io_timeout_ms
-        == DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS
-    );
-    TEST_ASSERT(
-        sandbox_config.port_forward_limits.connect_timeout_ms
-        == DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS
-    );
-    TEST_ASSERT(
-        sandbox_config.http_connection_idle_timeout_ms == DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS
-    );
+    assert_default_config_values(sandbox_config);
     TEST_ASSERT(
         sandbox_config.transfer_limits.max_archive_bytes == DEFAULT_TRANSFER_MAX_ARCHIVE_BYTES
     );

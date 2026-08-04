@@ -54,57 +54,35 @@ static Json exec_write_json(
     TestRouteHarness& harness,
     const std::string& daemon_session_id,
     const std::string& chars,
-    unsigned long yield_time_ms
-) {
-    const HttpResponse response = route_request(
-        harness,
-        make_json_http_request(
-            "/v1/exec/write",
-            Json{
-                {"daemon_session_id", daemon_session_id},
-                {"chars", chars},
-                {"yield_time_ms", yield_time_ms},
-            }
-        )
-    );
-    TEST_ASSERT(response.status == 200);
-    return Json::parse(response.body);
-}
-
-static Json exec_write_json_with_pty_size(
-    TestRouteHarness& harness,
-    const std::string& daemon_session_id,
-    const std::string& chars,
     unsigned long yield_time_ms,
-    unsigned short rows,
-    unsigned short cols
+    bool has_pty_size = false,
+    unsigned short rows = 0U,
+    unsigned short cols = 0U
 ) {
-    const HttpResponse response = route_request(
-        harness,
-        make_json_http_request(
-            "/v1/exec/write",
-            Json{
-                {"daemon_session_id", daemon_session_id},
-                {"chars", chars},
-                {"yield_time_ms", yield_time_ms},
-                {"pty_size", Json{{"rows", rows}, {"cols", cols}}},
-            }
-        )
-    );
+    Json body{
+        {"daemon_session_id", daemon_session_id},
+        {"chars", chars},
+        {"yield_time_ms", yield_time_ms},
+    };
+    if (has_pty_size) {
+        body["pty_size"] = Json{{"rows", rows}, {"cols", cols}};
+    }
+    const HttpResponse response =
+        route_request(harness, make_json_http_request("/v1/exec/write", body));
     TEST_ASSERT(response.status == 200);
     return Json::parse(response.body);
 }
 
-static std::string append_running_exec_output_until_contains(
+template <typename MatchPredicate>
+static std::string append_running_exec_output_until(
     TestRouteHarness& harness,
     const std::string& daemon_session_id,
     std::string output,
-    const std::string& fragment,
+    MatchPredicate matches,
     unsigned long timeout_ms
 ) {
     const std::uint64_t started = platform::monotonic_ms();
-    while (output.find(fragment) == std::string::npos
-           && platform::monotonic_ms() - started < timeout_ms) {
+    while (!matches(output) && platform::monotonic_ms() - started < timeout_ms) {
         const Json poll = exec_write_json(harness, daemon_session_id, "", 250UL);
         output += normalize_output(poll.at("output").get<std::string>());
         if (!poll.at("running").get<bool>()) {
@@ -114,29 +92,6 @@ static std::string append_running_exec_output_until_contains(
     }
     return output;
 }
-
-#ifndef _WIN32
-static std::string append_running_exec_output_until_pty_size(
-    TestRouteHarness& harness,
-    const std::string& daemon_session_id,
-    std::string output,
-    unsigned short rows,
-    unsigned short cols,
-    unsigned long timeout_ms
-) {
-    const std::uint64_t started = platform::monotonic_ms();
-    while (!test_exec_pty::pty_size_output_matches(output, rows, cols)
-           && platform::monotonic_ms() - started < timeout_ms) {
-        const Json poll = exec_write_json(harness, daemon_session_id, "", 250UL);
-        output += normalize_output(poll.at("output").get<std::string>());
-        if (!poll.at("running").get<bool>()) {
-            break;
-        }
-        platform::sleep_ms(10UL);
-    }
-    return output;
-}
-#endif
 
 static Json poll_exec_until_done(
     TestRouteHarness& harness,
@@ -241,11 +196,11 @@ static void assert_exec_routes(TestRouteHarness& harness, const fs::path& root) 
     TEST_ASSERT(non_tty_started.at("running").get<bool>());
     std::string non_tty_output = normalize_output(non_tty_started.at("output").get<std::string>());
     if (non_tty_output.find("ready") == std::string::npos) {
-        non_tty_output = append_running_exec_output_until_contains(
+        non_tty_output = append_running_exec_output_until(
             harness,
             non_tty_started.at("daemon_session_id").get<std::string>(),
             non_tty_output,
-            "ready",
+            [&](const std::string& value) { return value.find("ready") != std::string::npos; },
             2000UL
         );
     }
@@ -428,11 +383,13 @@ static void assert_exec_routes(TestRouteHarness& harness, const fs::path& root) 
         TEST_ASSERT(started.at("running").get<bool>());
         std::string start_output = normalize_output(started.at("output").get<std::string>());
         if (start_output.find("tty:yes\n") == std::string::npos) {
-            start_output = append_running_exec_output_until_contains(
+            start_output = append_running_exec_output_until(
                 harness,
                 started.at("daemon_session_id").get<std::string>(),
                 start_output,
-                "tty:yes\n",
+                [&](const std::string& value) {
+                    return value.find("tty:yes\n") != std::string::npos;
+                },
                 2000UL
             );
         }
@@ -477,34 +434,36 @@ static void assert_exec_routes(TestRouteHarness& harness, const fs::path& root) 
             resize_started.at("daemon_session_id").get<std::string>();
 #ifdef _WIN32
         const Json resized =
-            exec_write_json_with_pty_size(harness, resize_session_id, "\r\n", 1000UL, 33U, 101U);
+            exec_write_json(harness, resize_session_id, "\r\n", 1000UL, true, 33U, 101U);
         TEST_ASSERT(resized.at("running").get<bool>());
 #else
         std::string initial_size_output =
             normalize_output(resize_started.at("output").get<std::string>());
         if (!test_exec_pty::pty_size_output_matches(initial_size_output, 24U, 120U)) {
-            initial_size_output = append_running_exec_output_until_pty_size(
+            initial_size_output = append_running_exec_output_until(
                 harness,
                 resize_session_id,
                 initial_size_output,
-                24U,
-                120U,
+                [](const std::string& value) {
+                    return test_exec_pty::pty_size_output_matches(value, 24U, 120U);
+                },
                 2000UL
             );
         }
         TEST_ASSERT(test_exec_pty::pty_size_output_matches(initial_size_output, 24U, 120U));
 
         const Json resized =
-            exec_write_json_with_pty_size(harness, resize_session_id, "\n", 1000UL, 33U, 101U);
+            exec_write_json(harness, resize_session_id, "\n", 1000UL, true, 33U, 101U);
         TEST_ASSERT(resized.at("running").get<bool>());
         std::string resize_output = normalize_output(resized.at("output").get<std::string>());
         if (!test_exec_pty::pty_size_output_matches(resize_output, 33U, 101U)) {
-            resize_output = append_running_exec_output_until_pty_size(
+            resize_output = append_running_exec_output_until(
                 harness,
                 resize_session_id,
                 resize_output,
-                33U,
-                101U,
+                [](const std::string& value) {
+                    return test_exec_pty::pty_size_output_matches(value, 33U, 101U);
+                },
                 2000UL
             );
         }
@@ -522,7 +481,7 @@ int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
 #endif
-    const fs::path root = make_server_routes_test_root("remote-exec-cpp-server-routes-test");
+    const fs::path root = make_daemon_test_root("remote-exec-cpp-server-routes-test");
     TestRouteHarness harness(root);
     run_platform_neutral_server_route_tests(harness, root);
     assert_exec_routes(harness, root);

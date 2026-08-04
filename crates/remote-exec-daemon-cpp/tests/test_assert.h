@@ -1,10 +1,25 @@
 #pragma once
 
+#include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 
+#include "platform/platform.h"
+
 namespace test_assert {
+
+inline bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
+        if (value.load()) {
+            return true;
+        }
+        platform::sleep_ms(10UL);
+    }
+    return value.load();
+}
 
 inline void fail(const char* expression, const char* file, int line) {
     std::fprintf(stderr, "%s:%d: test assertion failed: %s\n", file, line, expression);
