@@ -21,7 +21,7 @@ use super::active::{
     send_tunnel_error_code,
 };
 use super::codec::decode_frame_meta;
-use super::error::{SessionCloseMode, operational_error, request_error};
+use super::error::{SessionCloseMode, bind_error, operational_error, request_error};
 use super::frames::{data_frame, empty_frame, endpoint_ok_frame, meta_frame};
 use super::session::{
     AttachmentState, SessionState, close_attached_session, listener_stream_id, udp_bind_stream_id,
@@ -29,15 +29,11 @@ use super::session::{
 };
 use super::{
     PortForwardPermit, READ_BUF_SIZE, TCP_WRITE_QUEUE_FRAMES, TcpStreamEntry, TcpWriteCommand,
-    TcpWriterHandle, TunnelState, send_forward_drop_report,
+    TcpWriterHandle, TunnelSender, TunnelState, send_forward_drop_report,
 };
 
 const TCP_CONTROL_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 type TcpStreamMap = tokio::sync::Mutex<std::collections::HashMap<u32, TcpStreamEntry>>;
-
-fn bind_error(code: RpcErrorCode) -> impl FnOnce(std::io::Error) -> HostRpcError {
-    move |err| operational_error(code, err.to_string())
-}
 
 enum AcceptLoopOutcome {
     Continue,
@@ -57,88 +53,6 @@ enum RegisteredAcceptedTcpStream {
         reader: OwnedReadHalf,
         stream_cancel: CancellationToken,
     },
-}
-
-trait TcpReadLoopContext {
-    fn tx(&self) -> &super::TunnelSender;
-    fn generation(&self) -> u64;
-    fn tcp_streams(&self) -> &TcpStreamMap;
-}
-
-impl TcpReadLoopContext for ConnectContext {
-    fn tx(&self) -> &super::TunnelSender {
-        ConnectContext::tx(self)
-    }
-
-    fn generation(&self) -> u64 {
-        ConnectContext::generation(self)
-    }
-
-    fn tcp_streams(&self) -> &TcpStreamMap {
-        ConnectContext::tcp_streams(self)
-    }
-}
-
-impl TcpReadLoopContext for ListenContext {
-    fn tx(&self) -> &super::TunnelSender {
-        ListenContext::tx(self)
-    }
-
-    fn generation(&self) -> u64 {
-        ListenContext::generation(self)
-    }
-
-    fn tcp_streams(&self) -> &TcpStreamMap {
-        ListenContext::tcp_streams(self)
-    }
-}
-
-async fn send_tcp_read_frame<T: TcpReadLoopContext>(
-    target: &T,
-    frame: Frame,
-) -> Result<(), HostRpcError> {
-    target.tx().send(frame).await
-}
-
-async fn send_tcp_read_error_code<T: TcpReadLoopContext>(
-    target: &T,
-    stream_id: u32,
-    code: String,
-    message: String,
-) {
-    let _ = send_tunnel_error_code(
-        target.tx(),
-        Some(target.generation()),
-        stream_id,
-        code,
-        message,
-        false,
-    )
-    .await;
-}
-
-async fn send_tcp_read_failed<T: TcpReadLoopContext>(target: &T, stream_id: u32, message: String) {
-    let _ = send_tunnel_error(
-        target.tx(),
-        Some(target.generation()),
-        stream_id,
-        RpcErrorCode::PortReadFailed,
-        message,
-        false,
-    )
-    .await;
-}
-
-async fn cleanup_tcp_read_stream<T: TcpReadLoopContext>(target: &T, stream_id: u32) {
-    cleanup_tcp_stream(target.tcp_streams(), stream_id).await;
-}
-
-async fn cancel_tcp_read_stream<T: TcpReadLoopContext>(target: &T, stream_id: u32) {
-    cancel_tcp_stream(target.tcp_streams(), stream_id).await;
-}
-
-async fn clear_tcp_read_cancel<T: TcpReadLoopContext>(target: &T, stream_id: u32) {
-    clear_tcp_cancel(target.tcp_streams(), stream_id).await;
 }
 
 fn spawn_tcp_writer_task(writer: OwnedWriteHalf, cancel: CancellationToken) -> TcpWriterHandle {
@@ -220,8 +134,7 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
                 peer,
             } => (attachment, stream, peer),
         };
-        let Some(stream_permit) =
-            acquire_active_tcp_stream_permit(&session, &attachment, &stream).await
+        let Some(stream_permit) = acquire_active_tcp_stream_permit(&session, &attachment).await
         else {
             continue;
         };
@@ -289,12 +202,10 @@ async fn accept_attached_tcp_stream(
 async fn acquire_active_tcp_stream_permit(
     session: &Arc<SessionState>,
     attachment: &Arc<AttachmentState>,
-    stream: &TcpStream,
 ) -> Option<PortForwardPermit> {
     match attachment.tx.limiter.try_acquire_active_tcp_stream() {
         Ok(permit) => Some(permit),
         Err(err) => {
-            let _ = stream;
             let _ = send_forward_drop_report(
                 &attachment.tx,
                 listener_stream_id(session).await.unwrap_or(0),
@@ -419,7 +330,15 @@ pub(super) async fn tunnel_tcp_read_loop_connection_local(
     mut reader: OwnedReadHalf,
     cancel: CancellationToken,
 ) {
-    tunnel_tcp_read_loop(connect, stream_id, &mut reader, cancel).await;
+    tunnel_tcp_read_loop(
+        connect.tx(),
+        connect.generation(),
+        connect.tcp_streams(),
+        stream_id,
+        &mut reader,
+        cancel,
+    )
+    .await;
 }
 
 pub(super) async fn tunnel_tcp_read_loop_attached_session(
@@ -429,8 +348,11 @@ pub(super) async fn tunnel_tcp_read_loop_attached_session(
     mut reader: OwnedReadHalf,
     cancel: CancellationToken,
 ) {
+    let context = ListenContext::new(session, attachment);
     tunnel_tcp_read_loop(
-        ListenContext::new(session, attachment),
+        context.tx(),
+        context.generation(),
+        context.tcp_streams(),
         stream_id,
         &mut reader,
         cancel,
@@ -438,8 +360,10 @@ pub(super) async fn tunnel_tcp_read_loop_attached_session(
     .await;
 }
 
-async fn tunnel_tcp_read_loop<T: TcpReadLoopContext>(
-    target: T,
+async fn tunnel_tcp_read_loop(
+    tx: &TunnelSender,
+    generation: u64,
+    tcp_streams: &TcpStreamMap,
     stream_id: u32,
     reader: &mut OwnedReadHalf,
     cancel: CancellationToken,
@@ -448,39 +372,50 @@ async fn tunnel_tcp_read_loop<T: TcpReadLoopContext>(
     loop {
         let read = tokio::select! {
             _ = cancel.cancelled() => {
-                cleanup_tcp_read_stream(&target, stream_id).await;
+                cleanup_tcp_stream(tcp_streams, stream_id).await;
                 return;
             }
             read = reader.read(&mut buf) => read,
         };
         match read {
             Ok(0) => {
-                let _ =
-                    send_tcp_read_frame(&target, empty_frame(FrameType::TcpEof, stream_id)).await;
-                clear_tcp_read_cancel(&target, stream_id).await;
+                let _ = tx.send(empty_frame(FrameType::TcpEof, stream_id)).await;
+                clear_tcp_cancel(tcp_streams, stream_id).await;
                 return;
             }
             Ok(read) => {
-                if let Err(err) = send_tcp_read_frame(
-                    &target,
-                    data_frame(FrameType::TcpData, stream_id, buf[..read].to_vec()),
-                )
-                .await
-                {
-                    send_tcp_read_error_code(
-                        &target,
+                if let Err(err) = tx
+                    .send(data_frame(
+                        FrameType::TcpData,
                         stream_id,
-                        err.wire_code().to_string(),
+                        buf[..read].to_vec(),
+                    ))
+                    .await
+                {
+                    let _ = send_tunnel_error_code(
+                        tx,
+                        Some(generation),
+                        stream_id,
+                        err.wire_code(),
                         err.message,
+                        false,
                     )
                     .await;
-                    cancel_tcp_read_stream(&target, stream_id).await;
+                    cancel_tcp_stream(tcp_streams, stream_id).await;
                     return;
                 }
             }
             Err(err) => {
-                send_tcp_read_failed(&target, stream_id, err.to_string()).await;
-                cancel_tcp_read_stream(&target, stream_id).await;
+                let _ = send_tunnel_error(
+                    tx,
+                    Some(generation),
+                    stream_id,
+                    RpcErrorCode::PortReadFailed,
+                    err.to_string(),
+                    false,
+                )
+                .await;
+                cancel_tcp_stream(tcp_streams, stream_id).await;
                 return;
             }
         }

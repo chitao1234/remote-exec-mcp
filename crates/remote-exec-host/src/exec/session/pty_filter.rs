@@ -73,10 +73,6 @@ impl TerminalOutputFilter for ControlSequenceFilter {
             response: performer.response,
         }
     }
-
-    fn drain_pending(&mut self) -> String {
-        String::new()
-    }
 }
 
 #[derive(Debug, Default)]

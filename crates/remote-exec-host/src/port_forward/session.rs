@@ -15,7 +15,8 @@ use super::limiter::{PortForwardLimiter, PortForwardPermit};
 use super::session_store::TunnelSessionStore;
 use super::udp::tunnel_udp_read_loop_attached_session;
 use super::{
-    ActiveTunnelState, TcpStreamEntry, TunnelSender, TunnelState, UdpReaderEntry, timings,
+    ActiveTunnelState, TcpStreamEntry, TunnelSender, TunnelState, UdpReaderEntry, cancel_all,
+    timings,
 };
 
 pub(super) struct SessionState {
@@ -149,11 +150,7 @@ impl SessionState {
 
     pub(super) async fn close_non_resumable_streams(&self) {
         if let Some(attachment) = self.attachment.lock().await.clone() {
-            for (_, mut stream) in attachment.tcp_streams.lock().await.drain() {
-                if let Some(cancel) = stream.cancel.take() {
-                    cancel.cancel();
-                }
-            }
+            cancel_all(&attachment.tcp_streams).await;
             for (_, reader) in attachment.udp_readers.lock().await.drain() {
                 reader.cancel.cancel();
             }
@@ -237,11 +234,7 @@ pub(super) async fn close_listen_session(
     };
     if let Some(attachment) = attachment {
         attachment.cancel.cancel();
-        for (_, mut stream) in attachment.tcp_streams.lock().await.drain() {
-            if let Some(cancel) = stream.cancel.take() {
-                cancel.cancel();
-            }
-        }
+        cancel_all(&attachment.tcp_streams).await;
         for (_, reader) in attachment.udp_readers.lock().await.drain() {
             reader.cancel.cancel();
         }

@@ -171,7 +171,6 @@ pub(super) fn is_windows_git_bash_alias(lower: &str) -> bool {
     is_windows_bash_family(lower)
 }
 
-#[cfg(any(test, unix, windows))]
 pub(super) fn should_set_chere_invoking_for_platform(
     is_windows: bool,
     is_cygwin: bool,

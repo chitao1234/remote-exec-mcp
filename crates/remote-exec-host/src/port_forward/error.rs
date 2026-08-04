@@ -15,6 +15,10 @@ pub(super) fn operational_error(code: RpcErrorCode, message: impl Into<String>) 
     crate::error::rpc_error(502, code, message)
 }
 
+pub(super) fn bind_error(code: RpcErrorCode) -> impl FnOnce(std::io::Error) -> HostRpcError {
+    move |err| operational_error(code, err.to_string())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SessionCloseMode {
     GracefulClose,

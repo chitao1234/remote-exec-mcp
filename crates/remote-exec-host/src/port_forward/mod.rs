@@ -85,5 +85,13 @@ pub(super) fn tunnel_error_frame(
     )
 }
 
+async fn cancel_all(map: &tokio::sync::Mutex<std::collections::HashMap<u32, TcpStreamEntry>>) {
+    for (_, mut stream) in map.lock().await.drain() {
+        if let Some(cancel) = stream.cancel.take() {
+            cancel.cancel();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

@@ -128,13 +128,11 @@ fn parse_locale_output(output: &str) -> Vec<String> {
 
 #[cfg(not(windows))]
 fn best_utf8_locale(locales: &[String]) -> Option<String> {
-    let mut candidates = locales
+    locales
         .iter()
         .filter(|locale| is_utf8_locale(locale))
+        .min_by_key(|locale| locale_rank(locale))
         .cloned()
-        .collect::<Vec<_>>();
-    candidates.sort_by_key(|locale| locale_rank(locale));
-    candidates.into_iter().next()
 }
 
 #[cfg(not(windows))]

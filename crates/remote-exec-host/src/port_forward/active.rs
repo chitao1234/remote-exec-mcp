@@ -49,8 +49,6 @@ pub(super) enum ActiveTunnelAccess {
 #[derive(Clone, Copy)]
 enum RequiredTunnelAccess {
     AnyProtocol,
-    ListenOnly,
-    ConnectOnly,
     BindTarget,
 }
 
@@ -138,9 +136,16 @@ impl ActiveTunnelAccess {
         protocol: TunnelForwardProtocol,
         operation: &str,
     ) -> Result<ListenContext, HostRpcError> {
-        match self.require_access(protocol, operation, RequiredTunnelAccess::ListenOnly)? {
-            ActiveProtocolAccess::Listen(context) => Ok(context),
-            ActiveProtocolAccess::Connect(_) => unreachable!("listen-only access accepted connect"),
+        match self {
+            Self::Unopened => Err(tunnel_open_required_error(operation)),
+            Self::Listen {
+                protocol: open_protocol,
+                context,
+            } if open_protocol == protocol => Ok(context),
+            Self::Listen { .. } => {
+                Err(protocol_required_error(operation, protocol, Some("listen")))
+            }
+            Self::Connect { .. } => Err(role_required_error(operation, "listen")),
         }
     }
 
@@ -149,11 +154,18 @@ impl ActiveTunnelAccess {
         protocol: TunnelForwardProtocol,
         operation: &str,
     ) -> Result<ConnectContext, HostRpcError> {
-        match self.require_access(protocol, operation, RequiredTunnelAccess::ConnectOnly)? {
-            ActiveProtocolAccess::Connect(context) => Ok(context),
-            ActiveProtocolAccess::Listen(_) => {
-                unreachable!("connect-only access accepted listen")
-            }
+        match self {
+            Self::Unopened => Err(tunnel_open_required_error(operation)),
+            Self::Connect {
+                protocol: open_protocol,
+                context,
+            } if open_protocol == protocol => Ok(context),
+            Self::Connect { .. } => Err(protocol_required_error(
+                operation,
+                protocol,
+                Some("connect"),
+            )),
+            Self::Listen { .. } => Err(role_required_error(operation, "connect")),
         }
     }
 
@@ -202,9 +214,6 @@ impl ActiveTunnelAccess {
                 protocol: open_protocol,
                 context,
             } => {
-                if let Some(err) = required.role_mismatch_error(operation, "listen") {
-                    return Err(err);
-                }
                 if open_protocol == protocol {
                     Ok(ActiveProtocolAccess::Listen(context))
                 } else {
@@ -215,9 +224,6 @@ impl ActiveTunnelAccess {
                 protocol: open_protocol,
                 context,
             } => {
-                if let Some(err) = required.role_mismatch_error(operation, "connect") {
-                    return Err(err);
-                }
                 if open_protocol == protocol {
                     Ok(ActiveProtocolAccess::Connect(context))
                 } else {
@@ -229,18 +235,6 @@ impl ActiveTunnelAccess {
 }
 
 impl RequiredTunnelAccess {
-    fn role_mismatch_error(
-        self,
-        operation: &str,
-        actual_role: &'static str,
-    ) -> Option<HostRpcError> {
-        match (self, actual_role) {
-            (Self::ListenOnly, "connect") => Some(role_required_error(operation, "listen")),
-            (Self::ConnectOnly, "listen") => Some(role_required_error(operation, "connect")),
-            _ => None,
-        }
-    }
-
     fn protocol_mismatch_error(
         self,
         operation: &str,
@@ -249,13 +243,7 @@ impl RequiredTunnelAccess {
     ) -> HostRpcError {
         match self {
             Self::AnyProtocol => protocol_required_error(operation, protocol, None),
-            Self::ListenOnly | Self::BindTarget if actual_role == "listen" => {
-                protocol_required_error(operation, protocol, Some("listen"))
-            }
-            Self::ConnectOnly | Self::BindTarget if actual_role == "connect" => {
-                protocol_required_error(operation, protocol, Some("connect"))
-            }
-            _ => unreachable!("role mismatch should be handled before protocol mismatch"),
+            Self::BindTarget => protocol_required_error(operation, protocol, Some(actual_role)),
         }
     }
 }

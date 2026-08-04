@@ -146,7 +146,25 @@ pub async fn drain_after_exit(session: &mut LiveSession) -> anyhow::Result<Strin
 }
 
 async fn drain_available(session: &mut LiveSession, output: &mut String) -> anyhow::Result<()> {
-    let chunk = session.read_available().await?;
+    drain_available_with(session, output, DrainMode::Normal).await
+}
+
+async fn drain_available_final(
+    session: &mut LiveSession,
+    output: &mut String,
+) -> anyhow::Result<()> {
+    drain_available_with(session, output, DrainMode::Final).await
+}
+
+async fn drain_available_with(
+    session: &mut LiveSession,
+    output: &mut String,
+    mode: DrainMode,
+) -> anyhow::Result<()> {
+    let chunk = match mode {
+        DrainMode::Normal => session.read_available().await?,
+        DrainMode::Final => session.read_available_final().await?,
+    };
     if !chunk.is_empty() {
         session.record_output(&chunk);
         output.push_str(&chunk);
@@ -154,16 +172,10 @@ async fn drain_available(session: &mut LiveSession, output: &mut String) -> anyh
     Ok(())
 }
 
-async fn drain_available_final(
-    session: &mut LiveSession,
-    output: &mut String,
-) -> anyhow::Result<()> {
-    let chunk = session.read_available_final().await?;
-    if !chunk.is_empty() {
-        session.record_output(&chunk);
-        output.push_str(&chunk);
-    }
-    Ok(())
+#[derive(Clone, Copy)]
+enum DrainMode {
+    Normal,
+    Final,
 }
 
 #[cfg(test)]

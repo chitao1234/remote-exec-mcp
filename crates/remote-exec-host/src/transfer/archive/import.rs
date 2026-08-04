@@ -116,28 +116,22 @@ async fn prepare_destination(
     sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> Result<bool, TransferError> {
     if let Some(parent) = destination.parent() {
+        let parent_exists = tokio::fs::metadata(parent)
+            .await
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false);
         if request.create_parent {
-            let parent_exists = tokio::fs::metadata(parent)
-                .await
-                .map(|metadata| metadata.is_dir())
-                .unwrap_or(false);
             if !parent_exists {
                 authorize_write_path(sandbox, parent, &parent.display().to_string())?;
             }
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(internal_transfer_error)?;
-        } else {
-            let parent_exists = tokio::fs::metadata(parent)
-                .await
-                .map(|metadata| metadata.is_dir())
-                .unwrap_or(false);
-            if !parent_exists {
-                return Err(TransferError::parent_missing(format!(
-                    "destination parent `{}` does not exist",
-                    parent.display()
-                )));
-            }
+        } else if !parent_exists {
+            return Err(TransferError::parent_missing(format!(
+                "destination parent `{}` does not exist",
+                parent.display()
+            )));
         }
     }
 

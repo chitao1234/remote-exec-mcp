@@ -102,15 +102,9 @@ fn validate_windows_shell_candidate(
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<String> {
     let shell = resolve_windows_shell_path(shell, windows_posix_root);
-    let lower = shell_basename_lower(&shell);
-    let resolved = if !is_path_like(&shell) && is_windows_git_bash_alias(&lower) {
-        find_windows_bash(environment, windows_posix_root).ok_or_else(|| {
-            anyhow::anyhow!(
-                "Git Bash was requested via `{shell}` but no Git for Windows bash.exe was found"
-            )
-        })?
-    } else {
-        resolve_windows_command_path(&shell, environment).unwrap_or_else(|| shell.clone())
+    let resolved = match resolve_git_bash_alias(&shell, environment, windows_posix_root)? {
+        Some(bash) => bash,
+        None => resolve_windows_command_path(&shell, environment).unwrap_or_else(|| shell.clone()),
     };
 
     probe_shell_for_platform(true, &resolved, environment)
@@ -124,15 +118,29 @@ fn resolve_requested_windows_shell(
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<String> {
     let shell = resolve_windows_shell_path(shell, windows_posix_root);
-    let lower = shell_basename_lower(&shell);
-    if !is_path_like(&shell) && is_windows_git_bash_alias(&lower) {
-        return find_windows_bash(environment, windows_posix_root).ok_or_else(|| {
-            anyhow::anyhow!(
-                "Git Bash was requested via `{shell}` but no Git for Windows bash.exe was found"
-            )
-        });
+    if let Some(bash) = resolve_git_bash_alias(&shell, environment, windows_posix_root)? {
+        return Ok(bash);
     }
     Ok(shell)
+}
+
+fn resolve_git_bash_alias(
+    shell: &str,
+    environment: &ProcessEnvironment,
+    windows_posix_root: Option<&Path>,
+) -> anyhow::Result<Option<String>> {
+    let lower = shell_basename_lower(shell);
+    if !is_path_like(shell) && is_windows_git_bash_alias(&lower) {
+        Ok(Some(
+            find_windows_bash(environment, windows_posix_root).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Git Bash was requested via `{shell}` but no Git for Windows bash.exe was found"
+                )
+            })?,
+        ))
+    } else {
+        Ok(None)
+    }
 }
 
 fn find_windows_bash(

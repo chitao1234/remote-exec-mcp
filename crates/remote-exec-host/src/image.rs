@@ -48,7 +48,7 @@ pub async fn read_image_local(
     let bytes = tokio::fs::read(path)
         .await
         .map_err(|err| read_error(path, err))?;
-    let (format, rendered_bytes) = render_image_bytes(path, req.detail.as_deref(), bytes)?;
+    let (format, rendered_bytes) = render_image_bytes(path, bytes)?;
     let image_url = encode_data_url(format, rendered_bytes)?;
     tracing::info!(
         target = %state.config.target,
@@ -123,11 +123,7 @@ fn encode_processed_image(
     Ok(out.into_inner())
 }
 
-fn render_image_bytes(
-    path: &Path,
-    _detail: Option<&str>,
-    bytes: Vec<u8>,
-) -> Result<(ImageFormat, Vec<u8>), ImageError> {
+fn render_image_bytes(path: &Path, bytes: Vec<u8>) -> Result<(ImageFormat, Vec<u8>), ImageError> {
     let source_format = match image::guess_format(&bytes) {
         Ok(format) => format,
         Err(err) => match ImageFormat::from_path(path) {

@@ -101,8 +101,6 @@ pub async fn export_path_to_byte_stream(
         prepare::prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root)
             .await?;
     let source_type = prepared.source_type;
-    let stream_compression = compression;
-    let stream_symlink_mode = symlink_mode;
     let (sender, receiver) = mpsc::channel(EXPORT_STREAM_CHANNEL_DEPTH);
 
     tokio::task::spawn_blocking(move || {
@@ -117,8 +115,8 @@ pub async fn export_path_to_byte_stream(
         let terminal = match single::write_prepared_export_to_writer_sync(
             prepared,
             writer.clone(),
-            stream_compression,
-            stream_symlink_mode,
+            compression,
+            symlink_mode,
         )
         .and_then(|_| writer.finish())
         {

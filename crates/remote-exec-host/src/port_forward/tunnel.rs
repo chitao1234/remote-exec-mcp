@@ -27,7 +27,7 @@ use super::tunnel_io::{read_frame, read_preface, write_frame};
 use super::udp::{tunnel_udp_bind, tunnel_udp_datagram};
 use super::{
     ActiveTunnelState, ConnectRuntimeState, PortForwardPermit, QueuedFrame, TunnelSender,
-    TunnelState,
+    TunnelState, cancel_all,
 };
 
 // Keep enough buffered slack for queued data plus follow-up control frames
@@ -477,11 +477,7 @@ async fn close_tunnel_runtime(tunnel: &Arc<TunnelState>, mode: super::error::Ses
         }
         ActiveTunnelState::Connect { runtime, .. } => {
             runtime.cancel.cancel();
-            for (_, mut stream) in runtime.tcp_streams.lock().await.drain() {
-                if let Some(cancel) = stream.cancel.take() {
-                    cancel.cancel();
-                }
-            }
+            cancel_all(&runtime.tcp_streams).await;
             for (_, bind) in runtime.udp_binds.lock().await.drain() {
                 bind.cancel.cancel();
             }

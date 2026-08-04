@@ -73,7 +73,7 @@ async fn load_accepts_max_open_sessions_override() {
         .unwrap();
     assert_eq!(config.max_open_sessions, 7);
     assert_eq!(
-        remote_exec_host::HostRuntimeConfig::from(&config).max_open_sessions,
+        remote_exec_host::HostRuntimeConfig::from(config.as_ref()).max_open_sessions,
         7
     );
 }

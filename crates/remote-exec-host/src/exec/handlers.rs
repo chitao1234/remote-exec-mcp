@@ -12,9 +12,8 @@ use crate::{
 
 use super::{
     policy::{
-        ensure_resolved_sandbox_access, finish_response, has_exited, internal_error, poll_once,
-        poll_until, resolve_workdir_for_operation, running_response, write_chars,
-        write_yield_time_operation,
+        ensure_resolved_sandbox_access, finish_response, internal_error, poll_until,
+        resolve_workdir_for_operation, running_response, write_yield_time_operation,
     },
     session, shell,
     store::{SessionLease, SessionLockError},
@@ -42,7 +41,7 @@ pub async fn exec_start_local(
     let mut output = String::new();
 
     while Instant::now() < deadline {
-        let chunk = poll_once(&mut session).await.map_err(internal_error)?;
+        let chunk = session.read_available().await.map_err(internal_error)?;
         if !chunk.is_empty() {
             output.push_str(&chunk);
             session.record_output(&chunk);
@@ -89,9 +88,7 @@ pub async fn exec_write_local(
     );
     let mut session = prepare_exec_write_session(&state, &req).await?;
 
-    write_chars(&mut session, &req.chars)
-        .await
-        .map_err(internal_error)?;
+    session.write(&req.chars).await.map_err(internal_error)?;
     let yield_time_ms = state
         .config
         .yield_time
@@ -118,8 +115,8 @@ pub async fn exec_write_local(
         return Ok(response);
     }
 
-    let response = running_session_response(
-        state.as_ref(),
+    let response = running_response(
+        &state.daemon_instance_id,
         daemon_session_id.clone(),
         &session,
         output,
@@ -171,7 +168,8 @@ async fn prepare_exec_write_session(
                 "PTY rows and cols must be greater than zero",
             ));
         }
-        super::policy::resize_pty(&mut session, size)
+        session
+            .resize_pty(size)
             .await
             .map_err(|err| logged_bad_request(RpcErrorCode::TtyUnsupported, err.to_string()))?;
     }
@@ -263,7 +261,7 @@ async fn completed_response_if_exited(
     output: &mut String,
     max_output_tokens: Option<u32>,
 ) -> Result<Option<ExecResponse>, HostRpcError> {
-    if !has_exited(session).await.map_err(internal_error)? {
+    if !session.has_exited().await.map_err(internal_error)? {
         return Ok(None);
     }
 
@@ -291,8 +289,8 @@ async fn store_running_session(
     } else {
         Vec::new()
     };
-    let response = running_session_response(
-        state,
+    let response = running_response(
+        &state.daemon_instance_id,
         daemon_session_id.clone(),
         &insert_outcome.lease,
         output,
@@ -303,24 +301,6 @@ async fn store_running_session(
         daemon_session_id,
         response,
     })
-}
-
-fn running_session_response(
-    state: &AppState,
-    daemon_session_id: String,
-    session: &session::LiveSession,
-    output: String,
-    max_output_tokens: Option<u32>,
-    warnings: Vec<ExecWarning>,
-) -> ExecResponse {
-    running_response(
-        &state.daemon_instance_id,
-        daemon_session_id,
-        session,
-        output,
-        max_output_tokens,
-        warnings,
-    )
 }
 
 fn ensure_requested_tty_supported(state: &Arc<AppState>, tty: bool) -> Result<(), HostRpcError> {
@@ -347,17 +327,12 @@ fn resolve_login_request(
     requested_login: Option<bool>,
 ) -> Result<bool, HostRpcError> {
     match requested_login {
-        Some(true) if !shell::platform_supports_login_shells() => Err(logged_bad_request(
-            RpcErrorCode::LoginShellUnsupported,
-            "login shells are not supported on this platform",
-        )),
         Some(true) if !state.config.allow_login_shell => Err(logged_bad_request(
             RpcErrorCode::LoginShellDisabled,
             "login shells are disabled by daemon config",
         )),
         Some(login) => Ok(login),
-        None if shell::platform_supports_login_shells() => Ok(state.config.allow_login_shell),
-        None => Ok(false),
+        None => Ok(state.config.allow_login_shell),
     }
 }
 

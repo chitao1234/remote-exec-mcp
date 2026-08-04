@@ -22,10 +22,6 @@ pub(crate) struct WinptySession {
     pty: Arc<Mutex<Pty>>,
 }
 
-fn map_winpty_error(err: winptyrs::Error) -> anyhow::Error {
-    anyhow::Error::new(err)
-}
-
 fn lock_winpty<'a, T>(
     mutex: &'a Mutex<T>,
     name: &'static str,
@@ -93,7 +89,7 @@ pub(crate) fn supports_winpty() -> anyhow::Result<()> {
     winpty_builder()
         .open()
         .map(|_| ())
-        .map_err(map_winpty_error)
+        .map_err(anyhow::Error::new)
 }
 
 pub(crate) fn spawn_winpty(
@@ -101,7 +97,7 @@ pub(crate) fn spawn_winpty(
     cwd: &Path,
     environment: EnvBlock,
 ) -> anyhow::Result<(WinptySession, UnboundedReceiver<String>)> {
-    let mut pty = winpty_builder().open().map_err(map_winpty_error)?;
+    let mut pty = winpty_builder().open().map_err(anyhow::Error::new)?;
     let spawn = SpawnConfig::new(resolve_executable_for_winpty(&cmd.program))
         .cwd(cwd.as_os_str().to_os_string());
     // Winpty forwards this string to CreateProcessW as lpCommandLine. Include argv[0]
@@ -110,7 +106,7 @@ pub(crate) fn spawn_winpty(
     let spawn = spawn.cmdline(OsString::from(cmd.windows_command_line()));
     let child = pty
         .spawn(spawn.env(environment))
-        .map_err(map_winpty_error)?;
+        .map_err(anyhow::Error::new)?;
 
     let pid = child.id();
     let pty: Arc<Mutex<Pty>> = Arc::new(Mutex::new(pty));
@@ -167,21 +163,21 @@ impl WinptySession {
         lock_winpty(&self.child, "child")?
             .try_wait()
             .map(|status| status.map(|value| value as i32))
-            .map_err(map_winpty_error)
+            .map_err(anyhow::Error::new)
     }
 
     pub(crate) fn write(&self, chars: &str) -> anyhow::Result<()> {
         lock_winpty(&self.pty, "pty")?
             .write(chars)
             .map(|_| ())
-            .map_err(map_winpty_error)
+            .map_err(anyhow::Error::new)
     }
 
     pub(crate) fn resize(&self, size: remote_exec_proto::rpc::ExecPtySize) -> anyhow::Result<()> {
-        let size = PtySize::new(size.cols, size.rows).map_err(map_winpty_error)?;
+        let size = PtySize::new(size.cols, size.rows).map_err(anyhow::Error::new)?;
         lock_winpty(&self.pty, "pty")?
             .resize(size)
-            .map_err(map_winpty_error)
+            .map_err(anyhow::Error::new)
     }
 
     pub(crate) fn terminate(&self) -> anyhow::Result<()> {

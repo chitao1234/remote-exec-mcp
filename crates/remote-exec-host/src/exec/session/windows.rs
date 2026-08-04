@@ -15,7 +15,6 @@ use super::{LiveSession, SpawnCommand, portable_pty_probe, spawn_pty};
 #[cfg(feature = "winpty")]
 use super::{SessionChild, new_winpty_live_session};
 
-#[cfg(any(test, windows))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PtyBackend {
     PortablePty,
@@ -38,7 +37,6 @@ struct PtyDiagnostics {
     winpty_probe: Result<(), String>,
 }
 
-#[cfg(any(test, windows))]
 pub(super) fn select_pty_backend_with(
     portable_probe: impl FnOnce() -> anyhow::Result<()>,
     winpty_probe: impl FnOnce() -> anyhow::Result<()>,

@@ -227,11 +227,11 @@ async fn update_file(
     );
     let content = current.encode(&text)?;
 
-    let destination_path = move_to
+    let resolved_destination_path = move_to
         .as_ref()
         .map(|destination| verify::resolve_patch_path(state, cwd, destination))
-        .map(|destination| destination.into_path_buf())
-        .unwrap_or_else(|| source_path.clone());
+        .unwrap_or_else(|| resolved_source_path.clone());
+    let destination_path = resolved_destination_path.path().to_path_buf();
     let remove_source =
         move_to.is_some() && !crate::path_compare::path_eq(&source_path, &destination_path);
     let summary_path = verify::display_relative(cwd, &destination_path);
@@ -241,13 +241,6 @@ async fn update_file(
         return Ok(format!("M {summary_path}"));
     }
 
-    let resolved_destination_path = verify::resolve_patch_path(
-        state,
-        cwd,
-        move_to
-            .as_ref()
-            .expect("move destination exists when source is removed"),
-    );
     crate::exec::ensure_resolved_sandbox_access(
         state,
         crate::sandbox::SandboxAccess::Write,

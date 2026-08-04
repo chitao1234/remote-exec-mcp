@@ -100,17 +100,16 @@ impl WinptyOutputFilter {
             self.process_char(ch, &mut response);
         }
 
-        let output = if self.debounce_enabled() {
-            self.queue_touched_rows(now_ms);
-            self.emit_due_rows(now_ms)
-        } else {
-            self.emit_touched_rows()
-        };
+        let output = self.flush_now(now_ms);
 
         TerminalOutputResult { output, response }
     }
 
     fn flush_due_at(&mut self, now_ms: u64) -> String {
+        self.flush_now(now_ms)
+    }
+
+    fn flush_now(&mut self, now_ms: u64) -> String {
         if self.debounce_enabled() {
             self.queue_touched_rows(now_ms);
             self.emit_due_rows(now_ms)
@@ -338,9 +337,7 @@ impl WinptyOutputFilter {
                 self.clear_line_from_cursor(parsed.first().copied().unwrap_or(0) as i32);
             }
             'm' => {}
-            'h' | 'l' => {
-                let _ = private_mode;
-            }
+            'h' | 'l' => {}
             'n' => match parsed.first().copied() {
                 Some(5) => response.push_str("\x1b[0n"),
                 Some(6) => response.push_str("\x1b[1;1R"),

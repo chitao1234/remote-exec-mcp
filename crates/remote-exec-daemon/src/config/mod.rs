@@ -344,18 +344,6 @@ impl From<&DaemonConfig> for HostRuntimeConfig {
     }
 }
 
-impl From<ValidatedDaemonConfig> for HostRuntimeConfig {
-    fn from(value: ValidatedDaemonConfig) -> Self {
-        value.into_inner().into()
-    }
-}
-
-impl From<&ValidatedDaemonConfig> for HostRuntimeConfig {
-    fn from(value: &ValidatedDaemonConfig) -> Self {
-        value.as_ref().into()
-    }
-}
-
 fn default_allow_login_shell() -> bool {
     true
 }

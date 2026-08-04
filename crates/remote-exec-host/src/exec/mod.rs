@@ -11,7 +11,4 @@ pub mod transcript;
 mod winpty;
 
 pub use handlers::{exec_start_local, exec_write_local};
-pub use policy::{
-    ensure_resolved_sandbox_access, ensure_sandbox_access, internal_error, resolve_input_path,
-    resolve_input_path_with_windows_posix_root, resolve_workdir, resolve_workdir_for_operation,
-};
+pub use policy::{ensure_resolved_sandbox_access, internal_error, resolve_workdir_for_operation};

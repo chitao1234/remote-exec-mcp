@@ -1,4 +1,3 @@
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,10 +14,6 @@ use crate::{
 };
 
 use super::{output, session, timing::EXEC_POLL_INTERVAL};
-
-pub fn resolve_workdir(state: &Arc<AppState>, workdir: Option<&str>) -> anyhow::Result<PathBuf> {
-    Ok(resolve_workdir_for_operation(state, workdir)?.into_path_buf())
-}
 
 pub fn resolve_workdir_for_operation(
     state: &Arc<AppState>,
@@ -37,27 +32,6 @@ pub fn resolve_workdir_for_operation(
     })
 }
 
-pub fn resolve_input_path(base: &Path, raw: &str) -> PathBuf {
-    resolve_input_path_with_windows_posix_root(base, raw, None)
-}
-
-pub fn resolve_input_path_with_windows_posix_root(
-    base: &Path,
-    raw: &str,
-    windows_posix_root: Option<&Path>,
-) -> PathBuf {
-    host_path::resolve_input_path_for_operation(base, raw, windows_posix_root).into_path_buf()
-}
-
-pub fn ensure_sandbox_access(
-    state: &Arc<AppState>,
-    access: SandboxAccess,
-    path: &Path,
-) -> Result<(), SandboxError> {
-    let resolved = host_path::ResolvedHostPath::new(path.display().to_string(), path.to_path_buf());
-    authorize_resolved_path(state.sandbox.as_ref(), access, &resolved)
-}
-
 pub fn ensure_resolved_sandbox_access(
     state: &Arc<AppState>,
     access: SandboxAccess,
@@ -72,28 +46,6 @@ pub fn internal_error(err: anyhow::Error) -> HostRpcError {
     crate::error::internal(RpcErrorCode::Internal, message)
 }
 
-pub(super) async fn poll_once(session: &mut session::LiveSession) -> anyhow::Result<String> {
-    session.read_available().await
-}
-
-pub(super) async fn has_exited(session: &mut session::LiveSession) -> anyhow::Result<bool> {
-    session.has_exited().await
-}
-
-pub(super) async fn write_chars(
-    session: &mut session::LiveSession,
-    chars: &str,
-) -> anyhow::Result<()> {
-    session.write(chars).await
-}
-
-pub(super) async fn resize_pty(
-    session: &mut session::LiveSession,
-    size: remote_exec_proto::rpc::ExecPtySize,
-) -> anyhow::Result<()> {
-    session.resize_pty(size).await
-}
-
 pub(super) async fn poll_until(
     session: &mut session::LiveSession,
     yield_time_ms: u64,
@@ -102,13 +54,13 @@ pub(super) async fn poll_until(
     let mut output = String::new();
 
     while Instant::now() < deadline {
-        let chunk = poll_once(session).await?;
+        let chunk = session.read_available().await?;
         if !chunk.is_empty() {
             session.record_output(&chunk);
             output.push_str(&chunk);
         }
 
-        if has_exited(session).await? {
+        if session.has_exited().await? {
             break;
         }
 

@@ -1,4 +1,3 @@
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn seek_sequence(
     lines: &[String],
     pattern: &[String],

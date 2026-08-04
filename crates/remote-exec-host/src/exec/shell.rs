@@ -12,10 +12,6 @@ use crate::config::ProcessEnvironment;
 
 pub use common::{apply_session_environment_overrides, shell_command};
 
-pub fn platform_supports_login_shells() -> bool {
-    true
-}
-
 #[cfg(unix)]
 pub fn resolve_default_shell(
     configured_default_shell: Option<&str>,
