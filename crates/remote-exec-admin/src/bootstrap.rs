@@ -1,42 +1,55 @@
+use std::fmt::{self, Write};
+
 use remote_exec_pki::{DevInitManifest, SubjectAltName};
 
-fn toml_string(value: &str) -> String {
+fn toml_string(value: impl fmt::Display) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
 pub(crate) fn render_dev_init_output(manifest: &DevInitManifest) -> String {
     let mut output = String::new();
 
-    output.push_str("Generated files:\n");
-    output.push_str(&format!("- CA cert: {}\n", manifest.ca.cert_pem.display()));
-    output.push_str(&format!("- CA key: {}\n", manifest.ca.key_pem.display()));
-    output.push_str(&format!(
-        "- Broker cert: {} (direct client and reverse listener)\n",
+    writeln!(output, "Generated files:").unwrap();
+    writeln!(output, "- CA cert: {}", manifest.ca.cert_pem.display()).unwrap();
+    writeln!(output, "- CA key: {}", manifest.ca.key_pem.display()).unwrap();
+    writeln!(
+        output,
+        "- Broker cert: {} (direct client and reverse listener)",
         manifest.broker.cert_pem.display()
-    ));
-    output.push_str(&format!(
-        "- Broker key: {} (direct client and reverse listener)\n",
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "- Broker key: {} (direct client and reverse listener)",
         manifest.broker.key_pem.display()
-    ));
+    )
+    .unwrap();
 
     for (target, daemon) in &manifest.daemons {
-        output.push_str(&format!(
-            "- Daemon `{target}` cert: {} (direct listener and reverse client)\n",
+        writeln!(
+            output,
+            "- Daemon `{target}` cert: {} (direct listener and reverse client)",
             daemon.cert_pem().display()
-        ));
-        output.push_str(&format!(
-            "- Daemon `{target}` key: {} (direct listener and reverse client)\n",
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "- Daemon `{target}` key: {} (direct listener and reverse client)",
             daemon.key_pem().display()
-        ));
-        output.push_str(&format!(
-            "- Daemon `{target}` SANs: {}\n",
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "- Daemon `{target}` SANs: {}",
             format_sans(&daemon.sans)
-        ));
+        )
+        .unwrap();
     }
 
-    output.push_str("\nBroker config snippets:\n");
+    write!(output, "\nBroker config snippets:\n").unwrap();
     for target in manifest.daemons.keys() {
-        output.push_str(&format!(
+        write!(
+            output,
             r#"[targets.{target}]
 # Set this to the daemon HTTPS endpoint.
 # base_url = {base_url}
@@ -50,16 +63,18 @@ expected_daemon_name = {expected_daemon_name}
 
 "#,
             target = target,
-            base_url = toml_string(&format!("https://{target}.example.com:9443")),
-            ca_pem = toml_string(&manifest.ca.cert_pem.display().to_string()),
-            broker_cert = toml_string(&manifest.broker.cert_pem.display().to_string()),
-            broker_key = toml_string(&manifest.broker.key_pem.display().to_string()),
+            base_url = toml_string(format_args!("https://{target}.example.com:9443")),
+            ca_pem = toml_string(manifest.ca.cert_pem.display()),
+            broker_cert = toml_string(manifest.broker.cert_pem.display()),
+            broker_key = toml_string(manifest.broker.key_pem.display()),
             expected_daemon_name = toml_string(target),
-        ));
+        )
+        .unwrap();
     }
 
-    output.push_str("# Reverse broker config snippet:\n");
-    output.push_str(&format!(
+    writeln!(output, "# Reverse broker config snippet:").unwrap();
+    write!(
+        output,
         r#"[reverse]
 listen = "0.0.0.0:9555"
 transport = "tls"
@@ -70,14 +85,16 @@ key_pem = {broker_key}
 ca_pem = {ca_pem}
 
 "#,
-        broker_cert = toml_string(&manifest.broker.cert_pem.display().to_string()),
-        broker_key = toml_string(&manifest.broker.key_pem.display().to_string()),
-        ca_pem = toml_string(&manifest.ca.cert_pem.display().to_string()),
-    ));
+        broker_cert = toml_string(manifest.broker.cert_pem.display()),
+        broker_key = toml_string(manifest.broker.key_pem.display()),
+        ca_pem = toml_string(manifest.ca.cert_pem.display()),
+    )
+    .unwrap();
 
-    output.push_str("Daemon config snippets:\n");
+    writeln!(output, "Daemon config snippets:").unwrap();
     for (target, daemon) in &manifest.daemons {
-        output.push_str(&format!(
+        write!(
+            output,
             r#"target = {target}
 # Set this to the daemon bind address.
 # listen = {listen}
@@ -111,12 +128,13 @@ ca_pem = {ca_pem}
             target = toml_string(target),
             listen = toml_string("0.0.0.0:9443"),
             default_workdir = toml_string("/srv/work"),
-            daemon_cert = toml_string(&daemon.cert_pem().display().to_string()),
-            daemon_key = toml_string(&daemon.key_pem().display().to_string()),
-            ca_pem = toml_string(&manifest.ca.cert_pem.display().to_string()),
-            broker_cert = toml_string(&manifest.broker.cert_pem.display().to_string()),
+            daemon_cert = toml_string(daemon.cert_pem().display()),
+            daemon_key = toml_string(daemon.key_pem().display()),
+            ca_pem = toml_string(manifest.ca.cert_pem.display()),
+            broker_cert = toml_string(manifest.broker.cert_pem.display()),
             broker_common_name = toml_string(&manifest.broker_common_name),
-        ));
+        )
+        .unwrap();
     }
 
     output

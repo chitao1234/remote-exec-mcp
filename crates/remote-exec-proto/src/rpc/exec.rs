@@ -65,24 +65,24 @@ pub enum ExecResponse {
     Completed(ExecCompletedResponse),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct ExecResponseEnvelope {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    daemon_session_id: Option<String>,
+#[derive(Debug, Serialize)]
+struct ExecResponseEnvelope<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    daemon_session_id: Option<&'a str>,
     #[serde(flatten)]
-    output: ExecOutputResponse,
+    output: &'a ExecOutputResponse,
 }
 
-impl From<ExecResponse> for ExecResponseEnvelope {
-    fn from(response: ExecResponse) -> Self {
+impl<'a> From<&'a ExecResponse> for ExecResponseEnvelope<'a> {
+    fn from(response: &'a ExecResponse) -> Self {
         match response {
             ExecResponse::Running(response) => Self {
-                daemon_session_id: Some(response.daemon_session_id),
-                output: response.output,
+                daemon_session_id: Some(response.daemon_session_id.as_str()),
+                output: &response.output,
             },
             ExecResponse::Completed(response) => Self {
                 daemon_session_id: None,
-                output: response.output,
+                output: &response.output,
             },
         }
     }
@@ -93,7 +93,7 @@ impl Serialize for ExecResponse {
     where
         S: serde::Serializer,
     {
-        ExecResponseEnvelope::from(self.clone()).serialize(serializer)
+        ExecResponseEnvelope::from(self).serialize(serializer)
     }
 }
 
@@ -102,7 +102,14 @@ impl<'de> Deserialize<'de> for ExecResponse {
     where
         D: serde::Deserializer<'de>,
     {
-        let envelope = ExecResponseEnvelope::deserialize(deserializer)?;
+        #[derive(Deserialize)]
+        struct ExecResponseEnvelopeOwned {
+            #[serde(default)]
+            daemon_session_id: Option<String>,
+            #[serde(flatten)]
+            output: ExecOutputResponse,
+        }
+        let envelope = ExecResponseEnvelopeOwned::deserialize(deserializer)?;
         let running = envelope.output.running;
         match (running, envelope.daemon_session_id) {
             (true, Some(daemon_session_id)) if !daemon_session_id.is_empty() => {
@@ -140,13 +147,6 @@ impl ExecResponse {
         match self {
             Self::Running(response) => Some(response.daemon_session_id.as_str()),
             Self::Completed(_) => None,
-        }
-    }
-
-    pub fn into_output(self) -> ExecOutputResponse {
-        match self {
-            Self::Running(response) => response.output,
-            Self::Completed(response) => response.output,
         }
     }
 }

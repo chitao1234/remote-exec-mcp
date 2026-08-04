@@ -69,19 +69,49 @@ impl CertificateAuthority {
     }
 
     pub fn issue_broker_cert(&self, common_name: &str) -> anyhow::Result<GeneratedPemPair> {
-        issue_broker_cert(self, common_name)
+        let key = KeyPair::generate()?;
+        let params = broker_params(common_name)?;
+        let cert = params.signed_by(&key, &self.issuer)?;
+        Ok(GeneratedPemPair {
+            cert_pem: cert.pem(),
+            key_pem: PrivateKeyPem::new(key.serialize_pem()),
+        })
     }
 
     pub fn issue_daemon_cert(&self, daemon: &DaemonCertSpec) -> anyhow::Result<GeneratedPemPair> {
-        issue_daemon_cert(self, daemon)
+        let key = KeyPair::generate()?;
+        let params = daemon_params(daemon)?;
+        let cert = params.signed_by(&key, &self.issuer)?;
+        Ok(GeneratedPemPair {
+            cert_pem: cert.pem(),
+            key_pem: PrivateKeyPem::new(key.serialize_pem()),
+        })
     }
 
     pub fn issue_reverse_broker_cert(&self, common_name: &str) -> anyhow::Result<GeneratedPemPair> {
-        issue_role_cert(self, common_name, ExtendedKeyUsagePurpose::ServerAuth, true)
+        let key = KeyPair::generate()?;
+        let mut params = CertificateParams::new(vec![common_name.to_string()])?;
+        params
+            .distinguished_name
+            .push(DnType::CommonName, common_name);
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        let cert = params.signed_by(&key, &self.issuer)?;
+        Ok(GeneratedPemPair {
+            cert_pem: cert.pem(),
+            key_pem: PrivateKeyPem::new(key.serialize_pem()),
+        })
     }
 
     pub fn issue_reverse_daemon_cert(&self, target: &str) -> anyhow::Result<GeneratedPemPair> {
-        issue_role_cert(self, target, ExtendedKeyUsagePurpose::ClientAuth, false)
+        let key = KeyPair::generate()?;
+        let mut params = CertificateParams::new(Vec::new())?;
+        params.distinguished_name.push(DnType::CommonName, target);
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        let cert = params.signed_by(&key, &self.issuer)?;
+        Ok(GeneratedPemPair {
+            cert_pem: cert.pem(),
+            key_pem: PrivateKeyPem::new(key.serialize_pem()),
+        })
     }
 }
 
@@ -172,57 +202,6 @@ fn certificate_public_key_der(cert_pem: &str) -> anyhow::Result<Vec<u8>> {
     let (_, parsed) = x509_parser::parse_x509_certificate(cert.as_ref())
         .map_err(|err| anyhow::anyhow!("parsing CA certificate DER: {err}"))?;
     Ok(parsed.public_key().raw.to_vec())
-}
-
-fn issue_broker_cert(
-    ca: &CertificateAuthority,
-    common_name: &str,
-) -> anyhow::Result<GeneratedPemPair> {
-    let key = KeyPair::generate()?;
-    let params = broker_params(common_name)?;
-    let cert = params.signed_by(&key, &ca.issuer)?;
-
-    Ok(GeneratedPemPair {
-        cert_pem: cert.pem(),
-        key_pem: PrivateKeyPem::new(key.serialize_pem()),
-    })
-}
-
-fn issue_daemon_cert(
-    ca: &CertificateAuthority,
-    daemon: &DaemonCertSpec,
-) -> anyhow::Result<GeneratedPemPair> {
-    let key = KeyPair::generate()?;
-    let params = daemon_params(daemon)?;
-    let cert = params.signed_by(&key, &ca.issuer)?;
-
-    Ok(GeneratedPemPair {
-        cert_pem: cert.pem(),
-        key_pem: PrivateKeyPem::new(key.serialize_pem()),
-    })
-}
-
-fn issue_role_cert(
-    ca: &CertificateAuthority,
-    common_name: &str,
-    usage: ExtendedKeyUsagePurpose,
-    include_dns_san: bool,
-) -> anyhow::Result<GeneratedPemPair> {
-    let key = KeyPair::generate()?;
-    let mut params = CertificateParams::new(if include_dns_san {
-        vec![common_name.to_string()]
-    } else {
-        Vec::new()
-    })?;
-    params
-        .distinguished_name
-        .push(DnType::CommonName, common_name);
-    params.extended_key_usages = vec![usage];
-    let cert = params.signed_by(&key, &ca.issuer)?;
-    Ok(GeneratedPemPair {
-        cert_pem: cert.pem(),
-        key_pem: PrivateKeyPem::new(key.serialize_pem()),
-    })
 }
 
 fn broker_params(common_name: &str) -> anyhow::Result<CertificateParams> {

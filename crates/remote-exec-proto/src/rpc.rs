@@ -32,8 +32,7 @@ pub use transfer::{
     TransferHeaderErrorKind, TransferHeaderPairs, TransferHeaders, TransferImportResponse,
     TransferPathInfoRequest, TransferPathInfoResponse, TransferStreamComplete,
     TransferStreamDecodeError, TransferStreamDecoder, TransferStreamExportItem,
-    TransferStreamFrame, TransferStreamFrameDecodeError, TransferStreamFrameHeader,
-    TransferStreamFrameType, TransferStreamTerminalDecodeError, TransferStreamTerminalFrame,
+    TransferStreamFrameDecodeError, TransferStreamFrameHeader, TransferStreamFrameType,
     TransferWarning, decode_transfer_stream_body, decode_transfer_stream_frame_header,
     encode_transfer_export_item_stream, encode_transfer_stream_body,
     encode_transfer_stream_complete_frame, encode_transfer_stream_data_frame,
@@ -41,10 +40,8 @@ pub use transfer::{
     encode_transfer_stream_frame_header, parse_transfer_export_metadata,
     parse_transfer_export_metadata_from_lookup, parse_transfer_import_metadata,
     parse_transfer_import_metadata_from_lookup, parse_transfer_stream_complete_payload,
-    parse_transfer_stream_error_payload, parse_transfer_stream_terminal_payload,
-    transfer_destination_path_header_value, transfer_export_header_pairs,
-    transfer_import_header_pairs, transfer_stream_complete_frame, transfer_stream_data_frame,
-    transfer_stream_error_frame,
+    parse_transfer_stream_error_payload, transfer_destination_path_header_value,
+    transfer_export_header_pairs, transfer_import_header_pairs,
 };
 pub use warning::WarningCode;
 

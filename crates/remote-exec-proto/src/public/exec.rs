@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::rpc::{
     DaemonIdentity, ExecPtySize, ExecWarning, FileToolProtocolVersion, TargetCapabilities,
-    TargetInfoResponse, TransferStreamProtocolVersion,
+    TransferStreamProtocolVersion,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -69,12 +69,6 @@ pub struct ListTargetDaemonInfo {
     pub transfer_stream_protocol_version: Option<TransferStreamProtocolVersion>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_tool_protocol_version: Option<FileToolProtocolVersion>,
-}
-
-impl From<&TargetInfoResponse> for ListTargetDaemonInfo {
-    fn from(value: &TargetInfoResponse) -> Self {
-        Self::from_identity_and_capabilities(value.identity.clone(), &value.capabilities)
-    }
 }
 
 impl ListTargetDaemonInfo {

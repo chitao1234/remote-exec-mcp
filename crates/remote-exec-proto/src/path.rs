@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,7 +24,7 @@ impl PathPolicy {
                     && (bytes[2] == b'\\' || bytes[2] == b'/'))
                     || raw.starts_with(r"\\")
                     || raw.starts_with("//")
-                    || translate_windows_posix_drive_path(raw).is_some()
+                    || starts_with_drive_prefix(raw)
             }
         }
     }
@@ -107,6 +108,30 @@ fn split_windows_prefix(raw: &str) -> (&str, &str) {
     ("", raw)
 }
 
+fn starts_with_drive_prefix(raw: &str) -> bool {
+    let bytes = raw.as_bytes();
+    if bytes.len() >= 2
+        && bytes[0] == b'/'
+        && bytes[1].is_ascii_alphabetic()
+        && (bytes.len() == 2 || bytes[2] == b'/')
+    {
+        return true;
+    }
+
+    let Some(rest) = raw
+        .get(.."/cygdrive/".len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case("/cygdrive/"))
+        .map(|_| &raw["/cygdrive/".len()..])
+    else {
+        return false;
+    };
+
+    let rest_bytes = rest.as_bytes();
+    !rest_bytes.is_empty()
+        && rest_bytes[0].is_ascii_alphabetic()
+        && (rest_bytes.len() == 1 || rest_bytes[1] == b'/')
+}
+
 fn translate_windows_posix_drive_path(raw: &str) -> Option<String> {
     let bytes = raw.as_bytes();
     if bytes.len() >= 2
@@ -120,13 +145,7 @@ fn translate_windows_posix_drive_path(raw: &str) -> Option<String> {
         ));
     }
 
-    let lower = raw.to_ascii_lowercase();
-    let rest = lower.strip_prefix("/cygdrive/")?;
-    let rest_bytes = rest.as_bytes();
-    if rest_bytes.is_empty()
-        || !rest_bytes[0].is_ascii_alphabetic()
-        || (rest_bytes.len() > 1 && rest_bytes[1] != b'/')
-    {
+    if !starts_with_drive_prefix(raw) {
         return None;
     }
 
@@ -185,7 +204,8 @@ fn split_windows_path_basename(raw: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-pub fn normalize_relative_path(path: &Path) -> Option<PathBuf> {
+#[cfg(test)]
+pub(crate) fn normalize_relative_path(path: &Path) -> Option<PathBuf> {
     let mut normalized = PathBuf::new();
 
     for component in path.components() {

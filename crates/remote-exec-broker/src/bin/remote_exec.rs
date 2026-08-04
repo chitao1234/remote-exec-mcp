@@ -11,6 +11,7 @@ use remote_exec_broker::cli::{
 use remote_exec_broker::{Connection, RemoteExecClient, ToolResponse};
 use remote_exec_proto::public::{ForwardPortsInput, ListTargetsInput, TransferDestinationMode};
 use remote_exec_proto::transfer::{TransferOverwrite, TransferSymlinkMode};
+use serde::Serialize;
 
 const CLI_AFTER_HELP: &str = "\
 Connection modes:
@@ -463,19 +464,11 @@ async fn run_command(client: &RemoteExecClient, command: Command, json: bool) ->
 }
 
 async fn run_list_targets(client: &RemoteExecClient, json: bool) -> CliResult<u8> {
-    let response = client
-        .call_tool("list_targets", &ListTargetsInput::default())
-        .await
-        .map_err(CliError::connection)?;
-    emit_and_status(&response, json)
+    call_and_emit(client, "list_targets", &ListTargetsInput::default(), json).await
 }
 
 async fn run_exec(client: &RemoteExecClient, args: ExecCommandArgs, json: bool) -> CliResult<u8> {
-    let response = client
-        .call_tool("exec_command", &exec_command_input(args))
-        .await
-        .map_err(CliError::connection)?;
-    emit_and_status(&response, json)
+    call_and_emit(client, "exec_command", &exec_command_input(args), json).await
 }
 
 async fn run_write_stdin(
@@ -484,11 +477,7 @@ async fn run_write_stdin(
     json: bool,
 ) -> CliResult<u8> {
     let input = write_stdin_input(args).await.map_err(CliError::usage)?;
-    let response = client
-        .call_tool("write_stdin", &input)
-        .await
-        .map_err(CliError::connection)?;
-    emit_and_status(&response, json)
+    call_and_emit(client, "write_stdin", &input, json).await
 }
 
 async fn run_apply_patch(
@@ -496,12 +485,10 @@ async fn run_apply_patch(
     args: ApplyPatchArgs,
     json: bool,
 ) -> CliResult<u8> {
-    let input = apply_patch_input(args).await.map_err(CliError::usage)?;
-    let response = client
-        .call_tool("apply_patch", &input)
+    let input = build_apply_patch_input(args.target, args.input, args.input_file, args.workdir)
         .await
-        .map_err(CliError::connection)?;
-    emit_and_status(&response, json)
+        .map_err(CliError::usage)?;
+    call_and_emit(client, "apply_patch", &input, json).await
 }
 
 async fn run_view_image(
@@ -509,9 +496,10 @@ async fn run_view_image(
     args: ViewImageArgs,
     json: bool,
 ) -> CliResult<u8> {
-    let output_path = args.out.clone();
+    let output_path = args.out;
+    let input = build_view_image_input(args.target, args.path, args.workdir, args.detail);
     let response = client
-        .call_tool("view_image", &view_image_input(args))
+        .call_tool("view_image", &input)
         .await
         .map_err(CliError::connection)?;
     if !response.is_error {
@@ -531,11 +519,7 @@ async fn run_transfer_files(
     json: bool,
 ) -> CliResult<u8> {
     let input = transfer_files_input(args).map_err(CliError::usage)?;
-    let response = client
-        .call_tool("transfer_files", &input)
-        .await
-        .map_err(CliError::connection)?;
-    emit_and_status(&response, json)
+    call_and_emit(client, "transfer_files", &input, json).await
 }
 
 async fn run_forward_ports(
@@ -544,11 +528,7 @@ async fn run_forward_ports(
     json: bool,
 ) -> CliResult<u8> {
     let input = forward_ports_input(args).map_err(CliError::usage)?;
-    let response = client
-        .call_tool("forward_ports", &input)
-        .await
-        .map_err(CliError::connection)?;
-    emit_and_status(&response, json)
+    call_and_emit(client, "forward_ports", &input, json).await
 }
 
 fn exec_command_input(args: ExecCommandArgs) -> remote_exec_proto::public::ExecCommandInput {
@@ -575,16 +555,6 @@ async fn write_stdin_input(
         pty_size: write_stdin_pty_size(args.pty_rows, args.pty_cols)?,
         target: args.target,
     })
-}
-
-async fn apply_patch_input(
-    args: ApplyPatchArgs,
-) -> anyhow::Result<remote_exec_proto::public::ApplyPatchInput> {
-    build_apply_patch_input(args.target, args.input, args.input_file, args.workdir).await
-}
-
-fn view_image_input(args: ViewImageArgs) -> remote_exec_proto::public::ViewImageInput {
-    build_view_image_input(args.target, args.path, args.workdir, args.detail)
 }
 
 fn transfer_files_input(
@@ -630,6 +600,22 @@ impl ConnectionArgs {
             _ => unreachable!("clap should enforce exactly one connection mode"),
         }
     }
+}
+
+async fn call_and_emit<T>(
+    client: &RemoteExecClient,
+    tool: &str,
+    input: &T,
+    json: bool,
+) -> CliResult<u8>
+where
+    T: Serialize + ?Sized,
+{
+    let response = client
+        .call_tool(tool, input)
+        .await
+        .map_err(CliError::connection)?;
+    emit_and_status(&response, json)
 }
 
 fn emit_and_status(response: &ToolResponse, json: bool) -> CliResult<u8> {

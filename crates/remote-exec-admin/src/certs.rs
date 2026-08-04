@@ -92,10 +92,6 @@ fn build_daemon_specs(args: &DevInitArgs) -> anyhow::Result<Vec<remote_exec_pki:
         });
     }
 
-    ensure!(
-        !daemon_specs.is_empty(),
-        "at least one --target is required"
-    );
     Ok(daemon_specs)
 }
 
