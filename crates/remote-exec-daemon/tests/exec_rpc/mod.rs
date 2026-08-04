@@ -233,13 +233,10 @@ fn available_windows_git_bash_path() -> Option<String> {
         .map(|candidate| candidate.to_string_lossy().into_owned())
 }
 
-/// Returns early from the calling test when no git bash is installed on this
-/// Windows host.
+/// Returns whether git bash is installed on this Windows host.
 #[cfg(windows)]
-fn skip_unless_git_bash() {
-    let Some(_) = available_windows_git_bash_path() else {
-        return;
-    };
+fn skip_unless_git_bash() -> bool {
+    available_windows_git_bash_path().is_some()
 }
 
 #[cfg(windows)]

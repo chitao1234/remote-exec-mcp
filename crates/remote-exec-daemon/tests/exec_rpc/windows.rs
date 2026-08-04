@@ -192,7 +192,9 @@ async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
 
 #[tokio::test]
 async fn exec_start_prefers_git_bash_when_shell_is_omitted_on_windows() {
-    skip_unless_git_bash();
+    if !skip_unless_git_bash() {
+        return;
+    }
 
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let response = fixture
@@ -215,7 +217,9 @@ async fn exec_start_prefers_git_bash_when_shell_is_omitted_on_windows() {
 
 #[tokio::test]
 async fn exec_start_resolves_bare_bash_shell_requests_to_git_bash_on_windows() {
-    skip_unless_git_bash();
+    if !skip_unless_git_bash() {
+        return;
+    }
 
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let response = fixture
@@ -238,7 +242,9 @@ async fn exec_start_resolves_bare_bash_shell_requests_to_git_bash_on_windows() {
 
 #[tokio::test]
 async fn exec_start_preserves_workdir_for_git_bash_login_shells_on_windows() {
-    skip_unless_git_bash();
+    if !skip_unless_git_bash() {
+        return;
+    }
 
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let workdir = fixture.workdir.join("git bash cwd");
@@ -371,7 +377,9 @@ async fn exec_start_resolves_windows_posix_root_shells_and_sets_chere_invoking()
 
 #[tokio::test]
 async fn exec_start_uses_git_bash_login_profiles_when_shell_is_omitted() {
-    skip_unless_git_bash();
+    if !skip_unless_git_bash() {
+        return;
+    }
 
     let home = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -436,7 +444,9 @@ async fn exec_start_keeps_windows_tty_sessions_alive_and_answers_terminal_querie
 
 #[tokio::test]
 async fn exec_start_prefers_git_bash_for_windows_pty_when_shell_is_omitted() {
-    skip_unless_git_bash();
+    if !skip_unless_git_bash() {
+        return;
+    }
 
     for_each_windows_pty_backend!(backend, fixture, {
         let response = fixture
@@ -471,7 +481,9 @@ async fn exec_start_prefers_git_bash_for_windows_pty_when_shell_is_omitted() {
 
 #[tokio::test]
 async fn exec_start_resolves_bare_bash_shell_requests_to_git_bash_for_windows_pty() {
-    skip_unless_git_bash();
+    if !skip_unless_git_bash() {
+        return;
+    }
 
     for_each_windows_pty_backend!(backend, fixture, {
         assert_windows_git_bash_tty_read_line(&fixture, backend, Some("bash.exe")).await;
@@ -480,7 +492,9 @@ async fn exec_start_resolves_bare_bash_shell_requests_to_git_bash_for_windows_pt
 
 #[tokio::test]
 async fn exec_start_preserves_workdir_for_git_bash_login_shells_over_windows_ptys() {
-    skip_unless_git_bash();
+    if !skip_unless_git_bash() {
+        return;
+    }
 
     for_each_windows_pty_backend!(backend, fixture, {
         let workdir = fixture
@@ -1024,7 +1038,9 @@ async fn exec_start_preserves_cmd_command_quoting_across_windows_pty_backends() 
 
 #[tokio::test]
 async fn exec_start_preserves_git_bash_command_quoting_across_windows_pty_backends() {
-    skip_unless_git_bash();
+    if !skip_unless_git_bash() {
+        return;
+    }
 
     for_each_windows_pty_backend!(backend, fixture, {
         assert_windows_git_bash_command_quoting(&fixture, backend, Some("bash.exe")).await;
@@ -1033,7 +1049,9 @@ async fn exec_start_preserves_git_bash_command_quoting_across_windows_pty_backen
 
 #[tokio::test]
 async fn exec_start_accepts_git_bash_aliases_on_windows() {
-    skip_unless_git_bash();
+    if !skip_unless_git_bash() {
+        return;
+    }
 
     for alias in ["bash", "sh", "git-bash"] {
         let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
