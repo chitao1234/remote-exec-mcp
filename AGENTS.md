@@ -236,6 +236,24 @@ When changing certificate/bootstrap behavior:
 
 Run targeted tests for the area changed before broader checks.
 
+Keep test support code shared, not copy-pasted. Recurring slop in this
+codebase has been per-file reimplementations of helpers that already live
+in a shared home. Before adding a test helper, check these first:
+
+- Rust broker tests: `crates/remote-exec-broker/tests/support/` (fixtures,
+  spawners, stub daemons, the shared `tunnel_drop_proxy` module)
+- Rust daemon tests: `crates/remote-exec-daemon/tests/support/`
+- Cross-crate Rust test helpers: `crates/remote-exec-test-support/`
+- C++ tests: `crates/remote-exec-daemon-cpp/tests/` shared headers
+  (`test_assert.h`, `test_filesystem.h`, `test_text_file.h`,
+  `test_contract_fixtures.h`, `test_daemon_fixtures.h`, `test_pty_helpers.h`,
+  `test_socket_pair.h`, `test_server_streaming_shared.h`,
+  `test_tar_helpers.h`)
+
+A helper used by more than one test file belongs in the shared home for
+that side, not duplicated per file. `#[allow(dead_code)]` on shared
+helpers is acceptable when another test target uses them.
+
 Focused Rust commands:
 
 - `cargo test -p remote-exec-daemon --test exec_rpc`
