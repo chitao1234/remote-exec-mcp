@@ -399,7 +399,7 @@ async fn assert_windows_bare_lf_advances_pty_line_reader(
         .expect("live session")
         .to_string();
     let (exit_code, combined_output) =
-        write_and_collect_session_output(&fixture, &session_id, "ping\n", &started.output().output)
+        write_and_collect_session_output(fixture, &session_id, "ping\n", &started.output().output)
             .await;
 
     let normalized_output = strip_terminal_noise(&combined_output);
@@ -522,7 +522,7 @@ async fn assert_windows_git_bash_tty_read_line(
         .expect("live session")
         .to_string();
     let (exit_code, combined_output) =
-        write_and_collect_session_output(&fixture, &session_id, "ping\n", &started.output().output)
+        write_and_collect_session_output(fixture, &session_id, "ping\n", &started.output().output)
             .await;
 
     let normalized_output = strip_terminal_noise(&combined_output).replace('\r', "");
