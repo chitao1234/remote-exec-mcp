@@ -606,6 +606,51 @@ static void assert_windows_cmd_command_line_preserves_command_quotes(const std::
     );
 }
 
+#ifdef _WIN32
+static void assert_windows_powershell_selection_and_argument_passing() {
+    const std::vector<std::string> powershell_names = {
+        "powershell.exe",
+        "powershell",
+        "pwsh.exe",
+        "pwsh",
+        "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+    };
+    for (std::size_t i = 0; i < powershell_names.size(); ++i) {
+        TEST_ASSERT(platform::shell_supported(powershell_names[i]));
+    }
+    TEST_ASSERT(platform::resolve_default_shell("pwsh.exe") == "pwsh.exe");
+    TEST_ASSERT(platform::selected_shell("powershell", "cmd.exe") == "powershell");
+
+    const std::vector<std::string> non_login_argv =
+        platform::shell_argv("pwsh.exe", false, "Write-Output alpha beta");
+    TEST_ASSERT(non_login_argv.size() == 4U);
+    TEST_ASSERT(non_login_argv[0] == "pwsh.exe");
+    TEST_ASSERT(non_login_argv[1] == "-NoProfile");
+    TEST_ASSERT(non_login_argv[2] == "-Command");
+    TEST_ASSERT(non_login_argv[3] == "Write-Output alpha beta");
+
+    const std::vector<std::string> login_argv =
+        platform::shell_argv("powershell.exe", true, "Write-Output alpha beta");
+    TEST_ASSERT(login_argv.size() == 3U);
+    TEST_ASSERT(login_argv[0] == "powershell.exe");
+    TEST_ASSERT(login_argv[1] == "-Command");
+    TEST_ASSERT(login_argv[2] == "Write-Output alpha beta");
+
+    TEST_ASSERT(
+        windows_process_command_line_for_test("Write-Output alpha beta", "pwsh.exe", false)
+        == "pwsh.exe -NoProfile -Command \"Write-Output alpha beta\""
+    );
+    TEST_ASSERT(
+        windows_process_command_line_for_test(
+            "Write-Output \"A & B\"",
+            "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+            true
+        )
+        == "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -Command \"Write-Output \\\"A & B\\\"\""
+    );
+}
+#endif
+
 static void assert_windows_command_com_command_line_omits_cmd_only_flags() {
     TEST_ASSERT(
         windows_process_command_line_for_test("echo \"A & B\"", "COMMAND.COM", false)
@@ -1995,6 +2040,7 @@ int main(int argc, char** argv) {
 
 #ifdef _WIN32
     assert_windows_cmd_command_line_preserves_command_quotes(shell);
+    assert_windows_powershell_selection_and_argument_passing();
     assert_windows_command_com_command_line_omits_cmd_only_flags();
     assert_windows_default_shell_fallback_tracks_runtime_family();
     assert_win32_process_tree_terminates_descendants(root);

@@ -145,7 +145,8 @@ namespace platform {
 bool shell_supported(const std::string& shell) {
 #ifdef _WIN32
     const std::string lower = shell_basename_lower(shell);
-    return is_windows_cmd_family(lower) || is_windows_command_family(lower);
+    return is_windows_cmd_family(lower) || is_windows_command_family(lower)
+           || is_windows_powershell_family(lower);
 #else
     (void)shell;
     return true;
@@ -157,7 +158,8 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
     if (!configured_default_shell.empty()) {
         if (!shell_supported(configured_default_shell)) {
             throw std::runtime_error(
-                "only cmd.exe and command.com are supported on this Windows C++ daemon build"
+                "supported Windows shells are cmd.exe/cmd, command.com/command, and the "
+                "PowerShell family (powershell.exe, powershell, pwsh.exe, pwsh)"
             );
         }
         return configured_default_shell;
