@@ -118,7 +118,7 @@ pub async fn spawn_tcp_echo() -> std::net::SocketAddr {
                 Err(_) => return,
             };
             tokio::spawn(async move {
-                let mut buf = [0u8; 1024];
+                let mut buf = [0u8; 64 * 1024];
                 loop {
                     let read = match stream.read(&mut buf).await {
                         Ok(0) | Err(_) => return,
