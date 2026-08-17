@@ -55,6 +55,11 @@ disable_structured_content = true
 #max_read_limit_lines = 20000
 #max_read_bytes = 4194304
 
+# Optional logical `local` endpoint. Set this scalar to relay every local
+# operation through an existing remote target. The selected target is exposed
+# publicly as `local`, and its configured name is no longer a separate target.
+#local = "builder-a"
+
 [targets.builder-a]
 # Requires the broker to be built with its default `broker-tls` Cargo feature.
 base_url = "https://builder-a.example.com:9443"
@@ -102,7 +107,7 @@ expected_daemon_name = "builder-xp"
 #bearer_token = "replace-me"
 
 # Optional broker-host transfer import safety limits for endpoints that use
-# `target = "local"`.
+# `target = "local"` without relay mode. Remote daemon limits apply in relay mode.
 #[transfer_limits]
 #max_archive_bytes = 536870912
 #max_entry_bytes = 536870912
@@ -122,9 +127,9 @@ expected_daemon_name = "builder-xp"
 
 # Optional broker-host sandbox for broker-local filesystem access.
 # This applies to `remote_transfer_files` endpoints with `target: "local"` and, when `[local]`
-# is enabled, also applies to the embedded local target.
-# It does not restrict `remote_forward_ports`; side `"local"` always means broker-host
-# network access and is usable even when `[local]` is omitted.
+# is enabled, also applies to the embedded local target. It is not used in relay mode
+# (`local = "builder-a"`), where the selected daemon's sandbox applies instead.
+# It does not restrict `remote_forward_ports` network access.
 # Missing `allow` or `allow = []` means "allow all", then `deny` refines it.
 #[host_sandbox.exec_cwd]
 #allow = ["/srv/local-work"]
@@ -138,13 +143,12 @@ expected_daemon_name = "builder-xp"
 #allow = ["/srv/local-work"]
 #deny = ["/srv/local-work/.git", "/srv/local-work/readonly"]
 
-# Optional broker-host local target for exec_command, write_stdin, apply_patch,
-# view_image, and enabled default-hidden read/write/edit tools.
-# When enabled, list_targets includes `local`.
-# `remote_transfer_files` can still use broker-host filesystem access with `target: "local"` even if
-# this section is omitted.
-# `remote_forward_ports` can still use broker-host network access with side `"local"` even if
-# this section is omitted.
+# Optional embedded broker-host local target for exec_command, write_stdin,
+# apply_patch, view_image, and enabled default-hidden read/write/edit tools.
+# This table is mutually exclusive with the scalar relay form above.
+# When neither form is configured, exec/patch/image/file operations cannot use
+# `target: "local"`, while transfer and forwarding retain their broker-host
+# compatibility behavior.
 #[local]
 #default_workdir = "/srv/local-work"
 

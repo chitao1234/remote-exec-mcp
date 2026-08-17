@@ -100,6 +100,8 @@ async fn target_info_is_available_over_plain_http() {
         info.capabilities.supports_pty,
         remote_exec_daemon::exec::session::supports_pty_for_mode(PtyMode::Auto)
     );
+    assert!(info.capabilities.supports_exec);
+    assert!(info.capabilities.supports_apply_patch);
     assert!(info.supports_image_read);
     assert!(info.supports_transfer_compression);
     assert_eq!(
@@ -108,6 +110,22 @@ async fn target_info_is_available_over_plain_http() {
             .map(|version| version.get()),
         Some(1)
     );
+}
+
+#[tokio::test]
+async fn target_info_reports_disabled_exec_and_apply_patch_capabilities() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        DEFAULT_TEST_TARGET,
+        "allow_exec = false\nallow_apply_patch = false\n",
+    )
+    .await;
+
+    let info = fixture
+        .rpc::<serde_json::Value, TargetInfoResponse>("/v1/target-info", &serde_json::json!({}))
+        .await;
+
+    assert!(!info.capabilities.supports_exec);
+    assert!(!info.capabilities.supports_apply_patch);
 }
 
 #[tokio::test]

@@ -192,6 +192,13 @@ HttpResponse handle_target_info(const TargetInfoRouteContext& context) {
 }
 
 HttpResponse handle_patch_apply(const PatchRouteContext& context, const HttpRequest& request) {
+    if (!context.allow_apply_patch) {
+        return make_rpc_error_response(
+            400,
+            "patch_disabled",
+            "apply_patch is disabled by daemon config"
+        );
+    }
     return handle_patch_rpc_route([&](HttpResponse& response) {
         const Json body = parse_json_body(request);
         const std::string workdir = resolve_workdir(context.paths, body);

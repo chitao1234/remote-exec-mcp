@@ -59,7 +59,7 @@ macro_rules! broker_tools {
             }
             TransferFiles {
                 name = "transfer_files",
-                description = "Transfer one file or one directory tree between broker-local and configured target filesystems.",
+                description = "Transfer one file or one directory tree between local or configured target filesystems.",
                 input = TransferFilesInput,
                 handler = crate::tools::transfer::transfer_files,
                 read_only = false,
@@ -67,7 +67,7 @@ macro_rules! broker_tools {
             }
             ForwardPorts {
                 name = "forward_ports",
-                description = "Open, list, or close TCP/UDP port forwards between broker-local and configured target machines.",
+                description = "Open, list, or close TCP/UDP port forwards between local or configured target machines.",
                 input = ForwardPortsInput,
                 handler = crate::tools::port_forward::forward_ports,
                 read_only = false,

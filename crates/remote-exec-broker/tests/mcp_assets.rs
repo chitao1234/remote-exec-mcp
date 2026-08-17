@@ -117,7 +117,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a: healthy, linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes, forward_ports=no\n- builder-b: maybe unhealthy (no cached daemon info)"
+        "Configured targets:\n- builder-a: healthy, linux/x86_64, host=builder-a-host, version=0.1.0, exec=yes, apply_patch=yes, pty=yes, forward_ports=no\n- builder-b: maybe unhealthy (no cached daemon info)"
     );
     assert_eq!(
         result.structured_content,
@@ -132,6 +132,8 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
                         "hostname": "builder-a-host",
                         "platform": "linux",
                         "arch": "x86_64",
+                        "supports_exec": true,
+                        "supports_apply_patch": true,
                         "supports_pty": true,
                         "supports_port_forward": false,
                         "transfer_stream_protocol_version": 2,
@@ -159,7 +161,7 @@ async fn list_targets_omits_structured_content_when_broker_disables_it() {
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a: healthy, linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes, forward_ports=no"
+        "Configured targets:\n- builder-a: healthy, linux/x86_64, host=builder-a-host, version=0.1.0, exec=yes, apply_patch=yes, pty=yes, forward_ports=no"
     );
     assert_eq!(result.structured_content, serde_json::Value::Null);
 }
@@ -173,7 +175,7 @@ async fn list_targets_formats_windows_metadata_and_truthful_pty_support() {
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a: healthy, windows/x86_64, host=builder-a-host, version=0.1.0, pty=no, forward_ports=no"
+        "Configured targets:\n- builder-a: healthy, windows/x86_64, host=builder-a-host, version=0.1.0, exec=yes, apply_patch=yes, pty=no, forward_ports=no"
     );
 }
 
@@ -271,6 +273,42 @@ async fn apply_patch_runs_against_enabled_local_target() {
         std::fs::read_to_string(workdir.join("hello.txt")).unwrap(),
         "hello local\n"
     );
+}
+
+#[tokio::test]
+async fn local_relay_routes_patch_and_image_to_backing_remote() {
+    let fixture =
+        support::spawners::spawn_broker_with_stub_daemon_and_extra_config("local = \"builder-a\"")
+            .await;
+
+    let patch = fixture
+        .call_tool(
+            "apply_patch",
+            serde_json::json!({
+                "target": "local",
+                "input": "*** Begin Patch\n*** Add File: relay.txt\n+relay\n*** End Patch\n",
+                "workdir": "/relay"
+            }),
+        )
+        .await;
+    assert!(patch.text_output.contains("Success."));
+    assert_eq!(
+        fixture.last_patch_request().await.unwrap().workdir,
+        Some("/relay".to_string())
+    );
+
+    let image = fixture
+        .call_tool(
+            "view_image",
+            serde_json::json!({
+                "target": "local",
+                "path": "/relay/chart.png",
+                "detail": "original"
+            }),
+        )
+        .await;
+    assert_eq!(image.structured_content["target"], "local");
+    assert_eq!(image.raw_content[0]["type"], "input_image");
 }
 
 #[tokio::test]

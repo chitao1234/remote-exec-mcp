@@ -30,6 +30,48 @@ async fn broker_keeps_healthy_targets_available_when_one_target_is_down() {
 }
 
 #[tokio::test]
+async fn local_relay_routes_exec_and_replaces_backing_target_name() {
+    let fixture =
+        support::spawners::spawn_broker_with_stub_daemon_and_extra_config("local = \"builder-a\"")
+            .await;
+
+    let listed = fixture
+        .call_tool("list_targets", serde_json::json!({}))
+        .await;
+    assert_eq!(
+        listed.structured_content["targets"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(listed.structured_content["targets"][0]["name"], "local");
+    assert!(!listed.text_output.contains("- builder-a:"));
+
+    let result = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "local",
+                "cmd": "printf relay",
+                "yield_time_ms": 1000
+            }),
+        )
+        .await;
+    assert_eq!(result.structured_content["target"], "local");
+    assert_eq!(result.structured_content["output"], "ready");
+    assert_eq!(fixture.exec_start_calls().await, 1);
+
+    let error = fixture
+        .call_tool_error(
+            "exec_command",
+            serde_json::json!({"target": "builder-a", "cmd": "printf bypass"}),
+        )
+        .await;
+    assert!(error.contains("unknown target `builder-a`"), "{error}");
+}
+
+#[tokio::test]
 async fn daemon_tool_error_triggers_health_recheck() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let before = fixture.health_call_count().await;

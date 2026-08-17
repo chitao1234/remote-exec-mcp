@@ -1,6 +1,6 @@
 ---
 name: using-remote-exec-mcp
-description: Use when work must happen through a remote-exec-mcp broker on a named target or broker-host `local`, including target discovery, remote command execution, live session input, remote patching, optional hidden text-file tools, image reads, file transfer, port forwarding, or the `remote-exec` CLI
+description: Use when work must happen through a remote-exec-mcp broker on a named target or logical `local` endpoint, including target discovery, remote command execution, live session input, remote patching, optional hidden text-file tools, image reads, file transfer, port forwarding, or the `remote-exec` CLI
 ---
 
 # Using remote-exec-mcp
@@ -30,7 +30,9 @@ still exits unsuccessfully.
 - A broker can set `prepend_tool_names = false` for legacy unprefixed MCP tool
   names. Use the names advertised by the broker when that compatibility mode is enabled.
 - Every machine-local operation is scoped to a logical `target`.
-- `local` means the broker host, not necessarily your current shell.
+- `local` is a logical endpoint. With no local config it is broker-host-only for
+  legacy transfer/forwarding behavior; `[local]` makes it an embedded broker-host
+  target; `local = "target-name"` makes it a relay to that remote daemon.
 - `session_id` and `forward_id` are opaque broker runtime tokens. Do not treat
   them as process IDs or daemon-local state.
 - `remote_list_targets` is broker inventory backed by cached metadata. It performs a
@@ -41,6 +43,8 @@ still exits unsuccessfully.
   `healthy`.
 - A configured target can have `healthy: false` and `daemon_info: null`; stale
   daemon metadata is hidden while the target remains unhealthy.
+- Target metadata includes `supports_exec` and `supports_apply_patch`. A false
+  value means the daemon policy disables that operation for this target.
 - Connectivity may be direct or daemon-initiated reverse mode. This is
   transparent to MCP callers; reverse-lane loss surfaces as ordinary target
   unavailability or transport failure.
@@ -57,6 +61,9 @@ still exits unsuccessfully.
   in `remote_list_targets`.
 - `remote_forward_ports` can use side `"local"` even when `local` does not appear in
   `remote_list_targets`.
+- In relay mode, `local` appears in `remote_list_targets` and all local operations,
+  including transfers and forwarding, use the selected remote. The backing
+  configured name is replaced by `local` and cannot be used as a bypass.
 - If broker structured content is disabled, rely on normal text/image content.
   `remote_apply_patch`, `remote_read`, `remote_write`, and `remote_edit` are text-only either way.
 - Tool errors include `request_id`, `tool`, and `target` when known. Keep the
@@ -492,6 +499,8 @@ Port forward:
   broker.
 - Use `supports_pty` before `tty: true`; if PTY support is false or unknown,
   run non-interactively or expect a typed unsupported error.
+- Use `supports_exec` and `supports_apply_patch` before relying on command or
+  patch operations. Daemon config can disable either independently.
 - Use `supports_port_forward` before opening forwards.
 - Optional tools, image detail modes, transfer features, shell behavior, and
   stdin behavior can vary by target. Read tool results, warnings, and errors.
@@ -499,7 +508,8 @@ Port forward:
 ## Common Mistakes
 
 - Guessing target names instead of calling `remote_list_targets`.
-- Forgetting that `local` means broker host.
+- Assuming `local` means the broker host without checking whether the broker is
+  configured for embedded local or remote relay mode.
 - Running a command on one target and expecting it to read another target's
   filesystem.
 - Using shell tricks instead of `remote_transfer_files` for cross-endpoint copy.

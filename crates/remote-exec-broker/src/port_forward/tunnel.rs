@@ -938,6 +938,8 @@ mod tests {
                 transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
                 max_open_sessions: remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS,
                 allow_login_shell: false,
+                allow_exec: false,
+                allow_apply_patch: false,
                 pty: remote_exec_host::PtyMode::None,
                 default_shell: None,
                 yield_time: remote_exec_host::YieldTimeConfig::default(),

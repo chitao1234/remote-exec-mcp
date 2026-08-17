@@ -36,6 +36,8 @@ static void assert_default_config_values(const DaemonConfig& config) {
     TEST_ASSERT(config.max_request_header_bytes == DEFAULT_MAX_REQUEST_HEADER_BYTES);
     TEST_ASSERT(config.max_request_body_bytes == DEFAULT_MAX_REQUEST_BODY_BYTES);
     TEST_ASSERT(config.max_open_sessions == DEFAULT_MAX_OPEN_SESSIONS);
+    TEST_ASSERT(config.allow_exec);
+    TEST_ASSERT(config.allow_apply_patch);
     TEST_ASSERT(config.http_connection_idle_timeout_ms == DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS);
     TEST_ASSERT(
         config.port_forward_limits.max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS
@@ -123,6 +125,8 @@ int main() {
             + "\n"
               "default_shell = /bin/sh\n"
               "allow_login_shell = false\n"
+              "allow_exec = false\n"
+              "allow_apply_patch = false\n"
               "http_auth_bearer_token = shared-secret\n"
               "max_request_header_bytes = 32768\n"
               "max_request_body_bytes = 1048576\n"
@@ -215,6 +219,8 @@ int main() {
     TEST_ASSERT(config.default_workdir == spaced_workdir.string());
     TEST_ASSERT(config.default_shell == "/bin/sh");
     TEST_ASSERT(!config.allow_login_shell);
+    TEST_ASSERT(!config.allow_exec);
+    TEST_ASSERT(!config.allow_apply_patch);
     TEST_ASSERT(config.http_auth_bearer_token == "shared-secret");
     TEST_ASSERT(config.max_request_header_bytes == 32768UL);
     TEST_ASSERT(config.max_request_body_bytes == 1048576UL);

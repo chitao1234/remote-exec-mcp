@@ -76,11 +76,12 @@ struct ExecRouteContext {
         SessionStore& sessions_value,
         const YieldTimeConfig& yield_time_value,
         unsigned long max_open_sessions_value,
-        const std::string& daemon_instance_id_value
+        const std::string& daemon_instance_id_value,
+        bool allow_exec_value
     )
         : request(request_value), target(target_value), sessions(sessions_value),
           yield_time(yield_time_value), max_open_sessions(max_open_sessions_value),
-          daemon_instance_id(daemon_instance_id_value) {}
+          daemon_instance_id(daemon_instance_id_value), allow_exec(allow_exec_value) {}
 
     ExecRequestContext request;
     const std::string& target;
@@ -88,17 +89,21 @@ struct ExecRouteContext {
     const YieldTimeConfig& yield_time;
     unsigned long max_open_sessions;
     const std::string& daemon_instance_id;
+    bool allow_exec;
 };
 
 struct PatchRouteContext {
     PatchRouteContext(
         const PathResolutionContext& paths_value,
-        const std::string& daemon_instance_id_value
+        const std::string& daemon_instance_id_value,
+        bool allow_apply_patch_value
     )
-        : paths(paths_value), daemon_instance_id(daemon_instance_id_value) {}
+        : paths(paths_value), daemon_instance_id(daemon_instance_id_value),
+          allow_apply_patch(allow_apply_patch_value) {}
 
     PathResolutionContext paths;
     const std::string& daemon_instance_id;
+    bool allow_apply_patch;
 };
 
 struct ImageRouteContext {

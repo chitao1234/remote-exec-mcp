@@ -7,6 +7,13 @@
 #include "rpc/server_route_exec.h"
 
 HttpResponse handle_exec_start(const ExecRouteContext& context, const HttpRequest& request) {
+    if (!context.allow_exec) {
+        return make_rpc_error_response(
+            400,
+            "exec_disabled",
+            "command execution is disabled by daemon config"
+        );
+    }
     return handle_exec_rpc_route("exec/start", ExecRouteKind::Start, [&](HttpResponse& response) {
         const ExecStartRequestSpec parsed = prepare_exec_start_request(context.request, request);
         const ExecSessionResult exec_result = context.sessions.start_command(
@@ -28,6 +35,13 @@ HttpResponse handle_exec_start(const ExecRouteContext& context, const HttpReques
 }
 
 HttpResponse handle_exec_write(const ExecRouteContext& context, const HttpRequest& request) {
+    if (!context.allow_exec) {
+        return make_rpc_error_response(
+            400,
+            "exec_disabled",
+            "command execution is disabled by daemon config"
+        );
+    }
     return handle_exec_rpc_route("exec/write", ExecRouteKind::Write, [&](HttpResponse& response) {
         const ExecWriteRequestSpec parsed = prepare_exec_write_request(request);
         {

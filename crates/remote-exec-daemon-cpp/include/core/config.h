@@ -103,7 +103,9 @@ struct DaemonConfig {
     std::string test_bound_addr_file;
     std::string default_workdir;
     std::string default_shell;
-    bool allow_login_shell;
+    bool allow_login_shell = true;
+    bool allow_exec = true;
+    bool allow_apply_patch = true;
     std::string http_auth_bearer_token;
     std::string tls_cert_pem;
     std::string tls_key_pem;

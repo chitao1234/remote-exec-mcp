@@ -59,6 +59,8 @@ mod tests {
                 enable_transfer_compression: true,
                 transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
                 max_open_sessions: remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS,
+                allow_exec: true,
+                allow_apply_patch: true,
                 allow_login_shell: true,
                 pty: PtyMode::Auto,
                 default_shell: None,

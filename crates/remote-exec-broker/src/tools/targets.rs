@@ -71,12 +71,14 @@ fn format_targets_text(targets: &[ListTargetEntry]) -> String {
                             "maybe unhealthy"
                         };
                     format!(
-                        "- {}: {status_label}, {}/{}, host={}, version={}, pty={}, forward_ports={}",
+                        "- {}: {status_label}, {}/{}, host={}, version={}, exec={}, apply_patch={}, pty={}, forward_ports={}",
                         target.name,
                         info.identity.platform.as_str(),
                         info.identity.arch.as_str(),
                         info.identity.hostname.as_str(),
                         info.identity.daemon_version.as_str(),
+                        if info.supports_exec { "yes" } else { "no" },
+                        if info.supports_apply_patch { "yes" } else { "no" },
                         if info.supports_pty { "yes" } else { "no" },
                         if info.supports_port_forward {
                             "yes"

@@ -81,11 +81,15 @@ async fn endpoint_target_context(
     target_name: &str,
 ) -> anyhow::Result<EndpointTargetContext> {
     match BrokerHostOrTarget::from_name(target_name) {
-        BrokerHostOrTarget::BrokerHost => Ok(EndpointTargetContext::local()),
-        BrokerHostOrTarget::Target(target_name) => EndpointTargetContext::remote(
-            target_name,
-            state.transfer_remote_daemon_info(target_name).await?,
-        ),
+        BrokerHostOrTarget::BrokerHost if !state.local_is_remote() => {
+            Ok(EndpointTargetContext::local())
+        }
+        BrokerHostOrTarget::BrokerHost | BrokerHostOrTarget::Target(_) => {
+            EndpointTargetContext::remote(
+                target_name,
+                state.transfer_remote_daemon_info(target_name).await?,
+            )
+        }
     }
 }
 

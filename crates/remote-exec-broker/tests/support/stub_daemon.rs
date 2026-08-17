@@ -361,6 +361,8 @@ pub(super) async fn spawn_named_daemon_on_listener(
         enable_transfer_compression: state.target_supports_transfer_compression,
         transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
         max_open_sessions: remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS,
+        allow_exec: true,
+        allow_apply_patch: true,
         allow_login_shell: true,
         pty: remote_exec_daemon::config::PtyMode::Auto,
         default_shell: None,
@@ -523,6 +525,8 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
         capabilities: TargetCapabilities {
             supports_pty: state.target_supports_pty,
             supports_port_forward: state.target_supports_port_forward,
+            supports_exec: true,
+            supports_apply_patch: true,
             port_forward_protocol_version: state.target_port_forward_protocol_version,
             transfer_stream_protocol_version: Some(TransferStreamProtocolVersion::v2()),
             file_tool_protocol_version: state.target_file_tool_protocol_version,

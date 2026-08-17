@@ -77,8 +77,12 @@ pub(super) async fn backend_for_endpoint<'a>(
 ) -> anyhow::Result<TransferEndpointBackend<'a>> {
     Ok(
         match crate::local::BrokerHostOrTarget::from_transfer_endpoint(endpoint) {
-            crate::local::BrokerHostOrTarget::BrokerHost => broker_host_backend(state),
-            crate::local::BrokerHostOrTarget::Target(target_name) => {
+            crate::local::BrokerHostOrTarget::BrokerHost if !state.local_is_remote() => {
+                broker_host_backend(state)
+            }
+            crate::local::BrokerHostOrTarget::BrokerHost
+            | crate::local::BrokerHostOrTarget::Target(_) => {
+                let target_name = endpoint.target.as_str();
                 let target = state.transfer_remote_target(target_name).await?;
                 TransferEndpointBackend::Remote(RemoteTransferBackend {
                     state,

@@ -27,9 +27,10 @@ ServerRouteContext make_server_route_context(
         services.sessions,
         config.yield_time,
         config.max_open_sessions,
-        metadata.daemon_instance_id
+        metadata.daemon_instance_id,
+        config.allow_exec
     );
-    const PatchRouteContext patch(paths, metadata.daemon_instance_id);
+    const PatchRouteContext patch(paths, metadata.daemon_instance_id, config.allow_apply_patch);
     const ImageRouteContext image(paths);
     const TransferRouteContext transfer(gate, paths, config.transfer_limits);
     return ServerRouteContext(gate, health, target_info, exec, patch, image, transfer);

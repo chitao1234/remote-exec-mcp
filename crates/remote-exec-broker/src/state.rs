@@ -43,9 +43,11 @@ pub(crate) struct BrokerHostFilesystemConfig {
 }
 
 impl BrokerHostFilesystemConfig {
-    pub(crate) fn from_local_config(local: Option<&crate::config::LocalTargetConfig>) -> Self {
+    pub(crate) fn from_local_config(local: Option<&crate::config::LocalConfig>) -> Self {
         Self {
-            windows_posix_root: local.and_then(|config| config.windows_posix_root.clone()),
+            windows_posix_root: local
+                .and_then(crate::config::LocalConfig::embedded)
+                .and_then(|config| config.windows_posix_root.clone()),
         }
     }
 
@@ -401,6 +403,10 @@ impl BrokerState {
     pub(crate) async fn exec_path_policy(&self, name: &str) -> anyhow::Result<PathPolicy> {
         let target = self.verified_target(name).await?;
         let info = target.cached_daemon_info_after_verification(name).await?;
+        anyhow::ensure!(
+            info.capabilities.supports_exec,
+            "target `{name}` does not support command execution"
+        );
         Ok(info.path_policy())
     }
 
@@ -410,6 +416,11 @@ impl BrokerState {
         req: &ExecStartRequest,
     ) -> anyhow::Result<ExecResponse> {
         let target = self.verified_target(name).await?;
+        let info = target.cached_daemon_info_after_verification(name).await?;
+        anyhow::ensure!(
+            info.capabilities.supports_exec,
+            "target `{name}` does not support command execution"
+        );
         self.normalize_target_result(name, target.exec_start(req).await, RpcToolErrorMode::Full)
     }
 
@@ -419,6 +430,11 @@ impl BrokerState {
         req: &PatchApplyRequest,
     ) -> anyhow::Result<PatchApplyResponse> {
         let target = self.verified_target(name).await?;
+        let info = target.cached_daemon_info_after_verification(name).await?;
+        anyhow::ensure!(
+            info.capabilities.supports_apply_patch,
+            "target `{name}` does not support apply_patch"
+        );
         self.normalize_target_result(name, target.patch_apply(req).await, RpcToolErrorMode::Full)
     }
 
@@ -480,6 +496,14 @@ impl BrokerState {
         }
 
         let target = self.verified_target(&record.target).await?;
+        let info = target
+            .cached_daemon_info_after_verification(&record.target)
+            .await?;
+        anyhow::ensure!(
+            info.capabilities.supports_exec,
+            "target `{}` does not support command execution",
+            record.target
+        );
         let request = ExecWriteRequest {
             daemon_session_id: record.daemon_session_id.clone(),
             chars,
@@ -596,6 +620,12 @@ impl BrokerState {
 
     pub(crate) fn configured_local_target_enabled(&self) -> bool {
         self.targets.contains_key(local::TARGET_NAME)
+    }
+
+    pub(crate) fn local_is_remote(&self) -> bool {
+        self.targets
+            .get(local::TARGET_NAME)
+            .is_some_and(|target| target.as_remote().is_some())
     }
 
     pub(crate) async fn port_forward_side(

@@ -541,6 +541,8 @@ fn build_stub_port_tunnel_state(
             transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
             max_open_sessions: remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS,
             allow_login_shell: true,
+            allow_exec: true,
+            allow_apply_patch: true,
             pty: PtyMode::None,
             default_shell: None,
             yield_time: YieldTimeConfig::default(),

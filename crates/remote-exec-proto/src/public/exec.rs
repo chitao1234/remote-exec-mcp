@@ -63,6 +63,8 @@ pub struct CommandToolResult {
 pub struct ListTargetDaemonInfo {
     #[serde(flatten)]
     pub identity: DaemonIdentity,
+    pub supports_exec: bool,
+    pub supports_apply_patch: bool,
     pub supports_pty: bool,
     pub supports_port_forward: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -78,6 +80,8 @@ impl ListTargetDaemonInfo {
     ) -> Self {
         Self {
             identity,
+            supports_exec: capabilities.supports_exec,
+            supports_apply_patch: capabilities.supports_apply_patch,
             supports_pty: capabilities.supports_pty,
             supports_port_forward: capabilities.supports_compatible_port_forward(),
             transfer_stream_protocol_version: capabilities.transfer_stream_protocol_version,

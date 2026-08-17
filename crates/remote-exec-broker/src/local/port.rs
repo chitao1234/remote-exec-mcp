@@ -54,6 +54,8 @@ fn local_port_forward_config(default_workdir: PathBuf) -> HostRuntimeConfig {
         transfer_limits: TransferLimits::default(),
         max_open_sessions: DEFAULT_MAX_OPEN_SESSIONS,
         allow_login_shell: false,
+        allow_exec: false,
+        allow_apply_patch: false,
         pty: PtyMode::None,
         default_shell: None,
         yield_time: YieldTimeConfig::default(),

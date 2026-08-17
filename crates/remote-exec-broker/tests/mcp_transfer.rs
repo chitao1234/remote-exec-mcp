@@ -1078,6 +1078,47 @@ async fn transfer_files_rejects_same_local_path_before_mutation() {
 }
 
 #[tokio::test]
+async fn transfer_files_local_relay_uses_remote_transfer_endpoints() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon_and_extra_config(
+        "local = \"builder-a\"\nenable_transfer_compression = false",
+    )
+    .await;
+    fixture
+        .set_transfer_export_file_response(b"relay payload\n")
+        .await;
+    fixture
+        .set_transfer_path_info_response(remote_exec_proto::rpc::TransferPathInfoResponse {
+            exists: true,
+            is_directory: false,
+        })
+        .await;
+
+    let result = transfer_single_source(
+        &fixture,
+        "local",
+        "/relay/source.txt",
+        "local",
+        "/relay/dest.txt",
+        Some("replace"),
+        true,
+    )
+    .await;
+    assert_eq!(result.structured_content["source_type"], "file");
+    assert_eq!(
+        fixture.last_transfer_export().await.unwrap().request.path,
+        "/relay/source.txt"
+    );
+    assert_eq!(
+        fixture
+            .last_transfer_import()
+            .await
+            .unwrap()
+            .destination_path,
+        "/relay/dest.txt"
+    );
+}
+
+#[tokio::test]
 async fn transfer_files_rejects_exact_normalized_windows_remote_duplicates_on_non_windows_hosts() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon_platform("windows", false).await;
 

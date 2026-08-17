@@ -3,6 +3,11 @@ listen = "0.0.0.0:9443"
 # Must already exist when the daemon starts.
 default_workdir = "/srv/work"
 allow_login_shell = true
+# Optional operation policies. Both default to true for compatibility.
+# `allow_exec = false` rejects command start and stdin/write RPCs.
+# `allow_apply_patch = false` rejects patch RPCs only; commands can still modify files.
+#allow_exec = true
+#allow_apply_patch = true
 # Live exec sessions and daemon-side forwarded sockets are in-memory only and
 # are closed during daemon shutdown or restart.
 

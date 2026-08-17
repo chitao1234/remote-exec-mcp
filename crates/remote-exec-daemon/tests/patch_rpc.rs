@@ -6,6 +6,36 @@ use remote_exec_test_support::test_helpers::utf16le_bom_bytes;
 use support::encoded_bytes;
 use support::test_helpers::DEFAULT_TEST_TARGET;
 
+#[tokio::test]
+async fn disabled_apply_patch_rejects_before_touching_the_filesystem() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        DEFAULT_TEST_TARGET,
+        "allow_apply_patch = false\n",
+    )
+    .await;
+    let destination = fixture.workdir.join("disabled.txt");
+
+    let error = fixture
+        .rpc_error(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Add File: disabled.txt\n",
+                    "+must not be written\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(error.wire_code(), "patch_disabled");
+    assert_eq!(error.message, "apply_patch is disabled by daemon config");
+    assert!(!destination.exists());
+}
+
 /// Applies `patch` to `plain.txt` (seeded with `initial_content`) and asserts the
 /// standard "M plain.txt" + resulting-content outcome shared by update_file_* tests.
 async fn assert_update_file_outcome(initial_content: &str, patch: &str, expected_content: &str) {

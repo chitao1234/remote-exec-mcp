@@ -60,6 +60,10 @@ pub struct DaemonConfig {
     pub max_open_sessions: usize,
     #[serde(default = "default_allow_login_shell")]
     pub allow_login_shell: bool,
+    #[serde(default = "default_allow_exec")]
+    pub allow_exec: bool,
+    #[serde(default = "default_allow_apply_patch")]
+    pub allow_apply_patch: bool,
     #[serde(default)]
     pub pty: PtyMode,
     #[serde(default)]
@@ -134,6 +138,8 @@ impl From<HostRuntimeConfig> for DaemonConfig {
             transfer_limits,
             max_open_sessions,
             allow_login_shell,
+            allow_exec,
+            allow_apply_patch,
             pty,
             default_shell,
             yield_time,
@@ -155,6 +161,8 @@ impl From<HostRuntimeConfig> for DaemonConfig {
             transfer_limits,
             max_open_sessions,
             allow_login_shell,
+            allow_exec,
+            allow_apply_patch,
             pty,
             default_shell,
             yield_time,
@@ -178,6 +186,8 @@ impl DaemonConfig {
             transfer_limits: self.transfer_limits,
             max_open_sessions: self.max_open_sessions,
             allow_login_shell: self.allow_login_shell,
+            allow_exec: self.allow_exec,
+            allow_apply_patch: self.allow_apply_patch,
             pty: self.pty,
             default_shell: self.default_shell.as_deref(),
             yield_time: self.yield_time,
@@ -290,6 +300,14 @@ impl DaemonConfig {
 
 fn default_reverse_min_idle_connections() -> usize {
     4
+}
+
+fn default_allow_exec() -> bool {
+    true
+}
+
+fn default_allow_apply_patch() -> bool {
+    true
 }
 
 fn default_daemon_listen() -> SocketAddr {

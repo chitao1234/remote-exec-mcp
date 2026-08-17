@@ -125,7 +125,7 @@ enum Command {
     #[command(about = "Read an image from a configured target machine.")]
     ViewImage(ViewImageArgs),
     #[command(
-        about = "Transfer files or directory trees between broker-local and configured targets.",
+        about = "Transfer files or directory trees between local or configured targets.",
         after_help = TRANSFER_AFTER_HELP
     )]
     TransferFiles(TransferFilesArgs),

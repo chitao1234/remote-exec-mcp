@@ -148,6 +148,8 @@ fn local_config(default_workdir: PathBuf) -> HostRuntimeConfig {
         transfer_limits: TransferLimits::default(),
         max_open_sessions: remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS,
         allow_login_shell: false,
+        allow_exec: false,
+        allow_apply_patch: true,
         pty: PtyMode::None,
         default_shell: None,
         yield_time: YieldTimeConfig::default(),

@@ -289,6 +289,43 @@ async fn forward_ports_opens_remote_forward_with_v4_tunnel_open() {
 }
 
 #[tokio::test]
+async fn forward_ports_local_relay_uses_backing_remote_tunnel() {
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version_and_extra_config(
+        4,
+        "local = \"builder-a\"",
+    )
+    .await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    let echo_addr = support::spawn_tcp_echo().await;
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": echo_addr.to_string(),
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    assert_eq!(
+        support::stub_daemon::tunnel_open_count(&fixture.stub_state).await,
+        2
+    );
+    assert_eq!(
+        open.structured_content["forwards"][0]["listen_side"],
+        "local"
+    );
+    let close = close_forward(&fixture, forward_id_from(&open)).await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
 async fn forward_ports_keeps_forward_open_after_listen_tunnel_drop() {
     let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;

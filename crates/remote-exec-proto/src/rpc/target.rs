@@ -28,6 +28,10 @@ pub struct DaemonIdentity {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct TargetCapabilities {
+    #[serde(default = "default_supported")]
+    pub supports_exec: bool,
+    #[serde(default = "default_supported")]
+    pub supports_apply_patch: bool,
     pub supports_pty: bool,
     #[serde(default)]
     pub supports_port_forward: bool,
@@ -37,6 +41,10 @@ pub struct TargetCapabilities {
     pub transfer_stream_protocol_version: Option<TransferStreamProtocolVersion>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_tool_protocol_version: Option<FileToolProtocolVersion>,
+}
+
+const fn default_supported() -> bool {
+    true
 }
 
 impl TargetCapabilities {
@@ -133,6 +141,8 @@ mod tests {
         port_forward_protocol_version: Option<PortForwardProtocolVersion>,
     ) -> TargetCapabilities {
         TargetCapabilities {
+            supports_exec: true,
+            supports_apply_patch: true,
             supports_pty: true,
             supports_port_forward,
             port_forward_protocol_version,
@@ -152,5 +162,17 @@ mod tests {
                 .supports_compatible_port_forward()
         );
         assert!(!capabilities(true, None).supports_compatible_port_forward());
+    }
+
+    #[test]
+    fn legacy_capabilities_default_exec_and_apply_patch_to_supported() {
+        let capabilities: TargetCapabilities = serde_json::from_value(serde_json::json!({
+            "supports_pty": false,
+            "supports_port_forward": false
+        }))
+        .unwrap();
+
+        assert!(capabilities.supports_exec);
+        assert!(capabilities.supports_apply_patch);
     }
 }

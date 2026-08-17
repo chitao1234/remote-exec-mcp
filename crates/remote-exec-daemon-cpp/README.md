@@ -318,6 +318,8 @@ target = builder-cpp
 listen_host = 0.0.0.0
 listen_port = 8181
 default_workdir = /work
+allow_exec = true
+allow_apply_patch = true
 
 # Optional plain-HTTP bearer auth.
 # http_auth_bearer_token = replace-me
@@ -500,6 +502,10 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 
 ### Images And Patches
 
+- `allow_exec` and `allow_apply_patch` default to `true`. Set `allow_exec = false`
+  to reject both exec start and stdin/write requests. Set
+  `allow_apply_patch = false` to reject patch RPCs independently. Disabling
+  patching does not stop enabled commands from modifying files.
 - `view_image` returns PNG, JPEG, and WebP without resizing.
 - `view_image.detail` is accepted for compatibility but has no effect.
 - `apply_patch` parses the complete patch before writing, so malformed syntax

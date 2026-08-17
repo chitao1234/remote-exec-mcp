@@ -567,6 +567,40 @@ pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> Broker
     spawn_broker_fixture_with_stub_target(addr, stub_state, None, None).await
 }
 
+pub async fn spawn_broker_with_stub_port_forward_version_and_extra_config(
+    version: u32,
+    extra_top_level: &str,
+) -> BrokerFixture {
+    remote_exec_daemon::install_crypto_provider().unwrap();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut stub_state = stub_daemon_state(
+        DEFAULT_TEST_TARGET,
+        ExecWriteBehavior::Success,
+        "linux",
+        true,
+    );
+    set_port_forward_support(&mut stub_state, true, version);
+    spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
+
+    spawn_broker_fixture_from_config(
+        tempdir,
+        &[BrokerConfigTarget {
+            name: DEFAULT_TEST_TARGET,
+            addr,
+            transport: BrokerTargetTransport::Http,
+            extra_config: None,
+        }],
+        None,
+        None,
+        Some(extra_top_level),
+        stub_state,
+    )
+    .await
+}
+
 pub async fn spawn_broker_with_local_and_stub_port_forward_version(version: u32) -> BrokerFixture {
     spawn_broker_with_local_and_stub_port_forward_version_and_extra_config(version, None).await
 }

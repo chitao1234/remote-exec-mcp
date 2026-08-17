@@ -26,6 +26,12 @@ pub async fn exec_start_local(
     state: Arc<AppState>,
     req: ExecStartRequest,
 ) -> Result<ExecResponse, HostRpcError> {
+    if !state.config.allow_exec {
+        return Err(logged_bad_request(
+            RpcErrorCode::ExecDisabled,
+            "command execution is disabled by daemon config",
+        ));
+    }
     log_exec_start_request(&state, &req);
     let prepared = prepare_exec_start(&state, &req)?;
     let mut session = session::spawn_with_windows_pty_backend_override(
@@ -78,6 +84,12 @@ pub async fn exec_write_local(
     state: Arc<AppState>,
     req: ExecWriteRequest,
 ) -> Result<ExecResponse, HostRpcError> {
+    if !state.config.allow_exec {
+        return Err(logged_bad_request(
+            RpcErrorCode::ExecDisabled,
+            "command execution is disabled by daemon config",
+        ));
+    }
     let daemon_session_id = req.daemon_session_id.clone();
     tracing::info!(
         target = %state.config.target,

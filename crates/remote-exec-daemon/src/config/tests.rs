@@ -62,7 +62,24 @@ async fn load_accepts_http_transport_without_tls_block() {
         config.max_open_sessions,
         remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS
     );
+    assert!(config.allow_exec);
+    assert!(config.allow_apply_patch);
     assert!(!config.experimental_apply_patch_target_encoding_autodetect);
+}
+
+#[tokio::test]
+async fn load_accepts_disabling_exec_and_apply_patch_independently() {
+    let dir = tempfile::tempdir().unwrap();
+    let config =
+        load_http_config_with_extra(&dir, "allow_exec = false\nallow_apply_patch = false\n")
+            .await
+            .unwrap();
+
+    assert!(!config.allow_exec);
+    assert!(!config.allow_apply_patch);
+    let host = remote_exec_host::HostRuntimeConfig::from(config.as_ref());
+    assert!(!host.allow_exec);
+    assert!(!host.allow_apply_patch);
 }
 
 #[tokio::test]

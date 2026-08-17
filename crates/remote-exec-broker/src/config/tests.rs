@@ -66,6 +66,46 @@ async fn load_accepts_non_reserved_target_names() {
 }
 
 #[tokio::test]
+async fn load_accepts_local_relay_target_and_keeps_backing_configured() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = load_config(
+        &dir,
+        format!(
+            "local = \"{DEFAULT_TEST_TARGET}\"\n\n{}",
+            valid_target_config(DEFAULT_TEST_TARGET)
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(
+        config.local.as_ref(),
+        Some(super::LocalConfig::Remote(target)) if target == DEFAULT_TEST_TARGET
+    ));
+    assert!(config.targets.contains_key(DEFAULT_TEST_TARGET));
+}
+
+#[tokio::test]
+async fn load_rejects_missing_or_empty_local_relay_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = load_config(&dir, "local = \"missing\"\n")
+        .await
+        .unwrap_err();
+    assert!(
+        missing
+            .to_string()
+            .contains("local relay target `missing` is not configured")
+    );
+
+    let empty = load_config(&dir, "local = \"\"\n").await.unwrap_err();
+    assert!(
+        empty
+            .to_string()
+            .contains("local relay target must not be empty")
+    );
+}
+
+#[tokio::test]
 async fn load_defaults_remote_request_timeout_for_long_operations() {
     let dir = tempfile::tempdir().unwrap();
     let config = load_config(&dir, valid_target_config(DEFAULT_TEST_TARGET))
@@ -246,14 +286,12 @@ async fn load_accepts_local_only_broker_config() {
     .await
     .unwrap();
     assert!(config.targets.is_empty());
+    let local = config.local.as_ref().and_then(super::LocalConfig::embedded);
     assert_eq!(
-        config.local.as_ref().map(|local| &local.default_workdir),
+        local.map(|local| &local.default_workdir),
         Some(&dir.path().to_path_buf())
     );
-    assert_eq!(
-        config.local.as_ref().map(|local| local.allow_login_shell),
-        Some(false)
-    );
+    assert_eq!(local.map(|local| local.allow_login_shell), Some(false));
     assert!(!config.disable_structured_content);
     assert!(matches!(config.mcp, McpServerConfig::Stdio));
 }
@@ -364,6 +402,7 @@ async fn load_accepts_local_apply_patch_encoding_autodetect() {
         config
             .local
             .as_ref()
+            .and_then(super::LocalConfig::embedded)
             .map(|local| local.experimental_apply_patch_target_encoding_autodetect),
         Some(true)
     );

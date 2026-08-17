@@ -534,6 +534,8 @@ DaemonConfig load_config(const std::string& path) {
     config.default_workdir = read_required_string(values, "default_workdir");
     config.default_shell = read_optional_string(values, "default_shell", "");
     config.allow_login_shell = read_optional_bool(values, "allow_login_shell", true);
+    config.allow_exec = read_optional_bool(values, "allow_exec", true);
+    config.allow_apply_patch = read_optional_bool(values, "allow_apply_patch", true);
     config.http_auth_bearer_token = read_http_auth_bearer_token(values);
     config.max_request_header_bytes =
         read_optional_size_t(values, "max_request_header_bytes", DEFAULT_MAX_REQUEST_HEADER_BYTES);

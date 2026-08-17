@@ -78,7 +78,7 @@ void initialize_test_daemon_state_with_port_forward_limits(
     state.metadata.daemon_instance_id = "test-instance";
     state.metadata.hostname = "test-host";
     state.metadata.default_shell = stable_test_shell();
-    state.metadata.capabilities = detect_daemon_capabilities();
+    state.metadata.capabilities = detect_daemon_capabilities(state.config);
     state.services.port_tunnel = create_port_tunnel_service(limits);
 }
 

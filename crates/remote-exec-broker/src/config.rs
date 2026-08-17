@@ -25,8 +25,10 @@ pub struct BrokerConfig {
     pub mcp: McpServerConfig,
     #[serde(default)]
     pub targets: BTreeMap<String, TargetConfig>,
+    /// Selects either the broker host (`[local]`) or an existing remote target
+    /// (`local = "target-name"`) as the public `local` endpoint.
     #[serde(default)]
-    pub local: Option<LocalTargetConfig>,
+    pub local: Option<LocalConfig>,
     #[serde(default)]
     pub host_sandbox: Option<FilesystemSandbox>,
     #[serde(default = "default_enable_transfer_compression")]
@@ -342,6 +344,22 @@ impl TargetTimeoutConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum LocalConfig {
+    Remote(String),
+    Embedded(LocalTargetConfig),
+}
+
+impl LocalConfig {
+    pub(crate) fn embedded(&self) -> Option<&LocalTargetConfig> {
+        match self {
+            Self::Embedded(config) => Some(config),
+            Self::Remote(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct LocalTargetConfig {
     pub default_workdir: PathBuf,
     #[serde(default)]
@@ -451,6 +469,8 @@ impl LocalTargetConfig {
             transfer_limits: self.transfer_limits,
             max_open_sessions: DEFAULT_MAX_OPEN_SESSIONS,
             allow_login_shell: self.allow_login_shell,
+            allow_exec: true,
+            allow_apply_patch: true,
             pty: self.pty,
             default_shell: self.default_shell.as_deref(),
             yield_time: self.yield_time,
@@ -504,7 +524,7 @@ impl McpServerConfig {
 
 impl BrokerConfig {
     pub(crate) fn normalize_paths(&mut self) {
-        if let Some(local) = &mut self.local {
+        if let Some(LocalConfig::Embedded(local)) = &mut self.local {
             let process_environment = ProcessEnvironment::capture_current();
             let mut host_config = HostRuntimeConfig::from_source(local.host_runtime_config_source(
                 None,
@@ -558,12 +578,27 @@ impl BrokerConfig {
             local::TARGET_NAME
         );
         if let Some(local) = &self.local {
-            local
-                .validate_host_runtime_config(
-                    self.host_sandbox.as_ref(),
-                    self.enable_transfer_compression,
-                )
-                .map(|_| ())?;
+            match local {
+                LocalConfig::Embedded(local) => {
+                    local
+                        .validate_host_runtime_config(
+                            self.host_sandbox.as_ref(),
+                            self.enable_transfer_compression,
+                        )
+                        .map(|_| ())?;
+                }
+                LocalConfig::Remote(target) => {
+                    anyhow::ensure!(!target.is_empty(), "local relay target must not be empty");
+                    anyhow::ensure!(
+                        target != local::TARGET_NAME,
+                        "local relay target cannot be `local`"
+                    );
+                    anyhow::ensure!(
+                        self.targets.contains_key(target),
+                        "local relay target `{target}` is not configured"
+                    );
+                }
+            }
         }
         for (name, target) in &self.targets {
             target.validate(name)?;

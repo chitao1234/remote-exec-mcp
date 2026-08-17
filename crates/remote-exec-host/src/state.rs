@@ -148,6 +148,8 @@ pub fn target_info_response(state: &HostRuntimeState, daemon_version: &str) -> T
             arch: std::env::consts::ARCH.to_string(),
         },
         capabilities: TargetCapabilities {
+            supports_exec: state.config.allow_exec,
+            supports_apply_patch: state.config.allow_apply_patch,
             supports_pty: state.supports_pty,
             supports_port_forward: true,
             port_forward_protocol_version: Some(PortForwardProtocolVersion::v4()),

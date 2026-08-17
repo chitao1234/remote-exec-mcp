@@ -149,7 +149,7 @@ ServerRuntime::ServerRuntime(const DaemonConfig& config)
     metadata_.daemon_instance_id = daemon_instance_id();
     metadata_.hostname = platform::hostname();
     metadata_.default_shell = platform::resolve_default_shell(config.default_shell);
-    metadata_.capabilities = detect_daemon_capabilities();
+    metadata_.capabilities = detect_daemon_capabilities(config_);
     sandbox_.enabled = config.sandbox_configured;
     if (sandbox_.enabled) {
         sandbox_.compiled = compile_filesystem_sandbox(config.sandbox);

@@ -35,6 +35,12 @@ pub async fn apply_patch_local_detailed(
     state: Arc<AppState>,
     req: PatchApplyRequest,
 ) -> Result<PatchApplyResponse, PatchApplyFailure> {
+    if !state.config.allow_apply_patch {
+        return Err(PatchApplyFailure::without_updates(logged_bad_request(
+            RpcErrorCode::PatchDisabled,
+            "apply_patch is disabled by daemon config",
+        )));
+    }
     tracing::info!(
         target = %state.config.target,
         patch_len = req.patch.len(),

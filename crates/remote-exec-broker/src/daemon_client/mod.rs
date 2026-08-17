@@ -133,6 +133,8 @@ mod tests {
             capabilities: TargetCapabilities {
                 supports_pty: true,
                 supports_port_forward: false,
+                supports_exec: true,
+                supports_apply_patch: true,
                 port_forward_protocol_version: None,
                 transfer_stream_protocol_version: Some(TransferStreamProtocolVersion::v2()),
                 file_tool_protocol_version: None,

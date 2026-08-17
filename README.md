@@ -84,7 +84,7 @@ Default-hidden file tools are available only when explicitly enabled under
 
 | Component | Role |
 | --- | --- |
-| `remote-exec-broker` | Public MCP server over stdio or streamable HTTP. It validates targets, routes calls, owns public `session_id` and `forward_id` namespaces, and can use the broker host as `local`. |
+| `remote-exec-broker` | Public MCP server over stdio or streamable HTTP. It validates targets, routes calls, owns public `session_id` and `forward_id` namespaces, and can expose `local` as the broker host or as a relay to one configured remote. |
 | `remote-exec` | CLI client built from the broker crate. It can run against a config in-process or a streamable-HTTP broker. |
 | `apply_patch` | Standalone local CLI built by both the Rust host crate and C++ daemon build. It reads a Codex-style patch from standard input. `--help` prints built-in usage; `--help --help-file PATH` prints the supplied help file instead. Without `--help`, `--help-file PATH` is ignored. |
 | `remote-exec-daemon` | Rust per-machine daemon. It supports mutual TLS by default, optional plain HTTP, exec, patch, image, transfer, sandbox checks, and v4 port-forward tunnels. |
@@ -117,6 +117,9 @@ Important invariants:
   remains the backward-compatible availability indicator.
 - Public `supports_port_forward` means the target reported forwarding support
   and the broker verified a supported tunnel protocol version.
+- `remote_list_targets` also reports `supports_exec` and `supports_apply_patch`.
+  These are daemon policy capabilities; missing fields from older daemons mean
+  both operations are supported for compatibility.
 - Temporarily unreachable targets can remain configured. Broker startup may
   succeed and verify a target before the first forwarded call.
 - Broker-daemon RPC uses HTTP/1.1 JSON. Port forwarding uses daemon-private
@@ -137,7 +140,7 @@ Use the example configs as the canonical shape:
 
 | File | Covers |
 | --- | --- |
-| `configs/broker.example.toml` | MCP transport, targets, TLS client credentials, reverse listener, broker-host `local`, host sandbox, hidden file tools, transfer limits, and forwarding limits. |
+| `configs/broker.example.toml` | MCP transport, targets, TLS client credentials, reverse listener, embedded or relay `local`, host sandbox, hidden file tools, transfer limits, and forwarding limits. |
 | `configs/daemon.example.toml` | Rust daemon target name, listen/reverse mode, default workdir, TLS or HTTP transport, bearer auth, shell/PTY policy, sandbox, transfer, yield-time, and forwarding limits. |
 | `crates/remote-exec-daemon-cpp/config/daemon-cpp.example.ini` | C++ daemon listen address, direct/reverse TLS or HTTP transport, default workdir, bearer auth, request/session/forwarding limits, yield-time limits, and sandbox. |
 
@@ -330,7 +333,7 @@ port forwards require a long-running broker, so prefer `--broker-url` for
 - runs one command on one target
 - returns `session_id` when still running
 - merges stdout/stderr order into one public `output` field for non-TTY exec
-- applies daemon or broker-local `yield_time_ms` policy
+- applies daemon or embedded broker-local `yield_time_ms` policy
 - truncates output by approximate token budget, where one token is about four
   UTF-8 bytes
 
@@ -426,16 +429,38 @@ Default-hidden file tools:
 
 ## Local Semantics
 
-The name `local` means the broker host.
+`local` is a logical endpoint with three possible configurations:
 
-- `[local]` enables `target: "local"` for `remote_exec_command`, `remote_write_stdin`,
-  `remote_apply_patch`, `remote_view_image`, and enabled default-hidden file tools.
-- `remote_transfer_files` can use `target: "local"` for broker-host filesystem access
-  even when `[local]` is omitted.
-- `remote_forward_ports` can use side `"local"` for broker-host network access even
-  when `[local]` is omitted.
-- Broker `host_sandbox` governs broker-host filesystem access. It does not
-  restrict `remote_forward_ports` network access.
+- With no local configuration, `local` is unavailable for exec, stdin, patch,
+  image, and hidden file tools. Transfer endpoints and forwarding sides named
+  `local` retain their legacy broker-host filesystem/network behavior.
+- An embedded `[local]` table makes `local` an actual broker-host target for
+  exec, stdin, patch, image, hidden file tools, and the host-side transfer and
+  forwarding compatibility paths. `host_sandbox` applies to broker-host
+  filesystem access.
+- A scalar `local = "builder-a"` enables relay mode. Every operation addressed
+  to `local`, including exec, stdin, patch, image, hidden file tools, transfers,
+  and both sides of port forwarding, runs through the selected remote daemon.
+  The broker host's filesystem and network are not reachable through this
+  endpoint. The selected configured name is replaced publicly by `local`, so
+  `builder-a` is not a second bypass target. Remote daemon sandbox and limits
+  apply; broker-host sandbox and host transfer limits do not.
+
+The scalar relay form and `[local]` table are mutually exclusive. The relay
+target must be a configured remote target and cannot itself be named `local`.
+
+## Daemon Operation Policies
+
+Rust and C++ daemons accept two independent, default-enabled policy settings:
+
+- `allow_exec = false` disables command execution, including both new exec
+  sessions and stdin/write or poll requests for existing sessions.
+- `allow_apply_patch = false` disables the patch RPC while leaving other daemon
+  operations available. If command execution remains enabled, commands can
+  still modify files; this setting is not a general write prohibition.
+
+The daemon advertises both settings through target capabilities, and the broker
+rejects known-disabled operations before forwarding them.
 
 ## Trust Model
 

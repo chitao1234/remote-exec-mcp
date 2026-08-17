@@ -56,8 +56,8 @@ pub async fn build_state(config: config::ValidatedBrokerConfig) -> anyhow::Resul
     let reverse_transport = ReverseTransportManager::start(&config).await?;
     let mut targets = BTreeMap::new();
 
-    insert_local_target(&config, &mut targets).await?;
     insert_remote_targets(&config.targets, reverse_transport.as_ref(), &mut targets).await?;
+    insert_local_target(&config, &mut targets).await?;
 
     Ok(BrokerState::new(BrokerStateInit {
         enable_transfer_compression: config.enable_transfer_compression,
@@ -97,6 +97,23 @@ async fn insert_local_target(
 ) -> anyhow::Result<()> {
     let Some(local_config) = &config.local else {
         return Ok(());
+    };
+
+    if let config::LocalConfig::Remote(target_name) = local_config {
+        let target = targets
+            .remove(target_name)
+            .with_context(|| format!("local relay target `{target_name}` is not configured"))?;
+        tracing::info!(
+            target = local::TARGET_NAME,
+            backing_target = %target_name,
+            "enabled local relay target"
+        );
+        targets.insert(local::TARGET_NAME.to_string(), target);
+        return Ok(());
+    }
+
+    let config::LocalConfig::Embedded(local_config) = local_config else {
+        unreachable!("remote local config handled above")
     };
 
     let client = LocalDaemonClient::new(
@@ -324,7 +341,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::config::{
-        BrokerConfig, BrokerHealthRefreshConfig, LocalTargetConfig, TargetConfig,
+        BrokerConfig, BrokerHealthRefreshConfig, LocalConfig, LocalTargetConfig, TargetConfig,
         TargetTimeoutConfig,
     };
     #[cfg(not(feature = "broker-tls"))]
@@ -353,7 +370,7 @@ mod tests {
                 health_refresh: Default::default(),
                 reverse: None,
                 targets: BTreeMap::new(),
-                local: Some(LocalTargetConfig {
+                local: Some(LocalConfig::Embedded(LocalTargetConfig {
                     default_workdir: tempdir.path().to_path_buf(),
                     windows_posix_root: None,
                     allow_login_shell: true,
@@ -363,7 +380,7 @@ mod tests {
                     transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
                     port_forward_limits: remote_exec_host::HostPortForwardLimits::default(),
                     experimental_apply_patch_target_encoding_autodetect: false,
-                }),
+                })),
             }
             .into_validated()
             .unwrap(),
@@ -434,6 +451,8 @@ mod tests {
                 capabilities: TargetCapabilities {
                     supports_pty: false,
                     supports_port_forward: false,
+                    supports_exec: true,
+                    supports_apply_patch: true,
                     port_forward_protocol_version: None,
                     transfer_stream_protocol_version: Some(TransferStreamProtocolVersion::v2()),
                     file_tool_protocol_version: None,
@@ -550,7 +569,7 @@ mod tests {
                 health_refresh: Default::default(),
                 reverse: None,
                 targets: BTreeMap::new(),
-                local: Some(LocalTargetConfig {
+                local: Some(LocalConfig::Embedded(LocalTargetConfig {
                     default_workdir: tempdir.path().to_path_buf(),
                     windows_posix_root: Some(windows_posix_root.clone()),
                     allow_login_shell: true,
@@ -560,7 +579,7 @@ mod tests {
                     transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
                     port_forward_limits: remote_exec_host::HostPortForwardLimits::default(),
                     experimental_apply_patch_target_encoding_autodetect: false,
-                }),
+                })),
             }
             .into_validated()
             .unwrap(),
@@ -740,6 +759,8 @@ mod tests {
             enable_transfer_compression: true,
             transfer_limits: Default::default(),
             max_open_sessions: remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS,
+            allow_exec: true,
+            allow_apply_patch: true,
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::None,
             default_shell: None,
@@ -938,6 +959,8 @@ mod tests {
             enable_transfer_compression: true,
             transfer_limits: Default::default(),
             max_open_sessions: remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS,
+            allow_exec: true,
+            allow_apply_patch: true,
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::None,
             default_shell: None,

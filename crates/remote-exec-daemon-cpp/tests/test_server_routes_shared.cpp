@@ -101,6 +101,8 @@ static void assert_target_info_and_basic_helpers(TestRouteHarness& harness) {
     TEST_ASSERT(info_response.headers.at(request_id_header_name()) == "client-req-123");
     const Json info = Json::parse(info_response.body);
     TEST_ASSERT(info.at("target").get<std::string>() == "cpp-test");
+    TEST_ASSERT(info.at("supports_exec").get<bool>());
+    TEST_ASSERT(info.at("supports_apply_patch").get<bool>());
     TEST_ASSERT(
         info.at("supports_pty").get<bool>() == harness.state.metadata.capabilities.supports_pty
     );
@@ -127,6 +129,47 @@ static void assert_target_info_and_basic_helpers(TestRouteHarness& harness) {
     TEST_ASSERT(
         base64_decode_bytes(base64_encode_bytes(std::string("hello\0world", 11))).size() == 11
     );
+}
+
+static void assert_disabled_exec_and_apply_patch_routes(const fs::path& root) {
+    TestRouteHarness disabled(root);
+    disabled.state.config.allow_exec = false;
+    disabled.state.config.allow_apply_patch = false;
+    disabled.state.metadata.capabilities = detect_daemon_capabilities(disabled.state.config);
+    disabled.refresh_context();
+
+    const HttpResponse start_response =
+        route_request(disabled, make_json_http_request("/v1/exec/start", Json::object()));
+    TEST_ASSERT(start_response.status == 400);
+    TEST_ASSERT(Json::parse(start_response.body).at("code").get<std::string>() == "exec_disabled");
+
+    const HttpResponse write_response =
+        route_request(disabled, make_json_http_request("/v1/exec/write", Json::object()));
+    TEST_ASSERT(write_response.status == 400);
+    TEST_ASSERT(Json::parse(write_response.body).at("code").get<std::string>() == "exec_disabled");
+
+    const fs::path patch_file = root / "disabled-patch.txt";
+    const HttpResponse patch_response = route_request(
+        disabled,
+        make_json_http_request(
+            "/v1/patch/apply",
+            Json{
+                {"workdir", root.string()},
+                {"patch",
+                 "*** Begin Patch\n*** Add File: disabled-patch.txt\n+blocked\n*** End Patch\n"},
+            }
+        )
+    );
+    TEST_ASSERT(patch_response.status == 400);
+    TEST_ASSERT(Json::parse(patch_response.body).at("code").get<std::string>() == "patch_disabled");
+    TEST_ASSERT(!fs::exists(patch_file));
+
+    HttpRequest info_request;
+    info_request.method = "POST";
+    info_request.path = "/v1/target-info";
+    const Json info = Json::parse(route_request(disabled, info_request).body);
+    TEST_ASSERT(!info.at("supports_exec").get<bool>());
+    TEST_ASSERT(!info.at("supports_apply_patch").get<bool>());
 }
 
 static void assert_shared_server_contract() {
@@ -736,6 +779,7 @@ static void assert_sandbox_routes(const fs::path& root) {
 void run_platform_neutral_server_route_tests(TestRouteHarness& harness, const fs::path& root) {
     assert_shared_server_contract();
     assert_target_info_and_basic_helpers(harness);
+    assert_disabled_exec_and_apply_patch_routes(root);
     assert_transfer_export_errors(harness, root);
     assert_image_routes(harness, root);
     assert_patch_route_audit_fields(harness, root);

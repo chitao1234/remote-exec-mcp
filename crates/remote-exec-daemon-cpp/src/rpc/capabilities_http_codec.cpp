@@ -1,6 +1,8 @@
 #include "rpc/capabilities_http_codec.h"
 
 void write_daemon_capabilities(Json* target, const DaemonCapabilities& capabilities) {
+    (*target)["supports_exec"] = capabilities.supports_exec;
+    (*target)["supports_apply_patch"] = capabilities.supports_apply_patch;
     (*target)["supports_pty"] = capabilities.supports_pty;
     (*target)["supports_image_read"] = capabilities.supports_image_read;
     (*target)["supports_transfer_compression"] = capabilities.supports_transfer_compression;

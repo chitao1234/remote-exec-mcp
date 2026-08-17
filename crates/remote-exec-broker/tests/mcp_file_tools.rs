@@ -217,6 +217,31 @@ async fn remote_file_tools_forward_configured_byte_limit() {
 }
 
 #[tokio::test]
+async fn hidden_file_tools_route_local_relay_to_backing_remote() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon_and_extra_config(concat!(
+        "local = \"builder-a\"\n",
+        "\n",
+        "[tools.file]\n",
+        "read = true\n",
+        "write = true\n",
+        "edit = true\n",
+    ))
+    .await;
+
+    let result = fixture
+        .call_tool(
+            "read",
+            serde_json::json!({"target": "local", "file_path": "/relay/file.txt"}),
+        )
+        .await;
+    assert!(result.text_output.contains("hello"));
+    assert_eq!(
+        fixture.last_file_read_request().await.unwrap().path,
+        "/relay/file.txt"
+    );
+}
+
+#[tokio::test]
 async fn remote_file_tools_reject_targets_without_file_capability() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon_without_file_tool_support(
         hidden_file_tools_config(),

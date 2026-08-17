@@ -30,6 +30,39 @@ const WINDOWS_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|C.UTF-8|C.UTF-8|C.UTF
 // Use a generous window so large-output assertions do not become timing-sensitive.
 const COMPLETED_COMMAND_YIELD_MS: u64 = 10_000;
 
+#[tokio::test]
+async fn disabled_exec_rejects_start_and_write_before_request_processing() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config(DEFAULT_TEST_TARGET, "allow_exec = false\n")
+            .await;
+
+    let start_error = fixture
+        .rpc_error(
+            "/v1/exec/start",
+            &test_exec_start_request(None, "ignored", false, None, None, None),
+        )
+        .await;
+    assert_eq!(start_error.wire_code(), "exec_disabled");
+    assert_eq!(
+        start_error.message,
+        "command execution is disabled by daemon config"
+    );
+
+    let write_error = fixture
+        .rpc_error(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: "unknown-session".to_string(),
+                chars: String::new(),
+                yield_time_ms: None,
+                max_output_tokens: None,
+                pty_size: None,
+            },
+        )
+        .await;
+    assert_eq!(write_error.wire_code(), "exec_disabled");
+}
+
 fn test_exec_start_request(
     shell: Option<&str>,
     cmd: &str,
