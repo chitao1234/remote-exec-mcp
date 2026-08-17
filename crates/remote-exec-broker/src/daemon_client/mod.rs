@@ -44,6 +44,18 @@ mod tests {
         )
     }
 
+    #[test]
+    fn connection_reset_warning_is_suppressed_only_for_known_unhealthy_target() {
+        let client = test_client(None);
+        assert!(client.connection_reset_warnings_enabled());
+
+        client.set_target_known_unhealthy(true);
+        assert!(!client.connection_reset_warnings_enabled());
+
+        client.record_connection_success(0);
+        assert!(client.connection_reset_warnings_enabled());
+    }
+
     async fn hung_response_client(
         timeout: Duration,
     ) -> (DaemonClient, tokio::task::JoinHandle<()>) {

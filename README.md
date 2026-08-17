@@ -495,7 +495,10 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 - Timed-out broker-daemon requests are never replayed.
 - After repeated direct-target timeouts without a successful HTTP response, the
   broker replaces the target's HTTP client pool. Reverse targets additionally
-  discard queued idle lanes so the daemon replenishes them.
+  discard queued idle lanes so the daemon replenishes them. Connection resets
+  remain warning-level while the target is healthy or `maybe_unhealthy`, but are
+  debug-level once repeated probes have marked it `unhealthy`; a successful
+  daemon response restores warning-level reset logging.
 - `remote_exec_command` and `remote_write_stdin` use at least `yield_time_ms` plus a small
   slow-host margin for their daemon RPC timeout.
 - Rust daemon and broker-host live exec sessions are capped by

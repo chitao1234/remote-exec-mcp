@@ -277,6 +277,16 @@ impl TargetHandle {
         self.runtime.lock().await.snapshot()
     }
 
+    fn sync_connection_reset_logging(&self, snapshot: &TargetRuntimeSnapshot) {
+        let target_known_unhealthy = snapshot
+            .health
+            .as_ref()
+            .is_some_and(|health| health.status == CachedTargetHealthStatus::Unhealthy);
+        if let Some(client) = self.backend.remote_client() {
+            client.set_target_known_unhealthy(target_known_unhealthy);
+        }
+    }
+
     pub(crate) async fn cached_daemon_info(&self) -> Option<CachedDaemonInfo> {
         self.runtime_snapshot().await.daemon_info
     }
@@ -413,9 +423,13 @@ impl TargetHandle {
         };
         ensure_expected_daemon_name(name, self.expected_daemon_name.as_deref(), &info.target)?;
 
-        self.runtime.lock().await.set_verified_target_info(&info);
-        self.log_availability_transition_since(name, &previous_snapshot, None)
-            .await;
+        let current_snapshot = {
+            let mut runtime = self.runtime.lock().await;
+            runtime.set_verified_target_info(&info);
+            runtime.snapshot()
+        };
+        self.sync_connection_reset_logging(&current_snapshot);
+        log_target_availability_transition(name, &previous_snapshot, &current_snapshot, None);
         Ok(())
     }
 
@@ -427,14 +441,16 @@ impl TargetHandle {
         let previous_snapshot = self.runtime_snapshot().await;
         match self.health().await {
             Ok(health) => {
-                let (previous_daemon_instance_id, needs_target_info) = {
+                let (previous_daemon_instance_id, needs_target_info, current_snapshot) = {
                     let mut runtime = self.runtime.lock().await;
                     let previous_daemon_instance_id = runtime.update_healthy(&health);
                     (
                         previous_daemon_instance_id,
                         runtime.snapshot.daemon_info.is_none(),
+                        runtime.snapshot(),
                     )
                 };
+                self.sync_connection_reset_logging(&current_snapshot);
 
                 if needs_target_info {
                     let info = match self.target_info().await {
@@ -512,6 +528,7 @@ impl TargetHandle {
         error: Option<&str>,
     ) -> bool {
         let current_snapshot = self.runtime_snapshot().await;
+        self.sync_connection_reset_logging(&current_snapshot);
         log_target_availability_transition(name, previous_snapshot, &current_snapshot, error)
     }
 
@@ -543,6 +560,7 @@ impl TargetHandle {
             (previous_snapshot, current_snapshot)
         };
 
+        self.sync_connection_reset_logging(&current_snapshot);
         log_target_availability_transition(name, &previous_snapshot, &current_snapshot, error)
     }
 }
@@ -656,13 +674,61 @@ impl RemoteTargetHandle<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use remote_exec_proto::rpc::{
         DaemonIdentity, FileToolProtocolVersion, HealthCheckResponse, HealthStatus,
         PortForwardProtocolVersion, TargetCapabilities, TargetInfoResponse,
         TransferStreamProtocolVersion,
     };
 
-    use super::{TargetAvailabilityTransition, TargetRuntimeSnapshot, TargetRuntimeState};
+    use crate::{daemon_client::DaemonClient, target::TargetBackend};
+
+    use super::{
+        TargetAvailabilityTransition, TargetHandle, TargetRuntimeSnapshot, TargetRuntimeState,
+    };
+
+    #[tokio::test]
+    async fn connection_reset_warning_tracks_confirmed_target_health() {
+        crate::install_crypto_provider().unwrap();
+        let timeout = Duration::from_secs(1);
+        let client = DaemonClient::from_test_client(
+            reqwest::Client::builder().build().unwrap(),
+            "http://127.0.0.1:9".to_string(),
+            None,
+            timeout,
+            timeout,
+        );
+        let info = target_info("daemon-old", "1.0.0");
+        let handle = TargetHandle::verified(
+            TargetBackend::remote(client.clone()),
+            Some("target-a".to_string()),
+            &info,
+        );
+
+        assert!(client.connection_reset_warnings_enabled());
+
+        handle
+            .mark_health_probe_timed_out("target-a", "first failure".to_string())
+            .await;
+        assert!(client.connection_reset_warnings_enabled());
+
+        handle
+            .mark_health_probe_timed_out("target-a", "second failure".to_string())
+            .await;
+        assert!(!client.connection_reset_warnings_enabled());
+
+        let previous_snapshot = handle.runtime_snapshot().await;
+        handle
+            .runtime
+            .lock()
+            .await
+            .update_healthy(&health("daemon-old", "1.0.0"));
+        handle
+            .log_availability_transition_since("target-a", &previous_snapshot, None)
+            .await;
+        assert!(client.connection_reset_warnings_enabled());
+    }
 
     #[test]
     fn healthy_refresh_for_new_instance_clears_stale_daemon_info_in_same_snapshot() {

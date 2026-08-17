@@ -1,4 +1,7 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{
+    Arc, RwLock,
+    atomic::{AtomicBool, Ordering},
+};
 
 use remote_exec_proto::request_id::REQUEST_ID_HEADER;
 use remote_exec_proto::rpc::{
@@ -73,6 +76,7 @@ struct DaemonConnection {
     state: RwLock<DaemonConnectionState>,
     recovery_lock: tokio::sync::Mutex<()>,
     factory: DaemonClientFactory,
+    target_known_unhealthy: AtomicBool,
 }
 
 struct DaemonConnectionSnapshot {
@@ -99,6 +103,7 @@ impl DaemonConnection {
         let mut state = self.state.write().expect("daemon connection lock poisoned");
         if state.generation == generation {
             state.consecutive_timeouts = 0;
+            self.target_known_unhealthy.store(false, Ordering::Relaxed);
         }
     }
 
@@ -180,6 +185,7 @@ impl DaemonClient {
                 }),
                 recovery_lock: tokio::sync::Mutex::new(()),
                 factory,
+                target_known_unhealthy: AtomicBool::new(false),
             }),
             base_url: reverse_connection.as_ref().map_or_else(
                 || config.base_url.clone(),
@@ -194,7 +200,7 @@ impl DaemonClient {
     }
 
     #[cfg(test)]
-    pub(super) fn from_test_client(
+    pub(crate) fn from_test_client(
         client: reqwest::Client,
         base_url: String,
         authorization: Option<HeaderValue>,
@@ -231,6 +237,7 @@ impl DaemonClient {
                     target_config,
                     reverse: false,
                 },
+                target_known_unhealthy: AtomicBool::new(false),
             }),
             reverse_connection: None,
             target_name: remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET.to_string(),
@@ -253,6 +260,18 @@ impl DaemonClient {
 
     pub fn health_probe_timeout(&self) -> std::time::Duration {
         self.health_probe_timeout
+    }
+
+    pub(crate) fn set_target_known_unhealthy(&self, target_known_unhealthy: bool) {
+        self.connection
+            .target_known_unhealthy
+            .store(target_known_unhealthy, Ordering::Relaxed);
+    }
+
+    fn target_known_unhealthy(&self) -> bool {
+        self.connection
+            .target_known_unhealthy
+            .load(Ordering::Relaxed)
     }
 
     pub async fn exec_start(
@@ -624,13 +643,23 @@ impl DaemonClient {
                 } else {
                     0
                 };
-                tracing::warn!(
-                    target = %self.target_name,
-                    base_url = %self.base_url,
-                    operation,
-                    dropped_reverse_lanes,
-                    "reset daemon connection after timeout"
-                );
+                if self.target_known_unhealthy() {
+                    tracing::debug!(
+                        target = %self.target_name,
+                        base_url = %self.base_url,
+                        operation,
+                        dropped_reverse_lanes,
+                        "reset daemon connection after timeout"
+                    );
+                } else {
+                    tracing::warn!(
+                        target = %self.target_name,
+                        base_url = %self.base_url,
+                        operation,
+                        dropped_reverse_lanes,
+                        "reset daemon connection after timeout"
+                    );
+                }
                 "connection was reset; request was not replayed".to_string()
             }
             Err(err) => {
@@ -662,6 +691,11 @@ impl DaemonClient {
 
     pub(super) fn record_connection_success(&self, generation: u64) {
         self.connection.record_success(generation);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn connection_reset_warnings_enabled(&self) -> bool {
+        !self.target_known_unhealthy()
     }
 
     fn request_with_client(&self, client: &reqwest::Client, path: &str) -> reqwest::RequestBuilder {
