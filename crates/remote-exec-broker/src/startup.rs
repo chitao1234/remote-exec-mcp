@@ -370,7 +370,7 @@ mod tests {
                 health_refresh: Default::default(),
                 reverse: None,
                 targets: BTreeMap::new(),
-                local: Some(LocalConfig::Embedded(LocalTargetConfig {
+                local: Some(LocalConfig::Embedded(Box::new(LocalTargetConfig {
                     default_workdir: tempdir.path().to_path_buf(),
                     windows_posix_root: None,
                     allow_login_shell: true,
@@ -380,7 +380,7 @@ mod tests {
                     transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
                     port_forward_limits: remote_exec_host::HostPortForwardLimits::default(),
                     experimental_apply_patch_target_encoding_autodetect: false,
-                })),
+                }))),
             }
             .into_validated()
             .unwrap(),
@@ -569,7 +569,7 @@ mod tests {
                 health_refresh: Default::default(),
                 reverse: None,
                 targets: BTreeMap::new(),
-                local: Some(LocalConfig::Embedded(LocalTargetConfig {
+                local: Some(LocalConfig::Embedded(Box::new(LocalTargetConfig {
                     default_workdir: tempdir.path().to_path_buf(),
                     windows_posix_root: Some(windows_posix_root.clone()),
                     allow_login_shell: true,
@@ -579,7 +579,7 @@ mod tests {
                     transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
                     port_forward_limits: remote_exec_host::HostPortForwardLimits::default(),
                     experimental_apply_patch_target_encoding_autodetect: false,
-                })),
+                }))),
             }
             .into_validated()
             .unwrap(),

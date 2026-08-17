@@ -357,6 +357,7 @@ async fn load_accepts_local_windows_posix_root() {
         config
             .local
             .as_ref()
+            .and_then(super::LocalConfig::embedded)
             .and_then(|local| local.windows_posix_root.as_ref()),
         Some(&PathBuf::from(r"C:\msys64"))
     );
@@ -381,6 +382,7 @@ async fn load_normalizes_local_default_workdir_through_windows_posix_root() {
         config
             .local
             .as_ref()
+            .and_then(super::LocalConfig::embedded)
             .map(|local| local.default_workdir.clone()),
         Some(synthetic_root.join("tmp"))
     );

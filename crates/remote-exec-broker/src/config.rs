@@ -347,13 +347,13 @@ impl TargetTimeoutConfig {
 #[serde(untagged)]
 pub enum LocalConfig {
     Remote(String),
-    Embedded(LocalTargetConfig),
+    Embedded(Box<LocalTargetConfig>),
 }
 
 impl LocalConfig {
     pub(crate) fn embedded(&self) -> Option<&LocalTargetConfig> {
         match self {
-            Self::Embedded(config) => Some(config),
+            Self::Embedded(config) => Some(config.as_ref()),
             Self::Remote(_) => None,
         }
     }
