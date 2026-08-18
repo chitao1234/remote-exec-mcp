@@ -343,6 +343,9 @@ jobs:
           apt_get 5m update
           apt_get 15m -o Dir::Cache::archives="$apt_cache_dir/" install -y \
             g++ make g++-mingw-w64-i686 g++-mingw-w64-x86-64 wine wine32:i386
+          # These root-owned transient entries cannot be archived by actions/cache.
+          sudo rm -rf "$apt_cache_dir/partial"
+          sudo rm -f "$apt_cache_dir/lock"
           command -v i686-w64-mingw32-g++
           command -v x86_64-w64-mingw32-g++
           command -v wine
