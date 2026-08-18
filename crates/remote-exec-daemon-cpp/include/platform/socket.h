@@ -69,6 +69,7 @@ int last_socket_error();
 bool would_block_error(int error);
 bool peer_disconnected_send_error(int error);
 bool receive_timeout_error(int error);
+bool udp_peer_unreachable_receive_error(int error);
 bool connect_in_progress_socket_error(int error);
 std::size_t bounded_socket_io_size(std::size_t remaining);
 int recv_bounded(SOCKET client, char* data, std::size_t remaining, int flags);

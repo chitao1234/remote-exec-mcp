@@ -42,6 +42,10 @@ impl UdpReadLoopTarget {
         }
     }
 
+    fn is_listen(&self) -> bool {
+        matches!(self, Self::Listen(_))
+    }
+
     async fn close_on_terminal_send_failure(&self, stream_id: u32) {
         match self {
             Self::Connect(context) => {
@@ -192,6 +196,22 @@ async fn tunnel_udp_read_loop(
         };
         let (read, peer) = match received {
             Ok(received) => received,
+            Err(err) if target.is_listen() && is_udp_peer_unreachable_receive_error(&err) => {
+                let message = err.to_string();
+                let _ = send_forward_drop_report(
+                    tx,
+                    stream_id,
+                    ForwardDropKind::UdpDatagram,
+                    RpcErrorCode::PortReadFailed.wire_value(),
+                    message.clone(),
+                )
+                .await;
+                tracing::debug!(
+                    error = %message,
+                    "udp listen socket reported an unreachable peer; keeping listener open"
+                );
+                continue;
+            }
             Err(err) => {
                 let _ = send_tunnel_error(
                     tx,
@@ -266,6 +286,16 @@ async fn tunnel_udp_read_loop(
     }
 }
 
+#[cfg(windows)]
+fn is_udp_peer_unreachable_receive_error(err: &std::io::Error) -> bool {
+    err.raw_os_error() == Some(windows_sys::Win32::Networking::WinSock::WSAECONNRESET)
+}
+
+#[cfg(not(windows))]
+fn is_udp_peer_unreachable_receive_error(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::ConnectionRefused
+}
+
 pub(super) async fn tunnel_udp_datagram(
     tunnel: &Arc<TunnelState>,
     frame: Frame,
@@ -303,4 +333,33 @@ pub(super) async fn tunnel_udp_datagram(
         .await
         .map_err(bind_error(RpcErrorCode::PortWriteFailed))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod receive_error_tests {
+    use super::is_udp_peer_unreachable_receive_error;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_udp_connection_reset_reports_unreachable_peer() {
+        use windows_sys::Win32::Networking::WinSock::{WSAECONNRESET, WSAETIMEDOUT};
+
+        assert!(is_udp_peer_unreachable_receive_error(
+            &std::io::Error::from_raw_os_error(WSAECONNRESET)
+        ));
+        assert!(!is_udp_peer_unreachable_receive_error(
+            &std::io::Error::from_raw_os_error(WSAETIMEDOUT)
+        ));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn posix_udp_connection_refused_reports_unreachable_peer() {
+        assert!(is_udp_peer_unreachable_receive_error(
+            &std::io::Error::from(std::io::ErrorKind::ConnectionRefused)
+        ));
+        assert!(!is_udp_peer_unreachable_receive_error(
+            &std::io::Error::from(std::io::ErrorKind::TimedOut)
+        ));
+    }
 }

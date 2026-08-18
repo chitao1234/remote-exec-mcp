@@ -1,4 +1,5 @@
 #include "test_assert.h"
+#include <cerrno>
 #include <climits>
 #include <cstring>
 #include <limits>
@@ -87,6 +88,14 @@ int main() {
         bounded_socket_io_size(std::numeric_limits<std::size_t>::max())
         == static_cast<std::size_t>(INT_MAX)
     );
+
+#ifdef _WIN32
+    TEST_ASSERT(udp_peer_unreachable_receive_error(WSAECONNRESET));
+    TEST_ASSERT(!udp_peer_unreachable_receive_error(WSAETIMEDOUT));
+#else
+    TEST_ASSERT(udp_peer_unreachable_receive_error(ECONNREFUSED));
+    TEST_ASSERT(!udp_peer_unreachable_receive_error(ETIMEDOUT));
+#endif
 
 #ifndef _WIN32
     assert_accept_socket_cloexec_sets_cloexec();

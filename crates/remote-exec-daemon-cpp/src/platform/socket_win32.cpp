@@ -321,6 +321,10 @@ bool receive_timeout_error(int error) {
     return error == WSAETIMEDOUT || error == WSAEWOULDBLOCK;
 }
 
+bool udp_peer_unreachable_receive_error(int error) {
+    return error == WSAECONNRESET;
+}
+
 bool connect_in_progress_socket_error(int error) {
     return error == WSAEWOULDBLOCK || error == WSAEINPROGRESS;
 }

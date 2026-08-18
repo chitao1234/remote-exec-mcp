@@ -1133,7 +1133,10 @@ async fn forward_ports_stays_open_during_heavy_local_udp_peer_churn() {
     }
 
     let listed = list_forward(&fixture, &forward_id).await;
-    assert_eq!(listed["status"], "open");
+    assert_eq!(
+        listed["status"], "open",
+        "forward unexpectedly stopped: {listed}"
+    );
 
     let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");

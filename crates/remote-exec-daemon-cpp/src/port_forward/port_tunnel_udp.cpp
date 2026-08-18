@@ -91,6 +91,7 @@ void PortTunnelService::udp_read_loop(
         }
         if (received < 0) {
             const int error = last_socket_error();
+            const std::string error_message = socket_error_message("recvfrom");
             if (receive_timeout_error(error)) {
                 continue;
             }
@@ -99,8 +100,16 @@ void PortTunnelService::udp_read_loop(
             }
             connection = session->connection_for_attachment(attachment);
             if (connection.get() != nullptr) {
-                connection
-                    ->send_error(stream_id, "port_read_failed", socket_error_message("recvfrom"));
+                if (udp_peer_unreachable_receive_error(error)) {
+                    connection->send_forward_drop(
+                        stream_id,
+                        "udp_datagram",
+                        "port_read_failed",
+                        error_message
+                    );
+                    continue;
+                }
+                connection->send_error(stream_id, "port_read_failed", error_message);
             }
             return;
         }

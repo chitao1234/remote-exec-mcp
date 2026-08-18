@@ -143,6 +143,10 @@ bool receive_timeout_error(int error) {
     return error == EAGAIN || error == EWOULDBLOCK;
 }
 
+bool udp_peer_unreachable_receive_error(int error) {
+    return error == ECONNREFUSED;
+}
+
 bool connect_in_progress_socket_error(int error) {
     return error == EINPROGRESS || error == EINTR;
 }
