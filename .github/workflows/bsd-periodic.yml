@@ -55,7 +55,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -83,7 +83,7 @@ jobs:
           chmod +x .github/bin/rustup-init
 
       - name: Start ${{ matrix.os.label }} VM
-        uses: cross-platform-actions/action@master
+        uses: cross-platform-actions/action@v1
         with:
           environment_variables: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
           operating_system: ${{ matrix.os.name }}

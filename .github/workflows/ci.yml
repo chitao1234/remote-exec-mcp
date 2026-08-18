@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -47,10 +47,18 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      - name: Cache apt package archives
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/apt-cache/archives
+          key: apt-${{ runner.os }}-${{ runner.arch }}-clang-format-v1
 
       - name: Install clang-format
         run: |
+          apt_cache_dir="$RUNNER_TEMP/apt-cache/archives"
+          mkdir -p "$apt_cache_dir/partial"
           apt_get() {
             local command_timeout="$1"
             shift
@@ -63,7 +71,7 @@ jobs:
               "$@"
           }
           apt_get 5m update
-          apt_get 10m install -y clang-format
+          apt_get 10m -o Dir::Cache::archives="$apt_cache_dir/" install -y clang-format
 
       - name: Check formatting
         run: crates/remote-exec-daemon-cpp/scripts/clang_format.sh check
@@ -84,7 +92,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -93,7 +101,7 @@ jobs:
 
       - name: Set up MSVC for Rust C++ integration tests
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: TheMrMilchmann/setup-msvc-dev@v4
         with:
           arch: x64
 
@@ -158,7 +166,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -211,7 +219,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -235,7 +243,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -265,12 +273,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
       - name: Cache C++ build outputs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: crates/remote-exec-daemon-cpp/build
           key: cpp-posix-${{ runner.os }}-${{ hashFiles('crates/remote-exec-daemon-cpp/**', 'winptyrs/**', '.gitmodules') }}
@@ -278,8 +286,16 @@ jobs:
             cpp-posix-${{ runner.os }}-
             cpp-${{ runner.os }}-
 
+      - name: Cache apt package archives
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/apt-cache/archives
+          key: apt-${{ runner.os }}-${{ runner.arch }}-cpp-posix-v1
+
       - name: Install Linux C++ dependencies
         run: |
+          apt_cache_dir="$RUNNER_TEMP/apt-cache/archives"
+          mkdir -p "$apt_cache_dir/partial"
           apt_get() {
             local command_timeout="$1"
             shift
@@ -292,7 +308,7 @@ jobs:
               "$@"
           }
           apt_get 5m update
-          apt_get 10m install -y g++ make
+          apt_get 10m -o Dir::Cache::archives="$apt_cache_dir/" install -y g++ make
 
       - name: Run POSIX C++ checks
         shell: bash
@@ -317,18 +333,18 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
       - name: Cache OpenSSL source archives
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: crates/remote-exec-daemon-cpp/.cache/openssl-sources
           key: openssl-sources-${{ runner.os }}-${{ hashFiles('crates/remote-exec-daemon-cpp/mk/openssl.mk', 'crates/remote-exec-daemon-cpp/scripts/prepare_openssl.sh') }}
 
       - name: Cache C++ build outputs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: crates/remote-exec-daemon-cpp/build
           key: cpp-windows-cross-${{ matrix.make_target }}-${{ runner.os }}-${{ hashFiles('crates/remote-exec-daemon-cpp/**', 'winptyrs/**', '.gitmodules') }}
@@ -336,9 +352,17 @@ jobs:
             cpp-windows-cross-${{ matrix.make_target }}-${{ runner.os }}-
             cpp-${{ runner.os }}-
 
+      - name: Cache apt package archives
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/apt-cache/archives
+          key: apt-${{ runner.os }}-${{ runner.arch }}-cpp-windows-cross-v1
+
       - name: Install Linux C++ dependencies
         run: |
+          apt_cache_dir="$RUNNER_TEMP/apt-cache/archives"
           sudo dpkg --add-architecture i386
+          mkdir -p "$apt_cache_dir/partial"
           apt_get() {
             local command_timeout="$1"
             shift
@@ -351,7 +375,7 @@ jobs:
               "$@"
           }
           apt_get 5m update
-          apt_get 15m install -y g++ make g++-mingw-w64-i686 g++-mingw-w64-x86-64 wine wine32:i386
+          apt_get 15m -o Dir::Cache::archives="$apt_cache_dir/" install -y g++ make g++-mingw-w64-i686 g++-mingw-w64-x86-64 wine wine32:i386
 
       - name: Run Windows C++ cross checks
         shell: bash
@@ -372,12 +396,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
       - name: Cache C++ build outputs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: crates/remote-exec-daemon-cpp/build
           key: cpp-msvc-${{ runner.os }}-${{ hashFiles('crates/remote-exec-daemon-cpp/**', 'winptyrs/**', '.gitmodules') }}
@@ -386,7 +410,7 @@ jobs:
             cpp-${{ runner.os }}-
 
       - name: Set up MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: TheMrMilchmann/setup-msvc-dev@v4
         with:
           arch: x86
 
