@@ -128,9 +128,12 @@ jobs:
             fi
             work_root=/var/tmp/remote-exec-bsd-ci
             mkdir -p "$work_root"
+            # The session-store test creates many child processes; keep the
+            # non-root user in OpenBSD's higher-limit staff class.
             if ! id "$BSD_TEST_USER" >/dev/null 2>&1; then
-              /usr/sbin/useradd -m -s /bin/sh "$BSD_TEST_USER"
+              /usr/sbin/useradd -m -s /bin/sh -L staff "$BSD_TEST_USER"
             fi
+            /usr/sbin/usermod -L staff "$BSD_TEST_USER"
             chown -R "$BSD_TEST_USER" "$work_root"
           release: ${{ matrix.os.release }}
           mem: 6144
@@ -235,6 +238,8 @@ jobs:
       - name: Run C++ and Rust tests on ${{ matrix.os.label }}
         run: |
           set -eu
+          # vmactions rsyncs the workspace as root before each custom-shell step.
+          chown -R "$BSD_TEST_USER" "$GITHUB_WORKSPACE"
           # vmactions connects as root. Keep setup privileged, then drop
           # privileges for the tests.
           su "$BSD_TEST_USER" -c 'sh -s' <<'NON_ROOT_TESTS'
