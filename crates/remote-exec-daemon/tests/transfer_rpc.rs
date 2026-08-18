@@ -247,6 +247,10 @@ async fn transfer_path_info_rejects_relative_paths_with_explicit_code() {
 #[cfg(unix)]
 #[tokio::test]
 async fn transfer_path_info_reports_permission_denied_as_internal_error() {
+    if support::running_as_root() {
+        return;
+    }
+
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let blocked = fixture.workdir.join("blocked");
     tokio::fs::create_dir_all(&blocked).await.unwrap();

@@ -78,6 +78,20 @@ pub fn sandbox_allow_config(section: &str, allow: &Path, deny: Option<&Path>) ->
     config
 }
 
+#[cfg(unix)]
+#[allow(
+    dead_code,
+    reason = "Shared across permission-sensitive daemon integration tests"
+)]
+pub fn running_as_root() -> bool {
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .is_ok_and(|output| {
+            output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "0"
+        })
+}
+
 #[cfg(windows)]
 #[allow(
     dead_code,

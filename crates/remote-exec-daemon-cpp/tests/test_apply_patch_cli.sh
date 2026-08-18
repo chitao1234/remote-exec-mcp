@@ -58,13 +58,12 @@ test "$missing_status" -eq 1
 test ! -s "$test_root/missing.stdout"
 grep -F 'failed to update `missing.txt`: unable to read ./missing.txt' "$test_root/missing.stderr"
 
-mkdir "$test_root/locked"
-chmod 555 "$test_root/locked"
+printf '%s\n' 'not a directory' > "$test_root/blocked"
 set +e
 printf '%s' '*** Begin Patch
 *** Add File: created-before-error.txt
 +created
-*** Add File: locked/blocked-after-error.txt
+*** Add File: blocked/child-after-error.txt
 +blocked
 *** End Patch
 ' | (
@@ -73,9 +72,9 @@ printf '%s' '*** Begin Patch
 )
 partial_status=$?
 set -e
-chmod 755 "$test_root/locked"
 test "$partial_status" -eq 1
 grep -F 'Partial success. Updated the following files:' "$test_root/partial.stdout"
 grep -F 'A created-before-error.txt' "$test_root/partial.stdout"
-grep -F 'failed to add `locked/blocked-after-error.txt`: unable to write ' "$test_root/partial.stderr"
+grep -F 'failed to add `blocked/child-after-error.txt`:' "$test_root/partial.stderr"
 test "$(cat "$test_root/created-before-error.txt")" = 'created'
+test "$(cat "$test_root/blocked")" = 'not a directory'

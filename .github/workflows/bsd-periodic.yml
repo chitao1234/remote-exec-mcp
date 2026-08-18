@@ -156,8 +156,15 @@ jobs:
           envs: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
           prepare: |
             set -eu
+            packages=
             if ! command -v rustc >/dev/null 2>&1; then
-              pkg install -y rust
+              packages="$packages rust"
+            fi
+            if [ ! -f /usr/local/include/openssl/ssl.h ]; then
+              packages="$packages openssl"
+            fi
+            if [ -n "$packages" ]; then
+              pkg install -y $packages
             fi
           release: ${{ matrix.os.release }}
           mem: 6144
@@ -268,6 +275,18 @@ jobs:
           ensure_cxx_tool
           setup_rust
 
+          case "$BSD_NAME" in
+            dragonflybsd)
+              OPENSSL_ROOT=/usr/local
+              CPP_TLS=openssl
+              export OPENSSL_ROOT
+              ;;
+            *)
+              CPP_TLS=auto
+              ;;
+          esac
+          export CPP_TLS
+
           "$CXX_CMD" --version
           cargo --version
           rustc --version
@@ -280,10 +299,10 @@ jobs:
           rust_status=0
 
           set +e
-          "$MAKE_CMD" -k -C crates/remote-exec-daemon-cpp BUILD_DIR="$cpp_build_dir" HOST_CXX="$CXX_CMD" all-posix
+          "$MAKE_CMD" -k -C crates/remote-exec-daemon-cpp BUILD_DIR="$cpp_build_dir" HOST_CXX="$CXX_CMD" TLS="$CPP_TLS" all-posix
           cpp_status=$?
           if [ "$cpp_status" -eq 0 ]; then
-            "$MAKE_CMD" -k -C crates/remote-exec-daemon-cpp BUILD_DIR="$cpp_build_dir" HOST_CXX="$CXX_CMD" check-posix
+            "$MAKE_CMD" -k -C crates/remote-exec-daemon-cpp BUILD_DIR="$cpp_build_dir" HOST_CXX="$CXX_CMD" TLS="$CPP_TLS" check-posix
             cpp_status=$?
           fi
 

@@ -138,11 +138,9 @@ async fn forward_ports_forwards_local_udp_datagrams() {
 #[tokio::test]
 async fn forward_ports_keeps_forward_open_after_stream_connect_error() {
     let fixture = support::spawners::spawn_broker_local_only().await;
-    let destination_guard = tokio::net::TcpSocket::new_v4().unwrap();
-    destination_guard
-        .bind("127.0.0.1:0".parse().unwrap())
-        .unwrap();
-    let destination_addr = destination_guard.local_addr().unwrap();
+    let destination_probe = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let destination_addr = destination_probe.local_addr().unwrap();
+    drop(destination_probe);
 
     let open = open_tcp_forward(&fixture, "local", "local", destination_addr).await;
     let forward_id = forward_id_from(&open);
@@ -168,7 +166,9 @@ async fn forward_ports_keeps_forward_open_after_stream_connect_error() {
         None
     );
 
-    let echo_listener = destination_guard.listen(1).unwrap();
+    let echo_listener = tokio::net::TcpListener::bind(destination_addr)
+        .await
+        .unwrap();
     tokio::spawn(async move {
         let (mut stream, _) = echo_listener.accept().await.unwrap();
         let mut buf = [0u8; 64];
@@ -1113,6 +1113,7 @@ max_tunnel_queued_bytes = 4096
 #[tokio::test]
 async fn forward_ports_stays_open_during_heavy_local_udp_peer_churn() {
     const UDP_PEER_COUNT: usize = 320;
+    const UDP_PEER_BATCH_SIZE: usize = 32;
 
     let fixture = support::spawners::spawn_broker_local_only().await;
     let echo_addr = support::spawn_udp_echo().await;
@@ -1121,11 +1122,14 @@ async fn forward_ports_stays_open_during_heavy_local_udp_peer_churn() {
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
-    let mut peers = Vec::with_capacity(UDP_PEER_COUNT);
+    let mut peers = Vec::with_capacity(UDP_PEER_BATCH_SIZE);
     for _ in 0..UDP_PEER_COUNT {
         let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         peer.send_to(b"peer", &listen_endpoint).await.unwrap();
         peers.push(peer);
+        if peers.len() == UDP_PEER_BATCH_SIZE {
+            peers.clear();
+        }
     }
 
     let listed = list_forward(&fixture, &forward_id).await;

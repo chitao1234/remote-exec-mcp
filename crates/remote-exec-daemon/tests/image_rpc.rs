@@ -434,6 +434,10 @@ allow = {allow}
 #[cfg(unix)]
 #[tokio::test]
 async fn image_read_reports_permission_denied_as_internal_error() {
+    if support::running_as_root() {
+        return;
+    }
+
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let hidden = fixture.workdir.join("hidden");
     tokio::fs::create_dir_all(&hidden).await.unwrap();

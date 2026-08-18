@@ -99,16 +99,12 @@ fn names_the_failed_action_for_patch_errors() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn reports_partial_success_after_a_runtime_failure() {
-    use std::os::unix::fs::PermissionsExt;
-
     let tempdir = tempfile::tempdir().unwrap();
-    let locked_dir = tempdir.path().join("locked");
-    std::fs::create_dir(&locked_dir).unwrap();
-    std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
-    let patch = "*** Begin Patch\n*** Add File: created.txt\n+created\n*** Add File: locked/blocked.txt\n+blocked\n*** End Patch\n";
+    let blocked_parent = tempdir.path().join("blocked");
+    std::fs::write(&blocked_parent, "not a directory\n").unwrap();
+    let patch = "*** Begin Patch\n*** Add File: created.txt\n+created\n*** Add File: blocked/child.txt\n+blocked\n*** End Patch\n";
 
     let output = apply_patch()
         .current_dir(tempdir.path())
@@ -124,8 +120,6 @@ fn reports_partial_success_after_a_runtime_failure() {
         })
         .unwrap();
 
-    std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-
     assert!(!output.status.success());
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
@@ -134,10 +128,14 @@ fn reports_partial_success_after_a_runtime_failure() {
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("failed to add `locked/blocked.txt`: Permission denied")
+            .contains("failed to add `blocked/child.txt`:")
     );
     assert_eq!(
         std::fs::read_to_string(tempdir.path().join("created.txt")).unwrap(),
         "created\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(blocked_parent).unwrap(),
+        "not a directory\n"
     );
 }
