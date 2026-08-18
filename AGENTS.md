@@ -23,6 +23,44 @@ configuration, and maintained external documentation are the compatibility
 boundary. Nothing else in source code is guaranteed to be stable unless a task
 explicitly changes that assumption.
 
+## Skill Content Boundary
+
+`skills/using-remote-exec-mcp/SKILL.md` is for a user or agent operating an
+already-deployed `remote-exec-mcp` service. Assume the connection and targets
+are available. Include a detail only when it changes what that caller should do:
+
+- which public MCP tool or CLI command to choose
+- which public input to send, especially when syntax or path rules are
+  non-obvious
+- how to interpret a public result, capability, warning, or error
+- which action to take next in a common workflow or after a partial failure
+- how to avoid a caller-visible risk such as unintended replacement, exposure,
+  or leaving a live session or forward open
+
+Keep the skill concise and task-oriented. Prefer selection guidance, essential
+examples, and non-obvious behavioral semantics over exhaustive schema copies.
+Treat the public tool schemas and CLI help as the canonical field reference.
+
+Do not put the following in the skill unless the user must act on it while
+performing a normal tool or CLI workflow:
+
+- deployment, bootstrap, certificate, listener, service, or broker/daemon
+  configuration instructions
+- repository layout, crate or module ownership, RPC routes, protocol internals,
+  or implementation algorithms
+- cache, probe, retry, buffering, compression, transport, or process-supervision
+  mechanics
+- Rust/C++ implementation differences, build matrices, or platform internals;
+  prefer advertised capabilities and public errors when callers can use those
+- maintainer testing, release, debugging, or log-correlation procedures
+- historical compatibility details or internal switches that a normal caller
+  does not select
+
+Document excluded material in `README.md`, `configs/*.example.toml`, source
+comments, or maintainer instructions as appropriate. For optional tools, teach
+the caller how to use them when exposed, but keep the configuration that exposes
+them outside the skill.
+
 ## Project Overview
 
 This repository is a Rust 2024 workspace for a remote-first MCP server that
@@ -180,8 +218,10 @@ structured-content behavior, update these together:
 - Rust daemon RPC routes/handlers when daemon behavior changes
 - `crates/remote-exec-daemon-cpp` when the C++ daemon shares the behavior or
   broker-daemon protocol
-- `README.md`, `configs/*.example.toml` when config or behavior changes, and
-  `skills/using-remote-exec-mcp/SKILL.md` for user-facing tool changes
+- `README.md` and `configs/*.example.toml` when configuration or behavior
+  changes, and `skills/using-remote-exec-mcp/SKILL.md` only when the change
+  affects a normal caller's tool or CLI workflow under the skill content
+  boundary above
 - MCP/broker tests, not only daemon internals
 
 When changing broker-daemon RPC contracts:
@@ -207,7 +247,9 @@ When changing `remote_forward_ports`:
 - update `crates/remote-exec-daemon-cpp/include/port_tunnel*.h` and
   `crates/remote-exec-daemon-cpp/src/port_tunnel*.cpp` when C++ shares the
   behavior
-- update broker, daemon, C++ tests, README, config examples, and the skill
+- update broker, daemon, C++ tests, README, and config examples; update the skill
+  only for caller-visible workflow changes that qualify under its content
+  boundary
 
 When changing transfer behavior or capability reporting:
 
@@ -216,7 +258,9 @@ When changing transfer behavior or capability reporting:
 - update `crates/remote-exec-host/src/transfer/`
 - update `crates/remote-exec-daemon/src/transfer/` route glue if needed
 - update `crates/remote-exec-daemon-cpp/src/transfer_ops*.cpp`
-- update README, C++ README, config comments, skill, and transfer tests
+- update README, C++ README, config comments, and transfer tests; update the
+  skill only for caller-visible workflow changes that qualify under its content
+  boundary
 
 When changing sandbox behavior:
 
