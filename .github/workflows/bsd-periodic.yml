@@ -90,7 +90,7 @@ jobs:
         if: matrix.os.name == 'freebsd'
         uses: vmactions/freebsd-vm@v1
         with:
-          cache-after-prepare: true
+          cache-after-prepare: false
           custom-shell-name: vmsh
           envs: BSD_NAME BSD_RUST_SETUP BSD_TEST_USER CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
           prepare: |
@@ -115,7 +115,7 @@ jobs:
         if: matrix.os.name == 'openbsd'
         uses: vmactions/openbsd-vm@v1
         with:
-          cache-after-prepare: true
+          cache-after-prepare: false
           custom-shell-name: vmsh
           envs: BSD_NAME BSD_RUST_SETUP BSD_TEST_USER CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
           prepare: |
@@ -144,7 +144,7 @@ jobs:
         if: matrix.os.name == 'netbsd'
         uses: vmactions/netbsd-vm@v1
         with:
-          cache-after-prepare: true
+          cache-after-prepare: false
           custom-shell-name: vmsh
           envs: BSD_NAME BSD_RUST_SETUP BSD_TEST_USER CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
           prepare: |
@@ -169,7 +169,7 @@ jobs:
         if: matrix.os.name == 'dragonflybsd'
         uses: vmactions/dragonflybsd-vm@v1
         with:
-          cache-after-prepare: true
+          cache-after-prepare: false
           custom-shell-name: vmsh
           envs: BSD_NAME BSD_RUST_SETUP BSD_TEST_USER CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
           prepare: |
@@ -199,7 +199,7 @@ jobs:
         if: matrix.os.name == 'omnios'
         uses: vmactions/omnios-vm@v1
         with:
-          cache-after-prepare: true
+          cache-after-prepare: false
           custom-shell-name: vmsh
           envs: BSD_NAME BSD_RUST_SETUP BSD_TEST_USER CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
           prepare: |
