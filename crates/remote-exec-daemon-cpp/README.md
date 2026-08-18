@@ -100,7 +100,7 @@ compiling the daemon as C++11; it does not imply a pre-C++11 language level.
 | `bmake check-posix` | Native POSIX through BSD make | POSIX-only; no Windows cross targets. |
 | `make check-windows-xp` | GNU x86 Windows XP, Winsock 2 | Common legacy Windows cross-build. |
 | `make check-windows-2000` | GNU x86 Windows 2000, Winsock 2 | NT-family Unicode path. |
-| `make check-windows-x64` | GNU x64 NT-family Windows, Winsock 2 | NT-family only. |
+| `make check-windows-x64` | GNU x64 Windows XP x64, Winsock 2 | Uses the `0x0502` x64 XP API floor and the x86_64 MinGW compiler. |
 | `make check-windows-nt3x-ws1` | GNU x86 NT 3.x API-floor, Winsock 1.1 | Keeps the 0x0400 Win32 API floor and disables winpty. |
 | `make check-windows-nt4-ws1` | GNU x86 NT 4.0 API-floor, Winsock 1.1 | Unicode variant tested on Windows NT 3.51 and Windows NT 4.0. |
 | `make check-windows-nt4-ws2` | GNU x86 NT 4.0 API-floor, Winsock 2 | Requires Winsock 2 at runtime. |
@@ -108,11 +108,12 @@ compiling the daemon as C++11; it does not imply a pre-C++11 language level.
 | `make check-windows-9x-ws2-ansi` | GNU x86 Windows 9x/Me ANSI, Winsock 2 | Older systems such as Windows 95 require Winsock 2 to be installed. |
 | `nmake /f NMakefile check-msvc-native` | Host-native MSVC | CI runs the 32-bit native path on `windows-latest`. |
 | `nmake /f NMakefile check-msvc-xp` | MSVC XP-compatible x86 | Requires an XP-capable C++11 toolset such as VS 2017 `v141_xp`. |
+| `nmake /f NMakefile check-msvc-xp-x64` | MSVC Windows XP x64 | Requires an x64 `v141_xp` toolset environment and the Windows SDK x64 libraries. |
 
 GNU Windows builds default to `WINDOWS_ARCH=x86` and Unicode Win32 APIs for the
 historical legacy matrix. `WINDOWS_ARCH=x64` selects the x86_64 MinGW cross
-compiler for NT-family builds. The Windows 9x/Me GNU aliases require x86 and
-the ANSI Win32 API path.
+compiler and defaults to the Windows XP x64 (`0x0502`) API floor. The Windows
+9x/Me GNU aliases require x86 and the ANSI Win32 API path.
 
 ## Build Guide
 
@@ -139,10 +140,11 @@ Common targets:
 | Stress POSIX lifecycle tests | `make STRESS_RUNS=10 STRESS_JOBS=8 stress-posix` |
 | Build all GNU Windows variants | `make all-windows` plus the controls below |
 | Test GNU Windows XP | `make check-windows-xp` |
-| Test GNU Windows x64 | `make check-windows-x64` |
+| Test GNU Windows XP x64 | `make check-windows-x64` or `make check-windows-xp-x64` |
 | Test BSD make POSIX path | `bmake check-posix` |
 | Test MSVC native | `nmake /f NMakefile check-msvc-native` |
-| Test MSVC XP-compatible | `nmake /f NMakefile check-msvc-xp` |
+| Test MSVC XP-compatible x86 | `nmake /f NMakefile check-msvc-xp` |
+| Test MSVC XP x64 | `nmake /f NMakefile check-msvc-xp-x64` |
 
 For direct standalone builds, use `make apply-patch-windows` with the same GNU
 Windows controls as the daemon, or `nmake /f NMakefile apply-patch-msvc-native`
@@ -153,8 +155,8 @@ GNU Windows controls:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `WINDOWS_TOOLCHAIN` | `cross` on non-Windows, `native` on Windows GNU hosts | Selects MinGW cross compiler or host `g++`. Cross builds link `-static-libgcc -static-libstdc++`; non-Windows cross tests default `WINDOWS_TEST_RUNNER` to `wine`. |
-| `WINDOWS_ARCH` | `x86` | Selects `i686-w64-mingw32-g++` or `x86_64-w64-mingw32-g++`. x64 is NT-family only. |
-| `WINDOWS_WINVER` | `0x0501` | Selects the Win32 API floor. |
+| `WINDOWS_ARCH` | `x86` | Selects `i686-w64-mingw32-g++` or `x86_64-w64-mingw32-g++`. x64 is NT-family only and defaults to the `0x0502` XP x64 API floor. |
+| `WINDOWS_WINVER` | `0x0501` for x86, `0x0502` for x64 | Selects the Win32 API floor. The x64 default targets Windows XP x64/Server 2003 x64. |
 | `WINDOWS_WIN32_WINNT` | follows `WINDOWS_WINVER` | Overrides `_WIN32_WINNT` when needed. |
 | `WINDOWS_FAMILY` | `nt` | Use `9x` for Windows 9x/Me aliases; this also defines `_WIN32_WINDOWS` and `_CHICAGO_`. |
 | `WINDOWS_CHAR_API` | `unicode` | Use `ansi` for daemon-owned `A` Win32 file/process/path calls. ANSI builds reject UTF-8 paths or commands that are not representable in the active Windows ANSI code page. |
@@ -173,7 +175,7 @@ Useful GNU aliases:
 | Windows 9x/Me ANSI | `all-windows-9x-ws1-ansi`, `check-windows-9x-ws1-ansi`, `all-windows-9x-ws2-ansi`, `check-windows-9x-ws2-ansi` |
 | Windows 2000 | `all-windows-2000`, `check-windows-2000` |
 | Windows XP | `all-windows-xp`, `check-windows-xp`, `all-windows-xp-ansi`, `check-windows-xp-ansi` |
-| Windows x64 | `all-windows-x64`, `check-windows-x64` |
+| Windows XP x64 | `all-windows-x64`, `check-windows-x64`, `all-windows-xp-x64`, `check-windows-xp-x64` |
 | Windows GNU native | `all-windows-native`, `check-windows-native` |
 
 The XP, x64, XP ANSI, and native aliases resolve `TLS=auto` to OpenSSL and
@@ -187,13 +189,16 @@ MSVC/NMAKE targets:
 | Variant | Build | Check | Focused tests |
 | --- | --- | --- | --- |
 | Native | `nmake /f NMakefile all-msvc-native` | `nmake /f NMakefile check-msvc-native` | `test-msvc-native-console-output`, `test-msvc-native-session-store`, `test-msvc-native-transfer`, `test-msvc-native-server-routes-common`, `test-msvc-native-server-runtime`, `test-msvc-native-server-transport`, `test-msvc-native-connection-manager` |
-| XP-compatible | `nmake /f NMakefile all-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp` | `nmake /f NMakefile check-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp` | `test-msvc-xp-console-output`, `test-msvc-xp-session-store`, `test-msvc-xp-transfer`, `test-msvc-xp-server-routes-common`, `test-msvc-xp-server-runtime`, `test-msvc-xp-server-transport`, `test-msvc-xp-connection-manager` |
+| XP-compatible x86 | `nmake /f NMakefile all-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp` | `nmake /f NMakefile check-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp` | `test-msvc-xp-console-output`, `test-msvc-xp-session-store`, `test-msvc-xp-transfer`, `test-msvc-xp-server-routes-common`, `test-msvc-xp-server-runtime`, `test-msvc-xp-server-transport`, `test-msvc-xp-connection-manager` |
+| XP x64 | `nmake /f NMakefile all-msvc-xp-x64 OPENSSL_ROOT=C:\path\to\openssl-xp-x64` | `nmake /f NMakefile check-msvc-xp-x64 OPENSSL_ROOT=C:\path\to\openssl-xp-x64` | Uses the x64 SDK library directory and a `5.02` minimum subsystem version. |
 
 `NMakefile` is intentionally separate from the GNU/BSD make entry points. It
 uses the static C runtime (`/MT`), vendors the same `winpty` sources as GNU
 Windows builds, stages `winpty-agent.exe` beside the daemon and test binaries,
-and links XP targets as x86 console programs with a Windows XP minimum
-subsystem version. NMAKE does not expose a Windows 2000 entry point.
+and links XP targets with an architecture-specific Windows minimum subsystem
+version (`5.01` for x86 and `5.02` for x64). Run the x64 target from an x64
+Visual Studio developer prompt so `cl` and the SDK libraries use the same
+machine type. NMAKE does not expose a Windows 2000 entry point.
 
 Makefile layout:
 
@@ -286,7 +291,7 @@ Use `config/daemon-cpp.example.ini` as the starting config. The configured
 | POSIX | `build/remote-exec-daemon-cpp` |
 | POSIX standalone patch CLI | `build/apply_patch` |
 | GNU Windows XP/Winsock 2 | `build\remote-exec-daemon-cpp-xp-ws2-tls-openssl.exe` |
-| GNU Windows x64 XP/Winsock 2 | `build\remote-exec-daemon-cpp-x64-xp-ws2-tls-openssl.exe` |
+| GNU Windows XP x64/Winsock 2 | `build\remote-exec-daemon-cpp-x64-xp-x64-ws2-tls-openssl.exe` |
 | GNU Windows 2000/Winsock 2 | `build\remote-exec-daemon-cpp-2000-ws2.exe` |
 | GNU host-native Windows XP/Winsock 2 | `build\remote-exec-daemon-cpp-native-xp-ws2-tls-openssl.exe` |
 | GNU Windows NT 3.x Winsock 1.1 | `build\remote-exec-daemon-cpp-nt3x-ws1.exe` |
@@ -295,7 +300,8 @@ Use `config/daemon-cpp.example.ini` as the starting config. The configured
 | GNU Windows 9x/Me Winsock 1.1 ANSI | `build\remote-exec-daemon-cpp-9x-ws1-ansi.exe` |
 | GNU Windows 9x/Me Winsock 2 ANSI | `build\remote-exec-daemon-cpp-9x-ws2-ansi.exe` |
 | GNU Windows NT 4.0 Winsock 2 | `build\remote-exec-daemon-cpp-nt4-ws2.exe` |
-| MSVC XP-compatible | `build\msvc-xp\remote-exec-daemon-cpp-xp-msvc-tls-openssl.exe` |
+| MSVC XP-compatible x86 | `build\msvc-xp\remote-exec-daemon-cpp-xp-msvc-tls-openssl.exe` |
+| MSVC XP x64-compatible | `build\msvc-xp-x64\remote-exec-daemon-cpp-xp-x64-msvc-tls-openssl.exe` |
 
 Every GNU Windows and MSVC daemon build also emits an `apply_patch-<variant>.exe`
 alongside its daemon binary. The standalone tool reads a Codex-style patch from
@@ -668,8 +674,8 @@ Port forwarding has stricter ownership rules because it is reconnect-aware:
 - GNU NT 3.x builds and GNU ANSI API builds where `WINDOWS_WINPTY=auto`
   resolves to disabled have no PTY support.
 - Windows runtime support is strongest on Unicode NT-family Windows.
-- GNU x64 builds are NT-family only; Windows 9x/Me aliases require
-  `WINDOWS_ARCH=x86`.
+- GNU x64 builds target NT-family systems, including Windows XP x64; Windows
+  9x/Me aliases require `WINDOWS_ARCH=x86`.
 - The GNU Winsock 1.1 Unicode variant has been tested on Windows NT 3.51 and
   Windows NT 4.0.
 - The GNU ANSI API path has been tested with Winsock 1.1 and Winsock 2 on
