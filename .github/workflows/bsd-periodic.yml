@@ -48,6 +48,11 @@ jobs:
             architecture: x86-64
             version: "6.4.2"
             rust_setup: package
+          - label: OmniOS (illumos)
+            name: omnios
+            architecture: x86-64
+            version: "r151058"
+            rust_setup: rustup
 
     defaults:
       run:
@@ -68,11 +73,14 @@ jobs:
             freebsd)
               rustup_target='x86_64-unknown-freebsd'
               ;;
+            omnios)
+              rustup_target='x86_64-unknown-illumos'
+              ;;
             netbsd)
               rustup_target='x86_64-unknown-netbsd'
               ;;
             *)
-              echo "unexpected rustup BSD target: ${{ matrix.os.name }}" >&2
+              echo "unexpected rustup target: ${{ matrix.os.name }}" >&2
               exit 1
               ;;
           esac
@@ -109,6 +117,8 @@ jobs:
               sudo "$@"
             elif command -v doas >/dev/null 2>&1; then
               doas "$@"
+            elif command -v pfexec >/dev/null 2>&1; then
+              pfexec "$@"
             elif [ "$(id -u)" -eq 0 ]; then
               "$@"
             else
@@ -127,12 +137,37 @@ jobs:
                 export PATH
                 MAKE_CMD=gmake
                 ;;
+              omnios)
+                if ! command -v gmake >/dev/null 2>&1; then
+                  run_as_root pkg install developer/build/gnu-make
+                fi
+                MAKE_CMD=gmake
+                ;;
               *)
                 MAKE_CMD=make
                 ;;
             esac
             export MAKE_CMD
             command -v "$MAKE_CMD" >/dev/null 2>&1
+          }
+
+          ensure_cxx_tool() {
+            case "$BSD_NAME" in
+              omnios)
+                if ! command -v c++ >/dev/null 2>&1 && ! command -v g++ >/dev/null 2>&1; then
+                  run_as_root pkg install build-essential
+                fi
+                if command -v c++ >/dev/null 2>&1; then
+                  CXX_CMD=c++
+                else
+                  CXX_CMD=g++
+                fi
+                ;;
+              *)
+                CXX_CMD=c++
+                ;;
+            esac
+            export CXX_CMD
           }
 
           setup_rust() {
@@ -176,9 +211,10 @@ jobs:
           export TMPDIR="$tmp_dir"
 
           ensure_make_tool
+          ensure_cxx_tool
           setup_rust
 
-          c++ --version
+          "$CXX_CMD" --version
           cargo --version
           rustc --version
           printf 'make command: %s\n' "$MAKE_CMD"
@@ -190,10 +226,10 @@ jobs:
           rust_status=0
 
           set +e
-          "$MAKE_CMD" -k -C crates/remote-exec-daemon-cpp BUILD_DIR="$cpp_build_dir" HOST_CXX=c++ all-posix
+          "$MAKE_CMD" -k -C crates/remote-exec-daemon-cpp BUILD_DIR="$cpp_build_dir" HOST_CXX="$CXX_CMD" all-posix
           cpp_status=$?
           if [ "$cpp_status" -eq 0 ]; then
-            "$MAKE_CMD" -k -C crates/remote-exec-daemon-cpp BUILD_DIR="$cpp_build_dir" HOST_CXX=c++ check-posix
+            "$MAKE_CMD" -k -C crates/remote-exec-daemon-cpp BUILD_DIR="$cpp_build_dir" HOST_CXX="$CXX_CMD" check-posix
             cpp_status=$?
           fi
 
