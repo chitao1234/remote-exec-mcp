@@ -48,6 +48,9 @@ async fn assert_list_targets_smoke(fixture: &CppDaemonBrokerFixture) {
         .expect("C++ daemon target should be listed");
     assert_eq!(target["healthy"], true);
     let daemon_info = &target["daemon_info"];
+    #[cfg(not(windows))]
+    assert_eq!(daemon_info["supports_pty"], true);
+    #[cfg(windows)]
     assert!(daemon_info["supports_pty"].as_bool().is_some());
     assert_eq!(daemon_info["supports_port_forward"], true);
     assert!(daemon_info.get("port_forward_protocol_version").is_none());

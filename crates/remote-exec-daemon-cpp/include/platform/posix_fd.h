@@ -19,6 +19,10 @@
 #include "platform/posix_eintr.h"
 #include "remote_exec_cpp_config.h"
 
+#if REMOTE_EXEC_CPP_HAVE_STREAMS_I_PUSH
+#include <stropts.h>
+#endif
+
 #if REMOTE_EXEC_CPP_HAVE_POSIX_OPENPT
 extern "C" int posix_openpt(int flags);
 #endif
@@ -224,6 +228,17 @@ inline bool pty_slave_path(int master_fd, std::string* slave_path) {
     (void)master_fd;
     errno = ENOSYS;
     return false;
+#endif
+}
+
+inline int push_stream_module(int fd, const char* module_name) {
+#if REMOTE_EXEC_CPP_HAVE_STREAMS_I_PUSH
+    return posix_eintr::retry<int>([&]() { return ioctl(fd, I_PUSH, module_name); });
+#else
+    (void)fd;
+    (void)module_name;
+    errno = ENOSYS;
+    return -1;
 #endif
 }
 

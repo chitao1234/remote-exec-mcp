@@ -289,6 +289,9 @@ inline void assert_built_winpty_runtime_available(bool runtime_supports_pty) {
 #endif
 
 inline bool should_skip_pty_tests(bool runtime_supports_pty) {
+#ifdef __sun
+    TEST_ASSERT(runtime_supports_pty);
+#endif
 #ifdef _WIN32
 #ifdef REMOTE_EXEC_CPP_HAS_WINPTY
     if (!runtime_supports_pty && is_wine_runtime()) {

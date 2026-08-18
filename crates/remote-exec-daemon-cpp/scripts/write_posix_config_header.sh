@@ -95,6 +95,15 @@ int main() {
 }
 EOF
 
+# illumos exposes PTY terminal semantics through STREAMS modules.
+probe REMOTE_EXEC_CPP_HAVE_STREAMS_I_PUSH <<'EOF'
+#include <stropts.h>
+#include <sys/ioctl.h>
+int main() {
+    return ioctl(-1, I_PUSH, "ptem");
+}
+EOF
+
 probe REMOTE_EXEC_CPP_HAVE_PIPE2 <<'EOF'
 #include <fcntl.h>
 #include <unistd.h>

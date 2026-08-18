@@ -127,10 +127,29 @@ PosixPtyPair create_posix_pty() {
     return pair;
 }
 
+// illumos PTY slaves need these STREAMS modules before terminal ioctls work.
+const char* configure_pty_slave_terminal_modules(int fd) {
+#ifdef __sun
+    if (posix_fd::push_stream_module(fd, "ptem") != 0) {
+        return "ioctl(I_PUSH, ptem on pty slave)";
+    }
+    if (posix_fd::push_stream_module(fd, "ldterm") != 0) {
+        return "ioctl(I_PUSH, ldterm on pty slave)";
+    }
+#else
+    (void)fd;
+#endif
+    return nullptr;
+}
+
 void verify_posix_pty_launch_setup(const PosixPtyPair& pair) {
     UniqueFd slave(posix_fd::open_cloexec_path(pair.slave_path.c_str(), O_RDWR | O_NOCTTY));
     if (!slave.valid()) {
         throw std::runtime_error(errno_error::operation_failed("open(pty slave)", errno));
+    }
+    const char* terminal_setup_error = configure_pty_slave_terminal_modules(slave.get());
+    if (terminal_setup_error != nullptr) {
+        throw std::runtime_error(errno_error::operation_failed(terminal_setup_error, errno));
     }
     if (!posix_fd::set_pty_window_size(slave.get(), DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS)) {
         throw std::runtime_error(
@@ -526,6 +545,9 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
             }
             const int slave_fd = posix_fd::open_path(pty.slave_path.c_str(), O_RDWR);
             if (slave_fd < 0) {
+                _exit(126);
+            }
+            if (configure_pty_slave_terminal_modules(slave_fd) != nullptr) {
                 _exit(126);
             }
             posix_fd::make_controlling_terminal_best_effort(slave_fd);
