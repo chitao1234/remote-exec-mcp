@@ -49,29 +49,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Cache apt package archives
-        uses: actions/cache@v6
+      - name: Install and cache clang-format
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
         with:
-          path: ${{ runner.temp }}/apt-cache/archives
-          key: apt-${{ runner.os }}-${{ runner.arch }}-clang-format-v1
-
-      - name: Install clang-format
-        run: |
-          apt_cache_dir="$RUNNER_TEMP/apt-cache/archives"
-          mkdir -p "$apt_cache_dir/partial"
-          apt_get() {
-            local command_timeout="$1"
-            shift
-            sudo timeout --signal=TERM --kill-after=30s "$command_timeout" \
-              env DEBIAN_FRONTEND=noninteractive apt-get \
-              -o Acquire::Retries=5 \
-              -o Acquire::http::Timeout=30 \
-              -o Acquire::https::Timeout=30 \
-              -o DPkg::Lock::Timeout=60 \
-              "$@"
-          }
-          apt_get 5m update
-          apt_get 10m -o Dir::Cache::archives="$apt_cache_dir/" install -y clang-format
+          packages: clang-format
+          version: clang-format-v1
 
       - name: Check formatting
         run: crates/remote-exec-daemon-cpp/scripts/clang_format.sh check
@@ -286,29 +268,11 @@ jobs:
             cpp-posix-${{ runner.os }}-
             cpp-${{ runner.os }}-
 
-      - name: Cache apt package archives
-        uses: actions/cache@v6
+      - name: Install and cache Linux C++ dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
         with:
-          path: ${{ runner.temp }}/apt-cache/archives
-          key: apt-${{ runner.os }}-${{ runner.arch }}-cpp-posix-v1
-
-      - name: Install Linux C++ dependencies
-        run: |
-          apt_cache_dir="$RUNNER_TEMP/apt-cache/archives"
-          mkdir -p "$apt_cache_dir/partial"
-          apt_get() {
-            local command_timeout="$1"
-            shift
-            sudo timeout --signal=TERM --kill-after=30s "$command_timeout" \
-              env DEBIAN_FRONTEND=noninteractive apt-get \
-              -o Acquire::Retries=5 \
-              -o Acquire::http::Timeout=30 \
-              -o Acquire::https::Timeout=30 \
-              -o DPkg::Lock::Timeout=60 \
-              "$@"
-          }
-          apt_get 5m update
-          apt_get 10m -o Dir::Cache::archives="$apt_cache_dir/" install -y g++ make
+          packages: g++ make
+          version: cpp-posix-v1
 
       - name: Run POSIX C++ checks
         shell: bash
@@ -352,30 +316,16 @@ jobs:
             cpp-windows-cross-${{ matrix.make_target }}-${{ runner.os }}-
             cpp-${{ runner.os }}-
 
-      - name: Cache apt package archives
-        uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/apt-cache/archives
-          key: apt-${{ runner.os }}-${{ runner.arch }}-cpp-windows-cross-v1
-
-      - name: Install Linux C++ dependencies
+      - name: Enable i386 packages
         run: |
-          apt_cache_dir="$RUNNER_TEMP/apt-cache/archives"
           sudo dpkg --add-architecture i386
-          mkdir -p "$apt_cache_dir/partial"
-          apt_get() {
-            local command_timeout="$1"
-            shift
-            sudo timeout --signal=TERM --kill-after=30s "$command_timeout" \
-              env DEBIAN_FRONTEND=noninteractive apt-get \
-              -o Acquire::Retries=5 \
-              -o Acquire::http::Timeout=30 \
-              -o Acquire::https::Timeout=30 \
-              -o DPkg::Lock::Timeout=60 \
-              "$@"
-          }
-          apt_get 5m update
-          apt_get 15m -o Dir::Cache::archives="$apt_cache_dir/" install -y g++ make g++-mingw-w64-i686 g++-mingw-w64-x86-64 wine wine32:i386
+          sudo apt-get update
+
+      - name: Install and cache Linux C++ dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
+        with:
+          packages: g++ make g++-mingw-w64-i686 g++-mingw-w64-x86-64 wine wine32:i386
+          version: cpp-windows-cross-v1
 
       - name: Run Windows C++ cross checks
         shell: bash
