@@ -24,6 +24,11 @@ inline bool is_windows_command_family(const std::string& lower) {
     return lower == "command.com" || lower == "command";
 }
 
+inline bool is_windows_bash_family(const std::string& lower) {
+    return lower == "bash.exe" || lower == "bash" || lower == "sh.exe" || lower == "sh"
+           || lower == "git-bash.exe" || lower == "git-bash";
+}
+
 } // namespace platform_detail
 
 #endif

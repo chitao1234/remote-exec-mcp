@@ -30,6 +30,7 @@ extern char** environ;
 namespace {
 
 #ifdef _WIN32
+using platform_detail::is_windows_bash_family;
 using platform_detail::is_windows_cmd_family;
 using platform_detail::is_windows_command_family;
 using platform_detail::shell_basename_lower;
@@ -146,7 +147,7 @@ bool shell_supported(const std::string& shell) {
 #ifdef _WIN32
     const std::string lower = shell_basename_lower(shell);
     return is_windows_cmd_family(lower) || is_windows_command_family(lower)
-           || is_windows_powershell_family(lower);
+           || is_windows_powershell_family(lower) || is_windows_bash_family(lower);
 #else
     (void)shell;
     return true;
@@ -159,7 +160,8 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
         if (!shell_supported(configured_default_shell)) {
             throw std::runtime_error(
                 "supported Windows shells are cmd.exe/cmd, command.com/command, and the "
-                "PowerShell family (powershell.exe, powershell, pwsh.exe, pwsh)"
+                "PowerShell family (powershell.exe, powershell, pwsh.exe, pwsh), or "
+                "Git Bash (bash.exe, bash, sh.exe, sh, git-bash.exe, git-bash)"
             );
         }
         return configured_default_shell;
@@ -235,6 +237,14 @@ std::vector<std::string> shell_argv(
             argv.push_back("-NoProfile");
         }
         argv.push_back("-Command");
+        argv.push_back(command);
+        return argv;
+    }
+    if (is_windows_bash_family(lower)) {
+        if (login) {
+            argv.push_back("-l");
+        }
+        argv.push_back("-c");
         argv.push_back(command);
         return argv;
     }

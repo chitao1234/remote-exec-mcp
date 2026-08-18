@@ -69,6 +69,12 @@ make prepare-openssl-xp OPENSSL_DEPS_DIR=/path/to/deps
 make all-windows-xp OPENSSL_ROOT=/path/to/deps/openssl-1.1.1w
 ```
 
+For TLS-enabled Windows builds, always prepare the matching OpenSSL dependency
+first with `prepare-openssl-xp` (or `prepare-openssl` for non-XP targets) and
+pass its install directory through `OPENSSL_ROOT`. If OpenSSL is unavailable
+in the build environment and TLS is not required, set `TLS=off` on the build
+and check commands instead.
+
 Run the MSVC native path from an x86 Visual Studio developer prompt:
 
 ```bat
@@ -171,8 +177,10 @@ Useful GNU aliases:
 | Windows GNU native | `all-windows-native`, `check-windows-native` |
 
 The XP, x64, XP ANSI, and native aliases resolve `TLS=auto` to OpenSSL and
-therefore require a compatible OpenSSL installation. Pass `OPENSSL_ROOT`, or
-use `TLS=off` when intentionally validating only the plain-HTTP build.
+therefore require a compatible OpenSSL installation. Use an existing
+`OPENSSL_ROOT`, or always run the matching `prepare-openssl`/
+`prepare-openssl-xp` target first. When the environment lacks OpenSSL, use
+`TLS=off` when intentionally building or validating only the plain-HTTP build.
 
 MSVC/NMAKE targets:
 
@@ -203,6 +211,12 @@ headers, minimum 1.0.2 version, and link libraries; TLS is enabled only when the
 probe succeeds. Windows XP and newer GNU/MSVC targets resolve auto to OpenSSL,
 while Windows 2000, NT 4.0, NT 3.x, and 9x targets resolve auto to off. Explicit
 `TLS=openssl` and `TLS=off` always override the automatic choice.
+
+Do not rely on `TLS=auto` to recover from a missing OpenSSL installation on
+Windows XP or newer targets: those targets resolve `auto` to OpenSSL. Always
+run `make prepare-openssl` or `make prepare-openssl-xp` and pass the resulting
+`OPENSSL_ROOT`, or set `TLS=off` when the environment has no OpenSSL and plain
+HTTP is sufficient.
 
 Use an installed OpenSSL:
 
@@ -416,10 +430,12 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
   `default_shell`, then `SHELL`, passwd shell, `bash`, and `/bin/sh`.
 - POSIX exec uses `shell -c <cmd>` or `shell -l -c <cmd>` for login shells.
 - POSIX child processes currently force `LC_ALL=C.UTF-8` and `LANG=C.UTF-8`.
-- Windows exec supports the `cmd.exe`, `command.com`, and PowerShell families
-  (`powershell.exe`, `powershell`, `pwsh.exe`, and `pwsh`). `cmd.exe` uses
-  `/S /C` and adds `/D` when `login=false`; `command.com` uses `/C`.
-  PowerShell uses `-Command <cmd>` and adds `-NoProfile` when `login=false`.
+- Windows exec supports the `cmd.exe`, `command.com`, PowerShell, and Git Bash
+  families (`bash.exe`, `bash`, `sh.exe`, `sh`, `git-bash.exe`, and
+  `git-bash`). `cmd.exe` uses `/S /C` and adds `/D` when `login=false`;
+  `command.com` uses `/C`. PowerShell uses `-Command <cmd>` and adds
+  `-NoProfile` when `login=false`. Git Bash uses `-c <cmd>` and adds `-l`
+  before `-c` when `login=true`.
 - Windows command stdout/stderr bytes are decoded as OEM code page first, then
   ANSI code page, then UTF-8 replacement decoding. This covers legacy console
   encodings such as GBK, Shift-JIS, and Big5 when the OS provides those code

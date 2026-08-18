@@ -546,6 +546,11 @@ make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws2
 bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
 
+For TLS-enabled C++ builds, always run the matching `prepare-openssl` or
+`prepare-openssl-xp` target first and pass the resulting `OPENSSL_ROOT`. When
+the environment does not provide OpenSSL and TLS is not needed, set `TLS=off`
+on the build and check commands.
+
 From an x86 Visual Studio developer prompt:
 
 ```bat

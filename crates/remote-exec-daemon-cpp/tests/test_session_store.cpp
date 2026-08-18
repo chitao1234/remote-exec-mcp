@@ -649,6 +649,50 @@ static void assert_windows_powershell_selection_and_argument_passing() {
         == "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -Command \"Write-Output \\\"A & B\\\"\""
     );
 }
+
+static void assert_windows_git_bash_selection_and_argument_passing() {
+    const std::vector<std::string> bash_names = {
+        "bash.exe",
+        "bash",
+        "sh.exe",
+        "sh",
+        "git-bash.exe",
+        "git-bash",
+        "C:\\Program Files\\Git\\bin\\bash.exe",
+    };
+    for (std::size_t i = 0; i < bash_names.size(); ++i) {
+        TEST_ASSERT(platform::shell_supported(bash_names[i]));
+    }
+    TEST_ASSERT(platform::selected_shell("git-bash.exe", "cmd.exe") == "git-bash.exe");
+
+    const std::vector<std::string> non_login_argv =
+        platform::shell_argv("bash.exe", false, "printf alpha beta");
+    TEST_ASSERT(non_login_argv.size() == 3U);
+    TEST_ASSERT(non_login_argv[0] == "bash.exe");
+    TEST_ASSERT(non_login_argv[1] == "-c");
+    TEST_ASSERT(non_login_argv[2] == "printf alpha beta");
+
+    const std::vector<std::string> login_argv =
+        platform::shell_argv("git-bash.exe", true, "printf alpha beta");
+    TEST_ASSERT(login_argv.size() == 4U);
+    TEST_ASSERT(login_argv[0] == "git-bash.exe");
+    TEST_ASSERT(login_argv[1] == "-l");
+    TEST_ASSERT(login_argv[2] == "-c");
+    TEST_ASSERT(login_argv[3] == "printf alpha beta");
+
+    TEST_ASSERT(
+        windows_process_command_line_for_test("printf alpha beta", "bash.exe", false)
+        == "bash.exe -c \"printf alpha beta\""
+    );
+    TEST_ASSERT(
+        windows_process_command_line_for_test(
+            "printf alpha beta",
+            "C:\\Program Files\\Git\\bin\\bash.exe",
+            true
+        )
+        == "\"C:\\Program Files\\Git\\bin\\bash.exe\" -l -c \"printf alpha beta\""
+    );
+}
 #endif
 
 static void assert_windows_command_com_command_line_omits_cmd_only_flags() {
@@ -2041,6 +2085,7 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     assert_windows_cmd_command_line_preserves_command_quotes(shell);
     assert_windows_powershell_selection_and_argument_passing();
+    assert_windows_git_bash_selection_and_argument_passing();
     assert_windows_command_com_command_line_omits_cmd_only_flags();
     assert_windows_default_shell_fallback_tracks_runtime_family();
     assert_win32_process_tree_terminates_descendants(root);
