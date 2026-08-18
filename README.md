@@ -526,7 +526,7 @@ The C++ daemon intentionally supports a smaller surface than the Rust daemon:
 | Files | `remote_apply_patch`, `remote_view_image` passthrough for PNG/JPEG/WebP, and transfer import/export. Default-hidden `remote_read` / `remote_write` / `remote_edit` are not implemented yet. |
 | Transfers | File, directory, and broker-built multi-source transfers. No transfer compression. |
 | Forwarding | v4 TCP/UDP port-forward tunnel support with daemon-local worker and queue limits. |
-| Legacy Windows | GNU paths cover NT 3.x Winsock 1.1, NT 4.0 Winsock 1.1/2, Windows 2000, XP, x64 NT-family, and ANSI Windows 9x/Me variants. MSVC covers native and `v141_xp` XP-compatible paths. |
+| Legacy Windows | GNU paths cover NT 3.x Winsock 1.1, NT 4.0 Winsock 1.1/2, Windows 2000, XP, XP x64, x64 NT-family, and ANSI Windows 9x/Me variants. MSVC covers native, x86 `v141_xp`, and x64 XP-compatible paths. |
 
 The daemon builds as C++11 on every supported build path. In this repository,
 "Windows XP-compatible" means using a toolchain that can target XP while still
@@ -540,6 +540,7 @@ make -C crates/remote-exec-daemon-cpp check-windows-2000
 make -C crates/remote-exec-daemon-cpp prepare-openssl-xp OPENSSL_DEPS_DIR=/path/to/deps
 make -C crates/remote-exec-daemon-cpp check-windows-xp OPENSSL_ROOT=/path/to/deps/openssl-1.0.2u
 make -C crates/remote-exec-daemon-cpp check-windows-x64 OPENSSL_ROOT=/path/to/openssl-mingw64
+make -C crates/remote-exec-daemon-cpp check-windows-xp-x64 TLS=off
 make -C crates/remote-exec-daemon-cpp check-windows-nt3x-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws2
@@ -562,6 +563,13 @@ toolset:
 
 ```bat
 nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-xp OPENSSL_ROOT=C:\path\to\openssl-xp
+```
+
+From an x64 Visual Studio developer prompt with the same XP-capable toolset:
+
+```bat
+vcvarsall.bat x64 -vcvars_ver=14.16
+nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-xp-x64 OPENSSL_ROOT=C:\path\to\openssl-xp-x64
 ```
 
 More C++ daemon details live in
@@ -608,6 +616,7 @@ make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-2000
 make -C crates/remote-exec-daemon-cpp check-windows-xp
 make -C crates/remote-exec-daemon-cpp check-windows-x64
+make -C crates/remote-exec-daemon-cpp check-windows-xp-x64 TLS=off
 make -C crates/remote-exec-daemon-cpp check-windows-nt3x-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws2
@@ -619,6 +628,7 @@ Additional platform checks:
 make -C crates/remote-exec-daemon-cpp check-windows WINDOWS_TOOLCHAIN=native WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2
 nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
 nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-xp
+nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-xp-x64
 ```
 
 Focused commands:
