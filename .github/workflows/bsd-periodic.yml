@@ -89,8 +89,18 @@ jobs:
         if: matrix.os.name == 'freebsd'
         uses: vmactions/freebsd-vm@v1
         with:
+          cache-after-prepare: true
           custom-shell-name: vmsh
           envs: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
+          prepare: |
+            set -eu
+            work_root=/var/tmp/remote-exec-bsd-ci
+            cargo_home="$work_root/cargo-home"
+            rustup_home="$work_root/rustup-home"
+            mkdir -p "$cargo_home" "$rustup_home"
+            export CARGO_HOME="$cargo_home"
+            export RUSTUP_HOME="$rustup_home"
+            ./.github/bin/rustup-init -y --profile minimal --default-toolchain 1.85.0
           release: ${{ matrix.os.release }}
           mem: 6144
           cpu: 4
@@ -100,8 +110,17 @@ jobs:
         if: matrix.os.name == 'openbsd'
         uses: vmactions/openbsd-vm@v1
         with:
+          cache-after-prepare: true
           custom-shell-name: vmsh
           envs: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
+          prepare: |
+            set -eu
+            if ! command -v gmake >/dev/null 2>&1; then
+              pkg_add gmake
+            fi
+            if ! command -v rustc >/dev/null 2>&1; then
+              pkg_add rust
+            fi
           release: ${{ matrix.os.release }}
           mem: 6144
           cpu: 4
@@ -111,8 +130,18 @@ jobs:
         if: matrix.os.name == 'netbsd'
         uses: vmactions/netbsd-vm@v1
         with:
+          cache-after-prepare: true
           custom-shell-name: vmsh
           envs: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
+          prepare: |
+            set -eu
+            work_root=/var/tmp/remote-exec-bsd-ci
+            cargo_home="$work_root/cargo-home"
+            rustup_home="$work_root/rustup-home"
+            mkdir -p "$cargo_home" "$rustup_home"
+            export CARGO_HOME="$cargo_home"
+            export RUSTUP_HOME="$rustup_home"
+            ./.github/bin/rustup-init -y --profile minimal --default-toolchain 1.85.0
           release: ${{ matrix.os.release }}
           mem: 6144
           cpu: 4
@@ -122,8 +151,14 @@ jobs:
         if: matrix.os.name == 'dragonflybsd'
         uses: vmactions/dragonflybsd-vm@v1
         with:
+          cache-after-prepare: true
           custom-shell-name: vmsh
           envs: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
+          prepare: |
+            set -eu
+            if ! command -v rustc >/dev/null 2>&1; then
+              pkg install -y rust
+            fi
           release: ${{ matrix.os.release }}
           mem: 6144
           cpu: 4
@@ -133,8 +168,24 @@ jobs:
         if: matrix.os.name == 'omnios'
         uses: vmactions/omnios-vm@v1
         with:
+          cache-after-prepare: true
           custom-shell-name: vmsh
           envs: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
+          prepare: |
+            set -eu
+            if ! command -v gmake >/dev/null 2>&1; then
+              pkg install developer/build/gnu-make
+            fi
+            if ! command -v c++ >/dev/null 2>&1 && ! command -v g++ >/dev/null 2>&1; then
+              pkg install build-essential
+            fi
+            work_root=/var/tmp/remote-exec-bsd-ci
+            cargo_home="$work_root/cargo-home"
+            rustup_home="$work_root/rustup-home"
+            mkdir -p "$cargo_home" "$rustup_home"
+            export CARGO_HOME="$cargo_home"
+            export RUSTUP_HOME="$rustup_home"
+            ./.github/bin/rustup-init -y --profile minimal --default-toolchain 1.85.0
           release: ${{ matrix.os.release }}
           mem: 6144
           cpu: 4
@@ -152,35 +203,14 @@ jobs:
         run: |
           set -eu
 
-          run_as_root() {
-            if command -v sudo >/dev/null 2>&1; then
-              sudo "$@"
-            elif command -v doas >/dev/null 2>&1; then
-              doas "$@"
-            elif command -v pfexec >/dev/null 2>&1; then
-              pfexec "$@"
-            elif [ "$(id -u)" -eq 0 ]; then
-              "$@"
-            else
-              echo "no supported privilege escalation command found" >&2
-              return 1
-            fi
-          }
-
           ensure_make_tool() {
             case "$BSD_NAME" in
               openbsd)
-                if ! command -v gmake >/dev/null 2>&1; then
-                  run_as_root pkg_add gmake
-                fi
                 PATH="/usr/local/bin:$PATH"
                 export PATH
                 MAKE_CMD=gmake
                 ;;
               omnios)
-                if ! command -v gmake >/dev/null 2>&1; then
-                  run_as_root pkg install developer/build/gnu-make
-                fi
                 MAKE_CMD=gmake
                 ;;
               *)
@@ -194,9 +224,6 @@ jobs:
           ensure_cxx_tool() {
             case "$BSD_NAME" in
               omnios)
-                if ! command -v c++ >/dev/null 2>&1 && ! command -v g++ >/dev/null 2>&1; then
-                  run_as_root pkg install build-essential
-                fi
                 if command -v c++ >/dev/null 2>&1; then
                   CXX_CMD=c++
                 else
@@ -213,22 +240,9 @@ jobs:
           setup_rust() {
             case "$BSD_RUST_SETUP" in
               rustup)
-                ./.github/bin/rustup-init -y --profile minimal --default-toolchain 1.85.0
                 . "$CARGO_HOME/env"
                 ;;
               package)
-                case "$BSD_NAME" in
-                  openbsd)
-                    run_as_root pkg_add rust
-                    ;;
-                  dragonflybsd)
-                    run_as_root pkg install -y rust
-                    ;;
-                  *)
-                    echo "unexpected packaged-rust BSD target: $BSD_NAME" >&2
-                    return 1
-                    ;;
-                esac
                 ;;
               *)
                 echo "unexpected rust setup mode: $BSD_RUST_SETUP" >&2
