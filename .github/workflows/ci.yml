@@ -316,16 +316,36 @@ jobs:
             cpp-windows-cross-${{ matrix.make_target }}-${{ runner.os }}-
             cpp-${{ runner.os }}-
 
-      - name: Enable i386 packages
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-
-      - name: Install and cache Linux C++ dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
+      # The multiarch packages need dpkg maintainer scripts to configure the
+      # MinGW alternatives. Cache the .deb files, but always install via apt.
+      - name: Cache apt package archives
+        uses: actions/cache@v6
         with:
-          packages: g++ make g++-mingw-w64-i686 g++-mingw-w64-x86-64 wine wine32:i386
-          version: cpp-windows-cross-v1
+          path: ${{ runner.temp }}/apt-cache/archives
+          key: apt-${{ runner.os }}-${{ runner.arch }}-cpp-windows-cross-archives-v1
+
+      - name: Install Linux C++ dependencies
+        run: |
+          apt_cache_dir="$RUNNER_TEMP/apt-cache/archives"
+          sudo dpkg --add-architecture i386
+          mkdir -p "$apt_cache_dir/partial"
+          apt_get() {
+            local command_timeout="$1"
+            shift
+            sudo timeout --signal=TERM --kill-after=30s "$command_timeout" \
+              env DEBIAN_FRONTEND=noninteractive apt-get \
+              -o Acquire::Retries=5 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              -o DPkg::Lock::Timeout=60 \
+              "$@"
+          }
+          apt_get 5m update
+          apt_get 15m -o Dir::Cache::archives="$apt_cache_dir/" install -y \
+            g++ make g++-mingw-w64-i686 g++-mingw-w64-x86-64 wine wine32:i386
+          command -v i686-w64-mingw32-g++
+          command -v x86_64-w64-mingw32-g++
+          command -v wine
 
       - name: Run Windows C++ cross checks
         shell: bash
