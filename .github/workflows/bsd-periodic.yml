@@ -30,33 +30,28 @@ jobs:
         os:
           - label: FreeBSD
             name: freebsd
-            architecture: x86-64
-            version: "15.0"
+            release: "15.0"
             rust_setup: rustup
           - label: OpenBSD
             name: openbsd
-            architecture: x86-64
-            version: "7.8"
+            release: "7.8"
             rust_setup: package
           - label: NetBSD
             name: netbsd
-            architecture: x86-64
-            version: "10.1"
+            release: "10.1"
             rust_setup: rustup
           - label: DragonFly BSD
             name: dragonflybsd
-            architecture: x86-64
-            version: "6.4.2"
+            release: "6.4.2"
             rust_setup: package
           - label: OmniOS (illumos)
             name: omnios
-            architecture: x86-64
-            version: "r151058"
+            release: "r151058"
             rust_setup: rustup
 
     defaults:
       run:
-        shell: cpa.sh {0}
+        shell: vmsh {0}
 
     steps:
       - name: Checkout
@@ -90,15 +85,60 @@ jobs:
             -o .github/bin/rustup-init
           chmod +x .github/bin/rustup-init
 
-      - name: Start ${{ matrix.os.label }} VM
-        uses: cross-platform-actions/action@v1
+      - name: Start FreeBSD VM
+        if: matrix.os.name == 'freebsd'
+        uses: vmactions/freebsd-vm@v1
         with:
-          environment_variables: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
-          operating_system: ${{ matrix.os.name }}
-          architecture: ${{ matrix.os.architecture }}
-          version: ${{ matrix.os.version }}
-          memory: 6G
-          cpu_count: 4
+          custom-shell-name: vmsh
+          envs: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
+          release: ${{ matrix.os.release }}
+          mem: 6144
+          cpu: 4
+          sync: rsync
+
+      - name: Start OpenBSD VM
+        if: matrix.os.name == 'openbsd'
+        uses: vmactions/openbsd-vm@v1
+        with:
+          custom-shell-name: vmsh
+          envs: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
+          release: ${{ matrix.os.release }}
+          mem: 6144
+          cpu: 4
+          sync: rsync
+
+      - name: Start NetBSD VM
+        if: matrix.os.name == 'netbsd'
+        uses: vmactions/netbsd-vm@v1
+        with:
+          custom-shell-name: vmsh
+          envs: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
+          release: ${{ matrix.os.release }}
+          mem: 6144
+          cpu: 4
+          sync: rsync
+
+      - name: Start DragonFly BSD VM
+        if: matrix.os.name == 'dragonflybsd'
+        uses: vmactions/dragonflybsd-vm@v1
+        with:
+          custom-shell-name: vmsh
+          envs: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
+          release: ${{ matrix.os.release }}
+          mem: 6144
+          cpu: 4
+          sync: rsync
+
+      - name: Start OmniOS VM
+        if: matrix.os.name == 'omnios'
+        uses: vmactions/omnios-vm@v1
+        with:
+          custom-shell-name: vmsh
+          envs: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_TEST_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
+          release: ${{ matrix.os.release }}
+          mem: 6144
+          cpu: 4
+          sync: rsync
 
       - name: Record guest details
         run: |
