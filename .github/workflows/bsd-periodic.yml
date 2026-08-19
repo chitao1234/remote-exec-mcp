@@ -254,7 +254,17 @@ jobs:
             echo "tests must not run as root" >&2
             exit 1
           fi
-          printf 'test identity: %s (uid=%s)\n' "$(id -un)" "$(id -u)"
+          test_home=$(awk -F: -v user="$BSD_TEST_USER" \
+            '$1 == user { print $6; exit }' /etc/passwd)
+          if [ -z "$test_home" ]; then
+            echo "could not determine home for $BSD_TEST_USER" >&2
+            exit 1
+          fi
+          HOME=$test_home
+          XDG_CONFIG_HOME="$HOME/.config"
+          export HOME XDG_CONFIG_HOME
+          printf 'test identity: %s (uid=%s, home=%s)\n' \
+            "$(id -un)" "$(id -u)" "$HOME"
 
           ensure_make_tool() {
             case "$BSD_NAME" in
