@@ -19,7 +19,7 @@ jobs:
   bsd-test:
     name: BSD test (${{ matrix.os.label }})
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     env:
       BSD_NAME: ${{ matrix.os.name }}
       BSD_RUST_SETUP: ${{ matrix.os.rust_setup }}
@@ -88,6 +88,7 @@ jobs:
 
       - name: Start FreeBSD VM
         if: matrix.os.name == 'freebsd'
+        timeout-minutes: 15
         uses: vmactions/freebsd-vm@v1
         with:
           cache-after-prepare: false
@@ -113,6 +114,7 @@ jobs:
 
       - name: Start OpenBSD VM
         if: matrix.os.name == 'openbsd'
+        timeout-minutes: 15
         uses: vmactions/openbsd-vm@v1
         with:
           cache-after-prepare: false
@@ -142,6 +144,7 @@ jobs:
 
       - name: Start NetBSD VM
         if: matrix.os.name == 'netbsd'
+        timeout-minutes: 15
         uses: vmactions/netbsd-vm@v1
         with:
           cache-after-prepare: false
@@ -167,6 +170,7 @@ jobs:
 
       - name: Start DragonFly BSD VM
         if: matrix.os.name == 'dragonflybsd'
+        timeout-minutes: 15
         uses: vmactions/dragonflybsd-vm@v1
         with:
           cache-after-prepare: false
@@ -197,6 +201,7 @@ jobs:
 
       - name: Start OmniOS VM
         if: matrix.os.name == 'omnios'
+        timeout-minutes: 15
         uses: vmactions/omnios-vm@v1
         with:
           cache-after-prepare: false
