@@ -86,17 +86,16 @@ async fn remote_exec_cli_rejects_removed_broker_bin_flag() {
 async fn remote_exec_cli_returns_usage_code_for_input_errors() {
     let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;
     let missing_patch = fixture._tempdir.path().join("missing.patch");
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
-        .arg("--broker-config")
-        .arg(&fixture.config_path)
-        .arg("apply-patch")
-        .arg("--target")
-        .arg(DEFAULT_TEST_TARGET)
-        .arg("--input-file")
-        .arg(&missing_patch)
-        .output()
-        .await
-        .unwrap();
+    let output = run_cli(&[
+        "--broker-config",
+        fixture.config_path.to_str().unwrap(),
+        "apply-patch",
+        "--target",
+        DEFAULT_TEST_TARGET,
+        "--input-file",
+        missing_patch.to_str().unwrap(),
+    ])
+    .await;
 
     assert_exit_code(&output, 2);
     assert!(
@@ -111,13 +110,12 @@ async fn remote_exec_cli_returns_usage_code_for_input_errors() {
 async fn remote_exec_cli_returns_config_code_for_config_errors() {
     let tempdir = tempfile::tempdir().unwrap();
     let missing_config = tempdir.path().join("missing-broker.toml");
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
-        .arg("--broker-config")
-        .arg(&missing_config)
-        .arg("list-targets")
-        .output()
-        .await
-        .unwrap();
+    let output = run_cli(&[
+        "--broker-config",
+        missing_config.to_str().unwrap(),
+        "list-targets",
+    ])
+    .await;
 
     assert_exit_code(&output, 3);
 }
@@ -132,13 +130,7 @@ async fn remote_exec_cli_returns_connection_code_for_broker_transport_errors() {
         }
     });
 
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
-        .arg("--broker-url")
-        .arg(url)
-        .arg("list-targets")
-        .output()
-        .await
-        .unwrap();
+    let output = run_cli(&["--broker-url", &url, "list-targets"]).await;
 
     assert_exit_code(&output, 4);
 }
@@ -146,16 +138,15 @@ async fn remote_exec_cli_returns_connection_code_for_broker_transport_errors() {
 #[tokio::test]
 async fn remote_exec_cli_returns_tool_code_for_tool_errors() {
     let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
-        .arg("--broker-config")
-        .arg(&fixture.config_path)
-        .arg("exec-command")
-        .arg("--target")
-        .arg("missing-target")
-        .arg("printf nope")
-        .output()
-        .await
-        .unwrap();
+    let output = run_cli(&[
+        "--broker-config",
+        fixture.config_path.to_str().unwrap(),
+        "exec-command",
+        "--target",
+        "missing-target",
+        "printf nope",
+    ])
+    .await;
 
     assert_exit_code(&output, 5);
     assert!(
@@ -184,14 +175,13 @@ path = "/mcp"
         .await
         .unwrap();
 
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
-        .arg("--broker-config")
-        .arg(&fixture.config_path)
-        .arg("--json")
-        .arg("list-targets")
-        .output()
-        .await
-        .unwrap();
+    let output = run_cli(&[
+        "--broker-config",
+        fixture.config_path.to_str().unwrap(),
+        "--json",
+        "list-targets",
+    ])
+    .await;
 
     assert!(
         output.status.success(),
@@ -314,21 +304,21 @@ async fn remote_exec_cli_forward_ports_opens_lists_and_closes_local_tcp_forward(
         stream.write_all(&buf[..read]).await.unwrap();
     });
 
-    let open_output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
-        .arg("--broker-url")
-        .arg(&fixture.url)
-        .arg("--json")
-        .arg("forward-ports")
-        .arg("open")
-        .arg("--listen-side")
-        .arg("local")
-        .arg("--connect-side")
-        .arg("local")
-        .arg("--forward")
-        .arg(format!("tcp:127.0.0.1:0={echo_addr}"))
-        .output()
-        .await
-        .unwrap();
+    let forward = format!("tcp:127.0.0.1:0={echo_addr}");
+    let open_output = run_cli(&[
+        "--broker-url",
+        &fixture.url,
+        "--json",
+        "forward-ports",
+        "open",
+        "--listen-side",
+        "local",
+        "--connect-side",
+        "local",
+        "--forward",
+        &forward,
+    ])
+    .await;
 
     assert!(
         open_output.status.success(),
@@ -357,17 +347,16 @@ async fn remote_exec_cli_forward_ports_opens_lists_and_closes_local_tcp_forward(
     stream.read_exact(&mut buf).await.unwrap();
     assert_eq!(&buf, b"hello");
 
-    let list_output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
-        .arg("--broker-url")
-        .arg(&fixture.url)
-        .arg("--json")
-        .arg("forward-ports")
-        .arg("list")
-        .arg("--forward-id")
-        .arg(&forward_id)
-        .output()
-        .await
-        .unwrap();
+    let list_output = run_cli(&[
+        "--broker-url",
+        &fixture.url,
+        "--json",
+        "forward-ports",
+        "list",
+        "--forward-id",
+        &forward_id,
+    ])
+    .await;
 
     assert!(
         list_output.status.success(),
@@ -383,17 +372,16 @@ async fn remote_exec_cli_forward_ports_opens_lists_and_closes_local_tcp_forward(
         "open"
     );
 
-    let close_output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
-        .arg("--broker-url")
-        .arg(&fixture.url)
-        .arg("--json")
-        .arg("forward-ports")
-        .arg("close")
-        .arg("--forward-id")
-        .arg(&forward_id)
-        .output()
-        .await
-        .unwrap();
+    let close_output = run_cli(&[
+        "--broker-url",
+        &fixture.url,
+        "--json",
+        "forward-ports",
+        "close",
+        "--forward-id",
+        &forward_id,
+    ])
+    .await;
 
     assert!(
         close_output.status.success(),

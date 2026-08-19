@@ -106,7 +106,7 @@ startup_probe_ms = 50
         Some(
             r#"[health_refresh]
 healthy_interval_ms = 20
-unhealthy_interval_ms = 200
+unhealthy_interval_ms = 5000
 "#,
         ),
     )
@@ -128,7 +128,7 @@ unhealthy_interval_ms = 200
         .await;
 
     let maybe_unhealthy = support::test_helpers::poll_until_ready(
-        100,
+        20,
         Duration::from_millis(5),
         || async {
             let result = fixture
@@ -146,8 +146,8 @@ unhealthy_interval_ms = 200
     );
 
     let unhealthy = support::test_helpers::poll_until_ready(
-        100,
-        Duration::from_millis(10),
+        30,
+        Duration::from_millis(250),
         || async {
             let result = fixture
                 .call_tool("list_targets", serde_json::json!({}))

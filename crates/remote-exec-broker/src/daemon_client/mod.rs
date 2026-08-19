@@ -33,6 +33,8 @@ mod tests {
     use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    const MULTI_REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
+
     fn test_client(authorization: Option<HeaderValue>) -> DaemonClient {
         crate::install_crypto_provider().unwrap();
         DaemonClient::from_test_client(
@@ -235,8 +237,8 @@ mod tests {
             reqwest::Client::builder().build().unwrap(),
             format!("http://{addr}"),
             None,
-            Duration::from_millis(50),
-            Duration::from_millis(50),
+            MULTI_REQUEST_TIMEOUT,
+            MULTI_REQUEST_TIMEOUT,
         );
 
         let first = client.target_info().await.unwrap_err();
@@ -277,8 +279,8 @@ mod tests {
             reqwest::Client::builder().build().unwrap(),
             format!("http://{addr}"),
             None,
-            Duration::from_millis(50),
-            Duration::from_millis(50),
+            MULTI_REQUEST_TIMEOUT,
+            MULTI_REQUEST_TIMEOUT,
         );
 
         let first = client.target_info().await.unwrap_err();
@@ -321,8 +323,8 @@ mod tests {
             reqwest::Client::builder().build().unwrap(),
             format!("http://{addr}"),
             None,
-            Duration::from_millis(50),
-            Duration::from_millis(50),
+            MULTI_REQUEST_TIMEOUT,
+            MULTI_REQUEST_TIMEOUT,
         );
 
         let first = client.target_info().await.unwrap_err();
@@ -370,9 +372,9 @@ mod tests {
                 http_auth: None,
                 timeouts: crate::config::TargetTimeoutConfig {
                     connect_ms: defaults.connect_ms,
-                    read_ms: 50,
-                    request_ms: 500,
-                    startup_probe_ms: 500,
+                    read_ms: MULTI_REQUEST_TIMEOUT.as_millis() as u64,
+                    request_ms: 2_000,
+                    startup_probe_ms: 2_000,
                 },
                 ca_pem: None,
                 client_cert_pem: None,

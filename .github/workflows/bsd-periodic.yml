@@ -245,6 +245,7 @@ jobs:
           set -eu
           # vmactions rsyncs the workspace as root before each custom-shell step.
           chown -R "$BSD_TEST_USER" "$GITHUB_WORKSPACE"
+          chmod -R u+rwX "$GITHUB_WORKSPACE"
           # vmactions connects as root. Keep setup privileged, then drop
           # privileges for the tests.
           su "$BSD_TEST_USER" -c 'sh -s' <<'NON_ROOT_TESTS'
