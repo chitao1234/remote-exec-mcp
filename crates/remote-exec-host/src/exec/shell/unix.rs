@@ -7,6 +7,15 @@ use crate::config::ProcessEnvironment;
 
 use super::common::{is_path_like, probe_shell_for_platform};
 
+#[cfg(target_os = "android")]
+const FALLBACK_SHELL: &str = "/system/bin/sh";
+#[cfg(not(target_os = "android"))]
+const FALLBACK_SHELL: &str = "/bin/sh";
+#[cfg(target_os = "android")]
+const DEFAULT_SHELL_ATTEMPTS: &str = "SHELL, bash, and /system/bin/sh";
+#[cfg(not(target_os = "android"))]
+const DEFAULT_SHELL_ATTEMPTS: &str = "SHELL, passwd shell, bash, and /bin/sh";
+
 pub(super) fn resolve_default_shell(
     configured_default_shell: Option<&str>,
     environment: &ProcessEnvironment,
@@ -18,14 +27,24 @@ pub(super) fn resolve_default_shell(
         configured_default_shell,
         env_shell.as_deref(),
         environment,
-        || -> anyhow::Result<Option<String>> {
-            Ok(
-                nix::unistd::User::from_uid(nix::unistd::Uid::effective())?.and_then(|user| {
-                    let shell = user.shell.to_string_lossy().into_owned();
-                    (!shell.is_empty()).then_some(shell)
-                }),
-            )
-        },
+        passwd_shell_lookup,
+    )
+}
+
+#[cfg(target_os = "android")]
+fn passwd_shell_lookup() -> anyhow::Result<Option<String>> {
+    // Android does not provide a conventional passwd-database login shell.
+    // Keep this lookup out of the resolution path entirely on Android.
+    Ok(None)
+}
+
+#[cfg(not(target_os = "android"))]
+fn passwd_shell_lookup() -> anyhow::Result<Option<String>> {
+    Ok(
+        nix::unistd::User::from_uid(nix::unistd::Uid::effective())?.and_then(|user| {
+            let shell = user.shell.to_string_lossy().into_owned();
+            (!shell.is_empty()).then_some(shell)
+        }),
     )
 }
 
@@ -93,12 +112,12 @@ where
         return Ok(shell);
     }
     if let Some(shell) =
-        usable_unix_shell_candidate_with_validator(Some("/bin/sh"), environment, &validate)
+        usable_unix_shell_candidate_with_validator(Some(FALLBACK_SHELL), environment, &validate)
     {
         return Ok(shell);
     }
 
-    anyhow::bail!("no usable default shell found; tried SHELL, passwd shell, bash, and /bin/sh");
+    anyhow::bail!("no usable default shell found; tried {DEFAULT_SHELL_ATTEMPTS}");
 }
 
 fn usable_unix_shell_candidate_with_validator<G>(
@@ -175,6 +194,8 @@ mod tests {
     use crate::config::ProcessEnvironment;
 
     use super::resolve_default_unix_shell_with_validator;
+    #[cfg(target_os = "android")]
+    use super::{FALLBACK_SHELL, passwd_shell_lookup};
 
     fn make_environment(path: Option<&std::path::Path>, shell: Option<&str>) -> ProcessEnvironment {
         let mut environment = ProcessEnvironment::default();
@@ -251,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn unix_default_shell_uses_bash_from_path_before_bin_sh() {
+    fn unix_default_shell_uses_bash_from_path_before_platform_fallback() {
         let bash = "/opt/test/bash";
         let environment = make_environment(Some(std::path::Path::new("/opt/test")), None);
 
@@ -283,5 +304,47 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("configured default shell"));
+    }
+
+    #[cfg(target_os = "android")]
+    #[test]
+    fn android_default_shell_skips_passwd_and_uses_system_sh_fallback() {
+        let environment = make_environment(None, None);
+        assert_eq!(passwd_shell_lookup().unwrap(), None);
+
+        let shell = resolve_default_unix_shell_with_validator(
+            None,
+            None,
+            &environment,
+            || panic!("Android must not query the passwd database"),
+            stub_validator(BTreeMap::from([(
+                FALLBACK_SHELL.to_string(),
+                FALLBACK_SHELL.to_string(),
+            )])),
+        )
+        .unwrap();
+
+        assert_eq!(shell, FALLBACK_SHELL);
+    }
+
+    #[cfg(target_os = "android")]
+    #[test]
+    fn android_default_shell_preserves_shell_environment_support() {
+        let env_shell = "/data/local/tmp/custom-shell";
+        let environment = make_environment(None, Some(env_shell));
+
+        let shell = resolve_default_unix_shell_with_validator(
+            None,
+            Some(env_shell),
+            &environment,
+            || panic!("Android must not query the passwd database"),
+            stub_validator(BTreeMap::from([(
+                env_shell.to_string(),
+                env_shell.to_string(),
+            )])),
+        )
+        .unwrap();
+
+        assert_eq!(shell, env_shell);
     }
 }

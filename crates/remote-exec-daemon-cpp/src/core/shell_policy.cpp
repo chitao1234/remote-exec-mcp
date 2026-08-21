@@ -8,7 +8,9 @@
 #include <windows.h>
 #else
 #include <errno.h>
+#ifndef __ANDROID__
 #include <pwd.h>
+#endif
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -130,6 +132,7 @@ std::string validate_unix_shell_candidate(const std::string& shell) {
     return !resolved.empty() && probe_unix_shell(resolved) ? resolved : "";
 }
 
+#ifndef __ANDROID__
 std::string passwd_shell() {
     struct passwd* entry = getpwuid(geteuid());
     if (entry == nullptr || entry->pw_shell == nullptr || entry->pw_shell[0] == '\0') {
@@ -137,6 +140,7 @@ std::string passwd_shell() {
     }
     return entry->pw_shell;
 }
+#endif
 #endif
 
 } // namespace
@@ -183,6 +187,13 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
     }
 
     const char* env_shell = std::getenv("SHELL");
+#ifdef __ANDROID__
+    const char* candidates[] = {
+        env_shell,
+        "bash",
+        "/system/bin/sh",
+    };
+#else
     const char* candidates[] = {
         env_shell,
         nullptr,
@@ -191,6 +202,7 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
     };
     const std::string passwd = passwd_shell();
     candidates[1] = passwd.empty() ? nullptr : passwd.c_str();
+#endif
 
     for (std::size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
         if (candidates[i] == nullptr || candidates[i][0] == '\0') {
@@ -202,9 +214,14 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
         }
     }
 
+#ifdef __ANDROID__
+    throw std::runtime_error("no usable default shell found; tried SHELL, bash, and /system/bin/sh"
+    );
+#else
     throw std::runtime_error(
         "no usable default shell found; tried SHELL, passwd shell, bash, and /bin/sh"
     );
+#endif
 #endif
 }
 
