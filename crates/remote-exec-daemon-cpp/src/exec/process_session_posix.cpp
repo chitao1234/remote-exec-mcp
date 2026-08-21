@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include "core/logging.h"
+#include "exec/locale.h"
 #include "exec/posix_child_reaper.h"
 #include "exec/process_session.h"
 #include "exec/utf8_stream_decode.h"
@@ -203,13 +204,30 @@ void upsert_env_value(std::vector<std::string>* values, const std::string& assig
     values->push_back(assignment);
 }
 
+void remove_env_key(std::vector<std::string>* values, const char* key) {
+    std::vector<std::string> filtered;
+    filtered.reserve(values->size());
+    for (std::size_t i = 0; i < values->size(); ++i) {
+        if (!env_key_matches((*values)[i], key)) {
+            filtered.push_back((*values)[i]);
+        }
+    }
+    values->swap(filtered);
+}
+
 ExecEnvironment build_exec_environment_values(bool tty) {
     ExecEnvironment env;
     for (char** current = environ; current != nullptr && *current != nullptr; ++current) {
         env.values.push_back(*current);
     }
-    upsert_env_value(&env.values, "LC_ALL=C.UTF-8");
-    upsert_env_value(&env.values, "LANG=C.UTF-8");
+    remove_env_key(&env.values, "LANG");
+    remove_env_key(&env.values, "LC_CTYPE");
+    remove_env_key(&env.values, "LC_ALL");
+    const std::vector<std::pair<std::string, std::string>> locale_pairs =
+        resolved_locale_env_plan().as_pairs();
+    for (std::size_t i = 0; i < locale_pairs.size(); ++i) {
+        upsert_env_value(&env.values, locale_pairs[i].first + "=" + locale_pairs[i].second);
+    }
     if (tty) {
         bool has_term = false;
         for (std::size_t i = 0; i < env.values.size(); ++i) {

@@ -56,6 +56,7 @@ POSIX_CHILD_REAPER_SRCS = $(SOURCE_PREFIX)src/exec/posix_child_reaper.cpp
 
 POSIX_PROCESS_SESSION_SRCS = \
 	$(SOURCE_PREFIX)src/exec/process_session_posix.cpp \
+	$(SOURCE_PREFIX)src/exec/locale.cpp \
 	$(POSIX_CHILD_REAPER_SRCS)
 
 DAEMON_THREAD_SRCS = $(SOURCE_PREFIX)src/runtime/daemon_thread.cpp

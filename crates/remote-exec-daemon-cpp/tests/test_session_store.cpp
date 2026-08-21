@@ -24,6 +24,7 @@
 #include "rpc/exec_http_codec.h"
 #include "rpc/exec_request_utils.h"
 #ifndef _WIN32
+#include "exec/locale.h"
 #include "exec/posix_child_reaper.h"
 #endif
 #include "../src/exec/session_pump_internal.h"
@@ -247,6 +248,79 @@ static std::string normalize_output(const std::string& input) {
     }
     return output;
 }
+
+#ifndef _WIN32
+static std::string locale_pair_value(
+    const std::vector<std::pair<std::string, std::string>>& pairs,
+    const char* key
+) {
+    for (std::size_t i = 0; i < pairs.size(); ++i) {
+        if (pairs[i].first == key) {
+            return pairs[i].second;
+        }
+    }
+    return "";
+}
+
+static void assert_posix_locale_strategy_selection() {
+    const LocaleStrategy direct =
+        choose_locale_strategy(std::vector<std::string>{"en_US.UTF-8", "C.UTF-8", "fr_FR.UTF-8"});
+    TEST_ASSERT(direct.kind == LocaleStrategyKind::Direct);
+    TEST_ASSERT(direct.locale == "C.UTF-8");
+
+    const LocaleStrategy lowercase_direct =
+        choose_locale_strategy(std::vector<std::string>{"C.utf8", "en_US.UTF-8"});
+    TEST_ASSERT(lowercase_direct.kind == LocaleStrategyKind::Direct);
+    TEST_ASSERT(lowercase_direct.locale == "C.utf8");
+
+    const LocaleStrategy english_hybrid =
+        choose_locale_strategy(std::vector<std::string>{"fr_FR.UTF-8", "en_US.UTF-8"});
+    TEST_ASSERT(english_hybrid.kind == LocaleStrategyKind::HybridCType);
+    TEST_ASSERT(english_hybrid.locale == "en_US.UTF-8");
+
+    const LocaleStrategy english_family_hybrid =
+        choose_locale_strategy(std::vector<std::string>{"fr_FR.UTF-8", "en_AU.UTF-8"});
+    TEST_ASSERT(english_family_hybrid.kind == LocaleStrategyKind::HybridCType);
+    TEST_ASSERT(english_family_hybrid.locale == "en_AU.UTF-8");
+
+    const LocaleStrategy non_english_hybrid =
+        choose_locale_strategy(std::vector<std::string>{"fr_FR.UTF-8"});
+    TEST_ASSERT(non_english_hybrid.kind == LocaleStrategyKind::HybridCType);
+    TEST_ASSERT(non_english_hybrid.locale == "fr_FR.UTF-8");
+
+    const LocaleStrategy lang_c =
+        choose_locale_strategy(std::vector<std::string>{"C", "POSIX", "en_US.ISO8859-1"});
+    TEST_ASSERT(lang_c.kind == LocaleStrategyKind::LangCOnly);
+    TEST_ASSERT(lang_c.locale.empty());
+
+    const LocaleEnvPlan direct_plan =
+        locale_env_plan_for_locales(std::vector<std::string>{"C.UTF-8"});
+    TEST_ASSERT(
+        direct_plan.as_pairs()
+        == std::vector<std::pair<std::string, std::string>>{
+            std::make_pair("LANG", "C.UTF-8"),
+            std::make_pair("LC_CTYPE", "C.UTF-8"),
+            std::make_pair("LC_ALL", "C.UTF-8"),
+        }
+    );
+
+    const LocaleEnvPlan hybrid_plan =
+        locale_env_plan_for_locales(std::vector<std::string>{"en_US.UTF-8"});
+    TEST_ASSERT(
+        hybrid_plan.as_pairs()
+        == std::vector<std::pair<std::string, std::string>>{
+            std::make_pair("LANG", "C"),
+            std::make_pair("LC_CTYPE", "en_US.UTF-8"),
+        }
+    );
+
+    const LocaleEnvPlan lang_c_plan = locale_env_plan_for_locales(std::vector<std::string>{"C"});
+    TEST_ASSERT(
+        lang_c_plan.as_pairs()
+        == std::vector<std::pair<std::string, std::string>>{std::make_pair("LANG", "C")}
+    );
+}
+#endif
 
 #ifdef _WIN32
 static std::string windows_stdin_echo_helper_command(const std::string& label) {
@@ -1015,17 +1089,30 @@ static void assert_posix_locale_and_late_output(
     (void)shell;
     (void)yield_time;
 #else
+    ScopedEnvVar lang_guard("LANG");
+    ScopedEnvVar lc_ctype_guard("LC_CTYPE");
+    ScopedEnvVar lc_all_guard("LC_ALL");
+    lang_guard.set("parent-lang-must-not-leak");
+    lc_ctype_guard.set("parent-lc-ctype-must-not-leak");
+    lc_all_guard.set("parent-lc-all-must-not-leak");
+    const std::vector<std::pair<std::string, std::string>> expected_locale =
+        resolved_locale_env_plan().as_pairs();
     const Json locale_response = start_command_session(
         store,
         root,
-        "printf '%s %s\\n' \"$LC_ALL\" \"$LANG\"",
+        "printf '%s|%s|%s\\n' \"$LC_ALL\" \"$LANG\" \"$LC_CTYPE\"",
         shell,
         false,
         5000UL,
         yield_time
     );
     TEST_ASSERT(locale_response.at("exit_code").get<int>() == 0);
-    TEST_ASSERT(locale_response.at("output").get<std::string>() == "C.UTF-8 C.UTF-8\n");
+    TEST_ASSERT(
+        locale_response.at("output").get<std::string>()
+        == locale_pair_value(expected_locale, "LC_ALL") + "|"
+               + locale_pair_value(expected_locale, "LANG") + "|"
+               + locale_pair_value(expected_locale, "LC_CTYPE") + "\n"
+    );
 
     const Json newline_preserved = start_test_command(
         store,
@@ -1166,7 +1253,7 @@ static void assert_posix_exec_uses_parent_built_environment_and_path(
     write_text_file(
         helper,
         "#!/bin/sh\n"
-        "printf '%s|%s|%s\\n' \"$LC_ALL\" \"$LANG\" \"$TERM\"\n"
+        "printf '%s|%s|%s|%s\\n' \"$LC_ALL\" \"$LANG\" \"$LC_CTYPE\" \"$TERM\"\n"
     );
     chmod(helper.c_str(), 0755);
 
@@ -1178,13 +1265,21 @@ static void assert_posix_exec_uses_parent_built_environment_and_path(
     path_guard.set(new_path);
     term_guard.unset();
 
+    const std::vector<std::pair<std::string, std::string>> expected_locale =
+        resolved_locale_env_plan().as_pairs();
+    const std::string expected_pipe_prefix = locale_pair_value(expected_locale, "LC_ALL") + "|"
+                                             + locale_pair_value(expected_locale, "LANG") + "|"
+                                             + locale_pair_value(expected_locale, "LC_CTYPE") + "|";
+
     const Json pipe_response =
         start_command_session(store, root, "env-helper", shell, false, 5000UL, yield_time);
     TEST_ASSERT(pipe_response.at("exit_code").get<int>() == 0);
     const std::string pipe_output = pipe_response.at("output").get<std::string>();
     // Haiku /bin/sh initializes TERM=dumb even under env -i; LC_ALL/LANG are
     // still the daemon-provided values this test is asserting.
-    TEST_ASSERT(pipe_output == "C.UTF-8|C.UTF-8|\n" || pipe_output == "C.UTF-8|C.UTF-8|dumb\n");
+    TEST_ASSERT(
+        pipe_output == expected_pipe_prefix + "\n" || pipe_output == expected_pipe_prefix + "dumb\n"
+    );
 
     if (process_session_supports_pty()) {
         const Json pty_response =
@@ -1192,7 +1287,7 @@ static void assert_posix_exec_uses_parent_built_environment_and_path(
         TEST_ASSERT(pty_response.at("exit_code").get<int>() == 0);
         TEST_ASSERT(
             normalize_output(pty_response.at("output").get<std::string>())
-            == "C.UTF-8|C.UTF-8|xterm-256color\n"
+            == expected_pipe_prefix + "xterm-256color\n"
         );
     }
 
@@ -2076,6 +2171,7 @@ int main(int argc, char** argv) {
 #endif
 #ifndef _WIN32
     install_posix_child_reaper();
+    assert_posix_locale_strategy_selection();
 #endif
     const fs::path root = make_test_root();
     SessionStore store;
