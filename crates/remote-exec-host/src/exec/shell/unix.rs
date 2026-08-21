@@ -12,9 +12,9 @@ const FALLBACK_SHELL: &str = "/system/bin/sh";
 #[cfg(not(target_os = "android"))]
 const FALLBACK_SHELL: &str = "/bin/sh";
 #[cfg(target_os = "android")]
-const DEFAULT_SHELL_ATTEMPTS: &str = "SHELL, bash, and /system/bin/sh";
+const DEFAULT_SHELL_ATTEMPTS: &str = "SHELL, bash, sh, and /system/bin/sh";
 #[cfg(not(target_os = "android"))]
-const DEFAULT_SHELL_ATTEMPTS: &str = "SHELL, passwd shell, bash, and /bin/sh";
+const DEFAULT_SHELL_ATTEMPTS: &str = "SHELL, passwd shell, bash, sh, and /bin/sh";
 
 pub(super) fn resolve_default_shell(
     configured_default_shell: Option<&str>,
@@ -113,6 +113,11 @@ where
 
     if let Some(shell) =
         usable_unix_shell_candidate_with_validator(Some("bash"), environment, &validate)
+    {
+        return Ok(shell);
+    }
+    if let Some(shell) =
+        usable_unix_shell_candidate_with_validator(Some("sh"), environment, &validate)
     {
         return Ok(shell);
     }
@@ -291,6 +296,24 @@ mod tests {
             )
             .unwrap(),
             bash
+        );
+    }
+
+    #[test]
+    fn unix_default_shell_uses_sh_from_path_before_platform_fallback() {
+        let sh = "/opt/test/sh";
+        let environment = make_environment(Some(std::path::Path::new("/opt/test")), None);
+
+        assert_eq!(
+            resolve_default_unix_shell_with_validator(
+                None,
+                None,
+                &environment,
+                || Ok(None),
+                stub_validator(BTreeMap::from([("sh".to_string(), sh.to_string())])),
+            )
+            .unwrap(),
+            sh
         );
     }
 

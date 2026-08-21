@@ -191,6 +191,7 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
     const char* candidates[] = {
         env_shell,
         "bash",
+        "sh",
         "/system/bin/sh",
     };
 #else
@@ -198,6 +199,7 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
         env_shell,
         nullptr,
         "bash",
+        "sh",
         "/bin/sh",
     };
     const std::string passwd = passwd_shell();
@@ -215,11 +217,12 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
     }
 
 #ifdef __ANDROID__
-    throw std::runtime_error("no usable default shell found; tried SHELL, bash, and /system/bin/sh"
+    throw std::runtime_error(
+        "no usable default shell found; tried SHELL, bash, sh, and /system/bin/sh"
     );
 #else
     throw std::runtime_error(
-        "no usable default shell found; tried SHELL, passwd shell, bash, and /bin/sh"
+        "no usable default shell found; tried SHELL, passwd shell, bash, sh, and /bin/sh"
     );
 #endif
 #endif
