@@ -51,7 +51,8 @@ cargo run -p remote-exec-broker --bin remote-exec -- \
 ```
 
 Run the C++ daemon when you need a smaller daemon or legacy Windows coverage.
-It supports optional OpenSSL mutual TLS and explicit plain HTTP:
+It supports optional OpenSSL mutual TLS, POSIX BoringSSL mutual TLS, and
+explicit plain HTTP:
 
 ```bash
 make -C crates/remote-exec-daemon-cpp check-posix
@@ -89,7 +90,7 @@ Default-hidden file tools are available only when explicitly enabled under
 | `apply_patch` | Standalone local CLI built by both the Rust host crate and C++ daemon build. It reads a Codex-style patch from standard input. `--help` prints built-in usage; `--help --help-file PATH` prints the supplied help file instead. Without `--help`, `--help-file PATH` is ignored. |
 | `remote-exec-daemon` | Rust per-machine daemon. It supports mutual TLS by default, optional plain HTTP, exec, patch, image, transfer, sandbox checks, and v4 port-forward tunnels. |
 | `remote-exec-host` | Shared Rust host runtime reused by the Rust daemon and broker-host `local` behavior. |
-| `remote-exec-daemon-cpp` | Standalone C++11 daemon with optional OpenSSL mTLS, explicit plain HTTP, and POSIX and legacy Windows build paths. |
+| `remote-exec-daemon-cpp` | Standalone C++11 daemon with optional OpenSSL mTLS, POSIX BoringSSL mTLS, explicit plain HTTP, and POSIX and legacy Windows build paths. |
 | `remote-exec-proto` | Public MCP schemas, broker-daemon RPC schemas, path and sandbox helpers, and port-forward protocol types. |
 | `remote-exec-admin` | Certificate/bootstrap CLI. |
 | `remote-exec-pki` | Reusable certificate generation, manifest, and private-key write helpers. |
@@ -152,15 +153,15 @@ Common rules:
 - Plain HTTP targets must be configured with `allow_insecure_http = true` in the
   broker.
 - The C++ daemon defaults to `TLS=auto`. POSIX builds enable TLS when OpenSSL
-  1.0.2 or newer is available; Windows XP and newer targets enable it
-  automatically, while older Windows targets default to TLS off.
+  1.0.2 or newer, or BoringSSL, is available; Windows XP and newer targets
+  enable it automatically, while older Windows targets default to TLS off.
 - Plain C++ daemon targets require `allow_insecure_http = true` and should
   usually use bearer auth when they are not isolated by another trusted
   transport.
 - Reverse mode keeps a bounded adaptive lane pool because transfers and
   port-forward upgrades can occupy HTTP/1.1 connections for long periods.
 - Both daemons support reverse TLS and explicit insecure HTTP. The C++ daemon
-  requires an OpenSSL-enabled build for TLS.
+  requires an OpenSSL-backed build, or a BoringSSL-backed POSIX build, for TLS.
 
 ## TLS And Bootstrap
 
@@ -520,8 +521,8 @@ The C++ daemon intentionally supports a smaller surface than the Rust daemon:
 
 | Area | C++ daemon behavior |
 | --- | --- |
-| Transport | Optional OpenSSL direct/reverse mTLS, or explicit plain HTTP. TLS builds use `https://...`; plain targets use `http://...` and `allow_insecure_http = true`. |
-| Security | Mutual TLS with OpenSSL 1.0.2 or newer, optional bearer auth, certificate pinning, and static path sandboxing. |
+| Transport | Optional OpenSSL direct/reverse mTLS, BoringSSL direct/reverse mTLS on POSIX, or explicit plain HTTP. TLS builds use `https://...`; plain targets use `http://...` and `allow_insecure_http = true`. |
+| Security | Mutual TLS with OpenSSL 1.0.2 or newer, or BoringSSL on POSIX, optional bearer auth, certificate pinning, and static path sandboxing. |
 | Exec | C++11 implementation for POSIX and legacy Windows hosts. POSIX PTY is supported when the host can allocate one. GNU/MSVC Windows PTY support depends on vendored `winpty`. |
 | Files | `remote_apply_patch`, `remote_view_image` passthrough for PNG/JPEG/WebP, and transfer import/export. Default-hidden `remote_read` / `remote_write` / `remote_edit` are not implemented yet. |
 | Transfers | File, directory, and broker-built multi-source transfers. No transfer compression. |
@@ -547,10 +548,12 @@ make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws2
 bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
 
-For TLS-enabled C++ builds, always run the matching `prepare-openssl` or
-`prepare-openssl-xp` target first and pass the resulting `OPENSSL_ROOT`. When
-the environment does not provide OpenSSL and TLS is not needed, set `TLS=off`
-on the build and check commands.
+For OpenSSL-backed C++ builds, run the matching `prepare-openssl` or
+`prepare-openssl-xp` target first and pass the resulting `OPENSSL_ROOT`.
+BoringSSL builds use the existing `TLS=openssl` compatibility mode with
+`OPENSSL_CPPFLAGS` and `OPENSSL_LDLIBS` pointing to the BoringSSL headers and
+libraries. When neither library is available and TLS is not needed, set
+`TLS=off` on the build and check commands.
 
 From an x86 Visual Studio developer prompt:
 

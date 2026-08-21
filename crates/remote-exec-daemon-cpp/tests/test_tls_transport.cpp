@@ -9,6 +9,7 @@
 #include "core/config.h"
 #include "http/connection_transport.h"
 #include "test_socket_pair.h"
+#include "tls/openssl_compat.h"
 #include "tls/tls_connection_transport.h"
 
 namespace {
@@ -17,6 +18,17 @@ const unsigned long TLS_TEST_TIMEOUT_MS = 5000UL;
 const char TLS_FIXTURE_DIR[] = "tests/fixtures/tls/";
 
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
+
+void test_tls_library_compatibility() {
+    TEST_ASSERT(openssl_compat::server_method() != nullptr);
+    TEST_ASSERT(openssl_compat::client_method() != nullptr);
+    TEST_ASSERT(!openssl_compat::compile_version().empty());
+    TEST_ASSERT(!openssl_compat::runtime_version().empty());
+#ifdef OPENSSL_IS_BORINGSSL
+    TEST_ASSERT(openssl_compat::compile_version().find("BoringSSL") != std::string::npos);
+    TEST_ASSERT(openssl_compat::runtime_version().find("BoringSSL") != std::string::npos);
+#endif
+}
 
 DaemonConfig make_server_config(const std::string& pinned_client) {
     DaemonConfig config;
@@ -149,6 +161,7 @@ void test_tls_disabled_error() {
 
 int main() {
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
+    test_tls_library_compatibility();
     test_mutual_tls_full_duplex();
     test_pinned_client_mismatch();
 #else

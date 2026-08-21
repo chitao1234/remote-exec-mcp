@@ -21,9 +21,10 @@ workflow.
 | Port forwarding | v4 TCP/UDP upgrade tunnels, including reconnect handling and resource limits. |
 | Hidden file tools | `read`, `write`, and `edit` are not implemented by this daemon. |
 
-OpenSSL builds support direct and reverse mutual TLS. Plain HTTP is available
-only when explicitly selected. Bearer authentication can authenticate plain
-HTTP requests, but it does not encrypt them.
+OpenSSL-backed builds and POSIX BoringSSL-backed builds support direct and
+reverse mutual TLS. Plain HTTP is available only when explicitly selected.
+Bearer authentication can authenticate plain HTTP requests, but it does not
+encrypt them.
 
 ## Quick start
 
@@ -76,7 +77,7 @@ credentials. For plain HTTP, leave TLS disabled and set
 
 Reverse mode is exclusive with a direct listener. Set `connection_mode=reverse`
 and the broker connection, transport, and authentication settings shown in
-`config/daemon-cpp.example.ini`. Reverse TLS requires an OpenSSL-enabled build;
+`config/daemon-cpp.example.ini`. Reverse TLS requires a TLS-enabled build;
 plain reverse mode requires `reverse_bearer_token`.
 
 Optional settings cover:
@@ -124,7 +125,7 @@ standalone `apply_patch` CLI for that variant.
 
 `TLS=auto` is the default:
 
-- POSIX enables TLS when OpenSSL 1.0.2 or newer is detected;
+- POSIX enables TLS when OpenSSL 1.0.2 or newer, or BoringSSL, is detected;
 - Windows XP and newer GNU/MSVC paths resolve `auto` to OpenSSL;
 - older Windows compatibility paths resolve `auto` to TLS off.
 
@@ -141,8 +142,9 @@ make all-windows-xp \
   OPENSSL_ROOT="$PWD/build/deps-mingw-xp/openssl-1.1.1w"
 ```
 
-Use an existing installation instead with `OPENSSL_ROOT`,
-`OPENSSL_CPPFLAGS`, and `OPENSSL_LDLIBS`. TLS negotiates TLS 1.2 or newer.
+Use an existing OpenSSL or BoringSSL installation instead with `OPENSSL_ROOT`,
+`OPENSSL_CPPFLAGS`, and `OPENSSL_LDLIBS`. The `TLS=openssl` value is retained as
+the compatibility-mode name for either library. TLS negotiates TLS 1.2 or newer.
 OpenSSL 1.0.x remains available when a legacy compatibility path requires it.
 
 ## Runtime notes

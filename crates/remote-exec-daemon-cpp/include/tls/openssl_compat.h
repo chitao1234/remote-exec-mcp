@@ -3,6 +3,11 @@
 #include <string>
 
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
+// BoringSSL's C API is C++11-compatible. Its optional C++ helpers require a
+// newer language standard and are not used by the daemon.
+#ifndef BORINGSSL_NO_CXX
+#define BORINGSSL_NO_CXX 1
+#endif
 #include <openssl/ssl.h>
 #endif
 
