@@ -13,6 +13,10 @@
 
 #include "platform/basic_mutex.h"
 
+#if defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x2070100fL
+#error LibreSSL 2.7.1 or newer is required
+#endif
+
 #if !defined(OPENSSL_IS_BORINGSSL) && OPENSSL_VERSION_NUMBER < 0x10002000L
 #error OpenSSL 1.0.2 or newer is required
 #endif
@@ -26,7 +30,8 @@ namespace {
 BasicMutex initialization_mutex;
 bool initialized = false;
 
-#if !defined(OPENSSL_IS_BORINGSSL) && OPENSSL_VERSION_NUMBER < 0x10100000L
+#if !defined(OPENSSL_IS_BORINGSSL) && !defined(LIBRESSL_VERSION_NUMBER)                            \
+    && OPENSSL_VERSION_NUMBER < 0x10100000L
 BasicMutex* legacy_locks = nullptr;
 int legacy_lock_count = 0;
 
@@ -66,8 +71,9 @@ void initialize() {
     if (initialized) {
         return;
     }
-#if defined(OPENSSL_IS_BORINGSSL)
-    // BoringSSL initializes itself and does not require process-wide cleanup.
+#if defined(OPENSSL_IS_BORINGSSL) || defined(LIBRESSL_VERSION_NUMBER)
+    // BoringSSL and LibreSSL initialize themselves and do not require
+    // process-wide cleanup.
 #elif OPENSSL_VERSION_NUMBER < 0x10100000L
     SSL_library_init();
     SSL_load_error_strings();
@@ -89,7 +95,8 @@ void cleanup() {
     if (!initialized) {
         return;
     }
-#if !defined(OPENSSL_IS_BORINGSSL) && OPENSSL_VERSION_NUMBER < 0x10100000L
+#if !defined(OPENSSL_IS_BORINGSSL) && !defined(LIBRESSL_VERSION_NUMBER)                            \
+    && OPENSSL_VERSION_NUMBER < 0x10100000L
     cleanup_legacy_locks();
     EVP_cleanup();
     ERR_free_strings();
@@ -110,6 +117,8 @@ std::string runtime_version() {
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
 #if defined(OPENSSL_IS_BORINGSSL)
     return OPENSSL_VERSION_TEXT;
+#elif defined(LIBRESSL_VERSION_NUMBER)
+    return OpenSSL_version(OPENSSL_VERSION);
 #elif OPENSSL_VERSION_NUMBER < 0x10100000L
     return SSLeay_version(SSLEAY_VERSION);
 #else
@@ -122,7 +131,8 @@ std::string runtime_version() {
 
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
 const SSL_METHOD* server_method() {
-#if !defined(OPENSSL_IS_BORINGSSL) && OPENSSL_VERSION_NUMBER < 0x10100000L
+#if !defined(OPENSSL_IS_BORINGSSL) && !defined(LIBRESSL_VERSION_NUMBER)                            \
+    && OPENSSL_VERSION_NUMBER < 0x10100000L
     return SSLv23_server_method();
 #else
     return TLS_server_method();
@@ -130,7 +140,8 @@ const SSL_METHOD* server_method() {
 }
 
 const SSL_METHOD* client_method() {
-#if !defined(OPENSSL_IS_BORINGSSL) && OPENSSL_VERSION_NUMBER < 0x10100000L
+#if !defined(OPENSSL_IS_BORINGSSL) && !defined(LIBRESSL_VERSION_NUMBER)                            \
+    && OPENSSL_VERSION_NUMBER < 0x10100000L
     return SSLv23_client_method();
 #else
     return TLS_client_method();
@@ -138,7 +149,8 @@ const SSL_METHOD* client_method() {
 }
 
 bool set_minimum_tls12(SSL_CTX* context) {
-#if !defined(OPENSSL_IS_BORINGSSL) && OPENSSL_VERSION_NUMBER < 0x10100000L
+#if !defined(OPENSSL_IS_BORINGSSL) && !defined(LIBRESSL_VERSION_NUMBER)                            \
+    && OPENSSL_VERSION_NUMBER < 0x10100000L
     SSL_CTX_set_options(
         context,
         SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1
@@ -150,7 +162,7 @@ bool set_minimum_tls12(SSL_CTX* context) {
 }
 
 bool configure_server_ecdh(SSL_CTX* context) {
-#if !defined(OPENSSL_IS_BORINGSSL) && OPENSSL_VERSION_NUMBER < 0x10100000L
+#if !defined(OPENSSL_IS_BORINGSSL) && !defined(LIBRESSL_VERSION_NUMBER)
     EC_KEY* key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
     if (key == nullptr) {
         return false;
@@ -165,7 +177,8 @@ bool configure_server_ecdh(SSL_CTX* context) {
 }
 
 bool set_expected_host(SSL* ssl, const std::string& host) {
-#if !defined(OPENSSL_IS_BORINGSSL) && OPENSSL_VERSION_NUMBER < 0x10100000L
+#if defined(LIBRESSL_VERSION_NUMBER)                                                               \
+    || (!defined(OPENSSL_IS_BORINGSSL) && OPENSSL_VERSION_NUMBER < 0x10100000L)
     X509_VERIFY_PARAM* parameters = SSL_get0_param(ssl);
     return parameters != nullptr
            && X509_VERIFY_PARAM_set1_host(parameters, host.c_str(), host.size()) == 1;
@@ -175,7 +188,8 @@ bool set_expected_host(SSL* ssl, const std::string& host) {
 }
 
 X509* peer_certificate(SSL* ssl) {
-#if !defined(OPENSSL_IS_BORINGSSL) && OPENSSL_VERSION_NUMBER >= 0x30000000L
+#if !defined(OPENSSL_IS_BORINGSSL) && !defined(LIBRESSL_VERSION_NUMBER)                            \
+    && OPENSSL_VERSION_NUMBER >= 0x30000000L
     return SSL_get1_peer_certificate(ssl);
 #else
     return SSL_get_peer_certificate(ssl);

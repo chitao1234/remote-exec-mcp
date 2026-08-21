@@ -21,10 +21,10 @@ workflow.
 | Port forwarding | v4 TCP/UDP upgrade tunnels, including reconnect handling and resource limits. |
 | Hidden file tools | `read`, `write`, and `edit` are not implemented by this daemon. |
 
-OpenSSL-backed builds and POSIX BoringSSL-backed builds support direct and
-reverse mutual TLS. Plain HTTP is available only when explicitly selected.
-Bearer authentication can authenticate plain HTTP requests, but it does not
-encrypt them.
+OpenSSL- or LibreSSL-backed builds and POSIX BoringSSL-backed builds support
+direct and reverse mutual TLS. Plain HTTP is available only when explicitly
+selected. Bearer authentication can authenticate plain HTTP requests, but it
+does not encrypt them.
 
 ## Quick start
 
@@ -125,13 +125,14 @@ standalone `apply_patch` CLI for that variant.
 
 `TLS=auto` is the default:
 
-- POSIX enables TLS when OpenSSL 1.0.2 or newer, or BoringSSL, is detected;
+- POSIX enables TLS when OpenSSL 1.0.2 or newer, LibreSSL 2.7.1 or newer, or
+  BoringSSL is detected, and uses the detected library automatically;
 - Windows XP and newer GNU/MSVC paths resolve `auto` to OpenSSL;
 - older Windows compatibility paths resolve `auto` to TLS off.
 
-Use `TLS=off` when plain HTTP is intentional. For TLS builds without a system
-OpenSSL installation, prepare the matching dependency and pass its install
-directory:
+Use `TLS=off` when plain HTTP is intentional. For OpenSSL-backed TLS builds
+without a system OpenSSL installation, prepare the matching dependency and pass
+its install directory:
 
 ```sh
 make prepare-openssl
@@ -142,9 +143,10 @@ make all-windows-xp \
   OPENSSL_ROOT="$PWD/build/deps-mingw-xp/openssl-1.1.1w"
 ```
 
-Use an existing OpenSSL or BoringSSL installation instead with `OPENSSL_ROOT`,
-`OPENSSL_CPPFLAGS`, and `OPENSSL_LDLIBS`. The `TLS=openssl` value is retained as
-the compatibility-mode name for either library. TLS negotiates TLS 1.2 or newer.
+Use an existing OpenSSL, LibreSSL, or BoringSSL installation instead with
+`OPENSSL_ROOT`, `OPENSSL_CPPFLAGS`, and `OPENSSL_LDLIBS`. The `TLS=openssl` value
+is retained as the compatibility-mode name for any supported library. TLS
+negotiates TLS 1.2 or newer.
 OpenSSL 1.0.x remains available when a legacy compatibility path requires it.
 
 ## Runtime notes

@@ -18,7 +18,12 @@ cat > "$source" <<'EOF'
 #include <openssl/opensslv.h>
 #include <openssl/ssl.h>
 
-#if !defined(OPENSSL_IS_BORINGSSL) && OPENSSL_VERSION_NUMBER < 0x10002000L
+#if defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x2070100fL
+#error LibreSSL 2.7.1 or newer is required
+#endif
+
+#if !defined(OPENSSL_IS_BORINGSSL) && !defined(LIBRESSL_VERSION_NUMBER) \
+    && OPENSSL_VERSION_NUMBER < 0x10002000L
 #error OpenSSL 1.0.2 or newer is required
 #endif
 
@@ -27,7 +32,8 @@ cat > "$source" <<'EOF'
 #endif
 
 int main() {
-#if defined(OPENSSL_IS_BORINGSSL) || OPENSSL_VERSION_NUMBER >= 0x10100000L
+#if defined(OPENSSL_IS_BORINGSSL) || defined(LIBRESSL_VERSION_NUMBER) \
+    || OPENSSL_VERSION_NUMBER >= 0x10100000L
     SSL_CTX* context = SSL_CTX_new(TLS_server_method());
     if (context != 0 && SSL_CTX_set_min_proto_version(context, TLS1_2_VERSION) != 1) {
         SSL_CTX_free(context);

@@ -28,6 +28,10 @@ void test_tls_library_compatibility() {
     TEST_ASSERT(openssl_compat::compile_version().find("BoringSSL") != std::string::npos);
     TEST_ASSERT(openssl_compat::runtime_version().find("BoringSSL") != std::string::npos);
 #endif
+#ifdef LIBRESSL_VERSION_NUMBER
+    TEST_ASSERT(openssl_compat::compile_version().find("LibreSSL") != std::string::npos);
+    TEST_ASSERT(openssl_compat::runtime_version().find("LibreSSL") != std::string::npos);
+#endif
 }
 
 DaemonConfig make_server_config(const std::string& pinned_client) {
