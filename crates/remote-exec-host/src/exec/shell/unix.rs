@@ -33,9 +33,7 @@ pub(super) fn resolve_default_shell(
 
 #[cfg(target_os = "android")]
 fn passwd_shell_lookup() -> anyhow::Result<Option<String>> {
-    // Android does not provide a conventional passwd-database login shell.
-    // Keep this lookup out of the resolution path entirely on Android.
-    Ok(None)
+    unreachable!("Android default-shell resolution must skip the passwd database")
 }
 
 #[cfg(not(target_os = "android"))]
@@ -99,12 +97,19 @@ where
         return Ok(shell);
     }
 
-    let passwd_shell = passwd_shell_lookup().ok().flatten();
-    if let Some(shell) =
-        usable_unix_shell_candidate_with_validator(passwd_shell.as_deref(), environment, &validate)
+    #[cfg(not(target_os = "android"))]
     {
-        return Ok(shell);
+        let passwd_shell = passwd_shell_lookup().ok().flatten();
+        if let Some(shell) = usable_unix_shell_candidate_with_validator(
+            passwd_shell.as_deref(),
+            environment,
+            &validate,
+        ) {
+            return Ok(shell);
+        }
     }
+    #[cfg(target_os = "android")]
+    let _ = passwd_shell_lookup;
 
     if let Some(shell) =
         usable_unix_shell_candidate_with_validator(Some("bash"), environment, &validate)
@@ -193,9 +198,9 @@ mod tests {
 
     use crate::config::ProcessEnvironment;
 
-    use super::resolve_default_unix_shell_with_validator;
     #[cfg(target_os = "android")]
-    use super::{FALLBACK_SHELL, passwd_shell_lookup};
+    use super::FALLBACK_SHELL;
+    use super::resolve_default_unix_shell_with_validator;
 
     fn make_environment(path: Option<&std::path::Path>, shell: Option<&str>) -> ProcessEnvironment {
         let mut environment = ProcessEnvironment::default();
@@ -310,7 +315,6 @@ mod tests {
     #[test]
     fn android_default_shell_skips_passwd_and_uses_system_sh_fallback() {
         let environment = make_environment(None, None);
-        assert_eq!(passwd_shell_lookup().unwrap(), None);
 
         let shell = resolve_default_unix_shell_with_validator(
             None,
