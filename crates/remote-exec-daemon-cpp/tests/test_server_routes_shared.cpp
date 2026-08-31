@@ -8,6 +8,7 @@
 #include "codec/base64_codec.h"
 #include "core/config.h"
 #include "http/http_helpers.h"
+#include "image/image_ops.h"
 #include "platform/platform.h"
 #include "policy/path_policy.h"
 #include "port_forward/port_forward_endpoint.h"
@@ -278,6 +279,24 @@ static void assert_image_routes(TestRouteHarness& harness, const fs::path& root)
     TEST_ASSERT(
         decode_data_url_bytes(noop_detail.at("image_url").get<std::string>()) == original_image
     );
+
+    const fs::path large_image_file = root / "large.png";
+    const std::size_t legacy_image_limit = 50U * 1024U * 1024U;
+    {
+        ScopedFile output(fs::open_file(large_image_file, "wb"));
+        TEST_ASSERT(output.valid());
+        const char png_signature[] = "\x89PNG\r\n\x1A\n";
+        TEST_ASSERT(std::fwrite(png_signature, 1, 8U, output.get()) == 8U);
+        TEST_ASSERT(std::fseek(output.get(), static_cast<long>(legacy_image_limit), SEEK_SET) == 0);
+        TEST_ASSERT(std::fputc(0, output.get()) != EOF);
+        TEST_ASSERT(output.close() == 0);
+    }
+    {
+        const ImageReadResult large_image = read_image_original(large_image_file.string());
+        TEST_ASSERT(large_image.mime_type == "image/png");
+        TEST_ASSERT(large_image.bytes.size() == legacy_image_limit + 1U);
+    }
+    fs::remove_all(large_image_file);
 
     const HttpResponse missing_image_response = route_request(
         harness,

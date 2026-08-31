@@ -32,15 +32,6 @@ ImageFailure internal_image_failure(const std::string& message) {
     return ImageFailure(ImageRpcCode::Internal, message);
 }
 
-ImageFailure too_large_image_failure(const std::string& path) {
-    return ImageFailure(
-        ImageRpcCode::Internal,
-        "image at `" + path + "` exceeds maximum supported size"
-    );
-}
-
-const std::size_t MAX_IMAGE_FILE_SIZE = 50U * 1024U * 1024U;
-
 std::string read_binary_file_bytes(const std::string& path) {
     errno = 0;
     ScopedFile input(path_utils::open_file(path, "rb"));
@@ -76,9 +67,6 @@ void require_regular_image_file(const std::string& path) {
     if (path_utils::path_metadata(path, &metadata)) {
         if (!metadata.is_regular_file) {
             throw not_file_image_failure(path);
-        }
-        if (metadata.size > static_cast<std::uint64_t>(MAX_IMAGE_FILE_SIZE)) {
-            throw too_large_image_failure(path);
         }
         return;
     }
