@@ -42,6 +42,26 @@ fn shell_command_with_login_flag(shell: &str, login: bool, cmd: &str) -> SpawnCo
     }
 }
 
+#[cfg(target_os = "haiku")]
+fn unix_shell_command(shell: &str, login: bool, cmd: &str) -> SpawnCommand {
+    let mut args = Vec::new();
+    if login {
+        // Haiku's Bash does not treat a synthetic `argv[0]` beginning with `-`
+        // as a login-shell request. Use the portable login flag so that the
+        // shell loads its configured login profile (`~/config/settings/profile`).
+        args.push("-l".to_string());
+    }
+    args.push("-c".to_string());
+    args.push(cmd.to_string());
+    SpawnCommand {
+        program: shell.to_string(),
+        argv0: None,
+        args,
+        windows_raw_arg_tail: None,
+    }
+}
+
+#[cfg(not(target_os = "haiku"))]
 fn unix_shell_command(shell: &str, login: bool, cmd: &str) -> SpawnCommand {
     SpawnCommand {
         program: shell.to_string(),
@@ -211,7 +231,7 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "haiku")))]
     #[test]
     fn unix_shell_command_uses_login_argv0_for_login_shells() {
         assert_eq!(
@@ -220,6 +240,20 @@ mod tests {
                 program: "/bin/sh".to_string(),
                 argv0: Some("-sh".to_string()),
                 args: vec!["-c".to_string(), "printf ok".to_string()],
+                windows_raw_arg_tail: None,
+            }
+        );
+    }
+
+    #[cfg(target_os = "haiku")]
+    #[test]
+    fn haiku_shell_command_uses_login_flag_for_login_shells() {
+        assert_eq!(
+            shell_command_for_platform(false, "/bin/sh", true, "printf ok"),
+            SpawnCommand {
+                program: "/bin/sh".to_string(),
+                argv0: None,
+                args: vec!["-l".to_string(), "-c".to_string(), "printf ok".to_string(),],
                 windows_raw_arg_tail: None,
             }
         );

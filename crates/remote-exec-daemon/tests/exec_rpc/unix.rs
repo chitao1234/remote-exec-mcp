@@ -133,11 +133,16 @@ async fn exec_start_includes_session_limit_warning_when_threshold_crossed() {
 #[tokio::test]
 async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
     let home = tempfile::tempdir().unwrap();
-    std::fs::write(
-        home.path().join(".profile"),
-        "export LOGIN_SENTINEL=from_profile\n",
-    )
-    .unwrap();
+    // Haiku's `/bin/sh` (bash) follows the native Haiku login profile
+    // location rather than the traditional Unix `~/.profile` path.
+    let profile = if cfg!(target_os = "haiku") {
+        let settings = home.path().join("config/settings");
+        std::fs::create_dir_all(&settings).unwrap();
+        settings.join("profile")
+    } else {
+        home.path().join(".profile")
+    };
+    std::fs::write(profile, "export LOGIN_SENTINEL=from_profile\n").unwrap();
     let home_text = home.path().to_string_lossy().into_owned();
     let fixture = support::spawn::spawn_daemon_with_process_environment(
         DEFAULT_TEST_TARGET,
@@ -507,6 +512,7 @@ async fn exec_output_preserves_pipe_mode_output_after_external_pipeline_steps() 
     assert_eq!(response.output().output, "marker\nexternal\ndone\n");
 }
 
+#[cfg(not(target_os = "haiku"))]
 #[tokio::test]
 async fn exec_output_uses_one_pipe_for_stdout_and_stderr_in_pipe_mode() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;

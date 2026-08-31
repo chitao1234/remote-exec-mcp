@@ -420,6 +420,7 @@ async fn export_directory_skips_special_files_with_warning() {
             .join(".remote-exec-transfer-summary.json")
             .exists()
     );
+    std::fs::remove_file(&fifo).unwrap();
 }
 
 #[tokio::test]

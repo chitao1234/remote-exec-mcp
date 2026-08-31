@@ -143,6 +143,7 @@ async fn transfer_files_skips_local_special_files_with_warning() {
             .text_output
             .contains("Skipped unsupported transfer source entry")
     );
+    std::fs::remove_file(&fifo).unwrap();
 }
 
 #[tokio::test]
