@@ -17,6 +17,7 @@
 #include "core/logging.h"
 #include "core/shell_policy_internal.h"
 #include "exec/console_output.h"
+#include "exec/process_environment.h"
 #include "exec/process_session.h"
 #include "exec/utf8_stream_decode.h"
 #include "platform/platform.h"
@@ -82,22 +83,38 @@ template <typename String> bool environment_entry_less(const String& left, const
 }
 
 template <typename String>
-std::vector<typename String::value_type> environment_block_with_chere(
+std::vector<typename String::value_type> environment_block_with_overrides(
     typename String::value_type* inherited,
-    bool set_chere_invoking
+    const std::vector<ProcessEnvironmentPair>& overrides
 ) {
     std::vector<String> entries;
-    const String chere_key = ascii_env_string<String>("CHERE_INVOKING");
+    std::vector<String> override_keys;
+    std::vector<String> override_entries;
+    override_keys.reserve(overrides.size());
+    override_entries.reserve(overrides.size());
+    for (std::size_t i = 0; i < overrides.size(); ++i) {
+        const String key = ascii_env_string<String>(overrides[i].first.c_str());
+        override_keys.push_back(key);
+        override_entries.push_back(
+            key + ascii_env_string<String>("=")
+            + ascii_env_string<String>(overrides[i].second.c_str())
+        );
+    }
     for (typename String::value_type* current = inherited; current != nullptr && *current != 0;) {
         const String entry(current);
-        if (!set_chere_invoking || !environment_key_matches(entry, chere_key)) {
+        bool overridden = false;
+        for (std::size_t i = 0; i < override_keys.size(); ++i) {
+            if (environment_key_matches(entry, override_keys[i])) {
+                overridden = true;
+                break;
+            }
+        }
+        if (!overridden) {
             entries.push_back(entry);
         }
         current += entry.size() + 1U;
     }
-    if (set_chere_invoking) {
-        entries.push_back(chere_key + ascii_env_string<String>("=1"));
-    }
+    entries.insert(entries.end(), override_entries.begin(), override_entries.end());
     std::sort(entries.begin(), entries.end(), environment_entry_less<String>);
 
     std::vector<typename String::value_type> block;
@@ -112,6 +129,20 @@ std::vector<typename String::value_type> environment_block_with_chere(
     return block;
 }
 
+std::vector<ProcessEnvironmentPair> windows_process_environment_overrides(bool set_chere_invoking) {
+    const std::vector<ProcessEnvironmentPair> locale_pairs = {
+        std::make_pair("LANG", "C.UTF-8"),
+        std::make_pair("LC_CTYPE", "C.UTF-8"),
+        std::make_pair("LC_ALL", "C.UTF-8"),
+    };
+    std::vector<ProcessEnvironmentPair> overrides =
+        normalized_process_environment_pairs(locale_pairs);
+    if (set_chere_invoking) {
+        overrides.push_back(std::make_pair("CHERE_INVOKING", "1"));
+    }
+    return overrides;
+}
+
 struct NativeEnvironmentBlock {
     std::vector<remote_exec_win32::NativeChar> data;
     DWORD creation_flags;
@@ -124,9 +155,9 @@ NativeEnvironmentBlock native_environment_block(bool set_chere_invoking) {
     }
     NativeEnvironmentBlock result;
     try {
-        result.data = environment_block_with_chere<remote_exec_win32::NativeString>(
+        result.data = environment_block_with_overrides<remote_exec_win32::NativeString>(
             inherited,
-            set_chere_invoking
+            windows_process_environment_overrides(set_chere_invoking)
         );
     } catch (...) {
         remote_exec_win32::free_environment_strings_native(inherited);
@@ -149,7 +180,10 @@ std::vector<wchar_t> wide_environment_block(bool set_chere_invoking) {
     }
     std::vector<wchar_t> result;
     try {
-        result = environment_block_with_chere<std::wstring>(inherited, set_chere_invoking);
+        result = environment_block_with_overrides<std::wstring>(
+            inherited,
+            windows_process_environment_overrides(set_chere_invoking)
+        );
     } catch (...) {
         FreeEnvironmentStringsW(inherited);
         throw;

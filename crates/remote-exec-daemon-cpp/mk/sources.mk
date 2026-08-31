@@ -54,9 +54,12 @@ CAPABILITIES_SRCS = $(SOURCE_PREFIX)src/capabilities/daemon_capabilities.cpp
 
 POSIX_CHILD_REAPER_SRCS = $(SOURCE_PREFIX)src/exec/posix_child_reaper.cpp
 
+PROCESS_ENVIRONMENT_SRCS = $(SOURCE_PREFIX)src/exec/process_environment.cpp
+
 POSIX_PROCESS_SESSION_SRCS = \
 	$(SOURCE_PREFIX)src/exec/process_session_posix.cpp \
 	$(SOURCE_PREFIX)src/exec/locale.cpp \
+	$(PROCESS_ENVIRONMENT_SRCS) \
 	$(POSIX_CHILD_REAPER_SRCS)
 
 DAEMON_THREAD_SRCS = $(SOURCE_PREFIX)src/runtime/daemon_thread.cpp
@@ -468,6 +471,7 @@ HOST_PORT_TUNNEL_FRAME_SRCS = \
 
 WINDOWS_DAEMON_SUPPORT_SRCS_NO_ERROR = \
 	$(SOURCE_PREFIX)src/exec/process_session_win32.cpp \
+	$(PROCESS_ENVIRONMENT_SRCS) \
 	$(SOURCE_PREFIX)src/exec/console_output.cpp \
 	$(SOURCE_PREFIX)src/platform/win32_process_tree.cpp
 

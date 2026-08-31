@@ -801,6 +801,58 @@ static void assert_windows_posix_shell_receives_chere_invoking(
     TEST_ASSERT(response.at("exit_code").get<int>() == 0);
     TEST_ASSERT(normalize_output(response.at("output").get<std::string>()) == "1\n");
 }
+
+static int run_windows_environment_helper() {
+    const char* keys[] = {
+        "NO_COLOR",
+        "TERM",
+        "COLORTERM",
+        "PAGER",
+        "GIT_PAGER",
+        "GH_PAGER",
+        "CODEX_CI",
+        "LANG",
+        "LC_CTYPE",
+        "LC_ALL",
+    };
+    for (std::size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+        const char* value = std::getenv(keys[i]);
+        std::printf("%s=%s\n", keys[i], value == nullptr ? "<unset>" : value);
+    }
+    return 0;
+}
+
+static void assert_windows_exec_uses_normalized_environment(
+    SessionStore& store,
+    const fs::path& root,
+    const std::string& shell,
+    const YieldTimeConfig& yield_time
+) {
+    const std::string command =
+        test_exec_pty::quoted_test_executable_path() + " --session-store-environment-helper";
+    const std::string expected = "NO_COLOR=1\n"
+                                 "TERM=dumb\n"
+                                 "COLORTERM=\n"
+                                 "PAGER=cat\n"
+                                 "GIT_PAGER=cat\n"
+                                 "GH_PAGER=cat\n"
+                                 "CODEX_CI=1\n"
+                                 "LANG=C.UTF-8\n"
+                                 "LC_CTYPE=C.UTF-8\n"
+                                 "LC_ALL=C.UTF-8\n";
+
+    const Json pipe_response =
+        start_command_session(store, root, command, shell, false, 5000UL, yield_time);
+    TEST_ASSERT(pipe_response.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(normalize_output(pipe_response.at("output").get<std::string>()) == expected);
+
+    if (process_session_supports_pty()) {
+        const Json pty_response =
+            start_command_session(store, root, command, shell, true, 5000UL, yield_time);
+        TEST_ASSERT(pty_response.at("exit_code").get<int>() == 0);
+        TEST_ASSERT(normalize_output(pty_response.at("output").get<std::string>()) == expected);
+    }
+}
 #endif
 
 static void assert_windows_command_com_command_line_omits_cmd_only_flags() {
@@ -1287,7 +1339,9 @@ static void assert_posix_exec_uses_parent_built_environment_and_path(
     write_text_file(
         helper,
         "#!/bin/sh\n"
-        "printf '%s|%s|%s|%s\\n' \"$LC_ALL\" \"$LANG\" \"$LC_CTYPE\" \"$TERM\"\n"
+        "printf '%s|%s|%s|%s|%s|[%s]|%s|%s|%s|%s\\n' \"$LC_ALL\" \"$LANG\" "
+        "\"$LC_CTYPE\" \"$TERM\" \"$NO_COLOR\" \"$COLORTERM\" \"$PAGER\" "
+        "\"$GIT_PAGER\" \"$GH_PAGER\" \"$CODEX_CI\"\n"
     );
     chmod(helper.c_str(), 0755);
 
@@ -1295,33 +1349,40 @@ static void assert_posix_exec_uses_parent_built_environment_and_path(
     const std::string old_path = old_path_raw != NULL ? old_path_raw : "";
     ScopedEnvVar path_guard("PATH");
     ScopedEnvVar term_guard("TERM");
+    ScopedEnvVar no_color_guard("NO_COLOR");
+    ScopedEnvVar colorterm_guard("COLORTERM");
+    ScopedEnvVar pager_guard("PAGER");
+    ScopedEnvVar git_pager_guard("GIT_PAGER");
+    ScopedEnvVar gh_pager_guard("GH_PAGER");
+    ScopedEnvVar codex_ci_guard("CODEX_CI");
     const std::string new_path = bin_dir.string() + ":" + old_path;
     path_guard.set(new_path);
-    term_guard.unset();
+    term_guard.set("parent-term-must-not-leak");
+    no_color_guard.set("parent-no-color-must-not-leak");
+    colorterm_guard.set("parent-colorterm-must-not-leak");
+    pager_guard.set("parent-pager-must-not-leak");
+    git_pager_guard.set("parent-git-pager-must-not-leak");
+    gh_pager_guard.set("parent-gh-pager-must-not-leak");
+    codex_ci_guard.set("parent-codex-ci-must-not-leak");
 
     const std::vector<std::pair<std::string, std::string>> expected_locale =
         resolved_locale_env_plan().as_pairs();
     const std::string expected_pipe_prefix = locale_pair_value(expected_locale, "LC_ALL") + "|"
                                              + locale_pair_value(expected_locale, "LANG") + "|"
                                              + locale_pair_value(expected_locale, "LC_CTYPE") + "|";
+    const std::string expected_output = expected_pipe_prefix + "dumb|1|[]|cat|cat|cat|1\n";
 
     const Json pipe_response =
         start_command_session(store, root, "env-helper", shell, false, 5000UL, yield_time);
     TEST_ASSERT(pipe_response.at("exit_code").get<int>() == 0);
-    const std::string pipe_output = pipe_response.at("output").get<std::string>();
-    // Haiku /bin/sh initializes TERM=dumb even under env -i; LC_ALL/LANG are
-    // still the daemon-provided values this test is asserting.
-    TEST_ASSERT(
-        pipe_output == expected_pipe_prefix + "\n" || pipe_output == expected_pipe_prefix + "dumb\n"
-    );
+    TEST_ASSERT(pipe_response.at("output").get<std::string>() == expected_output);
 
     if (process_session_supports_pty()) {
         const Json pty_response =
             start_command_session(store, root, "env-helper", shell, true, 5000UL, yield_time);
         TEST_ASSERT(pty_response.at("exit_code").get<int>() == 0);
         TEST_ASSERT(
-            normalize_output(pty_response.at("output").get<std::string>())
-            == expected_pipe_prefix + "xterm-256color\n"
+            normalize_output(pty_response.at("output").get<std::string>()) == expected_output
         );
     }
 
@@ -2196,6 +2257,9 @@ static void assert_threshold_warnings_follow_configured_limit(
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
+    if (argc >= 2 && std::strcmp(argv[1], "--session-store-environment-helper") == 0) {
+        return run_windows_environment_helper();
+    }
     if (argc >= 2 && std::strcmp(argv[1], "--session-store-helper") == 0) {
         return test_exec_pty::run_windows_stdin_helper(argc, argv, 2);
     }
@@ -2227,6 +2291,7 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     assert_windows_cmd_quotes_survive_non_tty_and_tty(store, root, shell, yield_time);
     assert_windows_cmd_runs_quoted_script_path_with_spaces(store, root, shell, yield_time);
+    assert_windows_exec_uses_normalized_environment(store, root, shell, yield_time);
     assert_windows_posix_shell_receives_chere_invoking(store, root, shell, yield_time);
 #endif
     assert_posix_locale_and_late_output(store, root, shell, yield_time);

@@ -19,6 +19,7 @@
 #include "core/logging.h"
 #include "exec/locale.h"
 #include "exec/posix_child_reaper.h"
+#include "exec/process_environment.h"
 #include "exec/process_session.h"
 #include "exec/utf8_stream_decode.h"
 #include "platform/platform.h"
@@ -216,7 +217,6 @@ void remove_env_key(std::vector<std::string>* values, const char* key) {
 }
 
 ExecEnvironment build_exec_environment_values(
-    bool tty,
     const std::string& shell,
     const std::string& windows_posix_root
 ) {
@@ -227,25 +227,13 @@ ExecEnvironment build_exec_environment_values(
     remove_env_key(&env.values, "LANG");
     remove_env_key(&env.values, "LC_CTYPE");
     remove_env_key(&env.values, "LC_ALL");
-    const std::vector<std::pair<std::string, std::string>> locale_pairs =
-        resolved_locale_env_plan().as_pairs();
-    for (std::size_t i = 0; i < locale_pairs.size(); ++i) {
-        upsert_env_value(&env.values, locale_pairs[i].first + "=" + locale_pairs[i].second);
+    const std::vector<ProcessEnvironmentPair> normalized_pairs =
+        normalized_process_environment_pairs(resolved_locale_env_plan().as_pairs());
+    for (std::size_t i = 0; i < normalized_pairs.size(); ++i) {
+        upsert_env_value(&env.values, normalized_pairs[i].first + "=" + normalized_pairs[i].second);
     }
     if (platform::should_set_chere_invoking(shell, windows_posix_root)) {
         upsert_env_value(&env.values, "CHERE_INVOKING=1");
-    }
-    if (tty) {
-        bool has_term = false;
-        for (std::size_t i = 0; i < env.values.size(); ++i) {
-            if (env_key_matches(env.values[i], "TERM")) {
-                has_term = true;
-                break;
-            }
-        }
-        if (!has_term) {
-            env.values.push_back("TERM=xterm-256color");
-        }
     }
     return env;
 }
@@ -553,8 +541,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     bool tty
 ) {
     const std::vector<std::string> argv = platform::shell_argv(shell, login, command);
-    ExecEnvironment exec_environment =
-        build_exec_environment_values(tty, shell, windows_posix_root);
+    ExecEnvironment exec_environment = build_exec_environment_values(shell, windows_posix_root);
     exec_environment.refresh_pointers();
     const std::vector<char*> exec_argv = build_exec_argv(argv);
     const std::string executable_path = resolve_exec_path(argv[0], exec_environment);
