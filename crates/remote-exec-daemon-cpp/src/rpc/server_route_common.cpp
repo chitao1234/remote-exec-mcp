@@ -203,8 +203,12 @@ HttpResponse handle_patch_apply(const PatchRouteContext& context, const HttpRequ
         const Json body = parse_json_body(request);
         const std::string workdir = resolve_workdir(context.paths, body);
         const std::string patch_text = body.at("patch").get<std::string>();
-        const PatchApplyResult result =
-            apply_patch(workdir, patch_text, make_patch_path_authorizer(context.paths));
+        const PatchApplyResult result = apply_patch(
+            workdir,
+            patch_text,
+            make_patch_path_authorizer(context.paths),
+            context.paths.windows_posix_root
+        );
         LogMessageBuilder summary("patch/apply");
         summary.field("patch_len", patch_text.size());
         log_message(LOG_INFO, "server", summary.str());

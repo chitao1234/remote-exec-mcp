@@ -359,6 +359,76 @@ static void assert_image_routes(TestRouteHarness& harness, const fs::path& root)
 #endif
 }
 
+#ifdef _WIN32
+static void assert_windows_posix_root_routes(const fs::path& root) {
+    const fs::path synthetic_root = root / "synthetic-posix-root";
+    const fs::path workdir = synthetic_root / "work";
+    const fs::path assets = synthetic_root / "assets";
+    fs::create_directories(workdir);
+    fs::create_directories(assets);
+
+    const fs::path image_file = assets / "rooted.png";
+    fs::write_file_bytes(
+        image_file,
+        base64_decode_bytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
+                            "x8AAwMCAO+aL9sAAAAASUVORK5CYII=")
+    );
+
+    TestRouteHarness harness(synthetic_root);
+    harness.state.config.default_workdir = workdir.string();
+    harness.state.config.windows_posix_root = synthetic_root.string();
+    harness.refresh_context();
+
+    const HttpResponse image_response = route_request(
+        harness,
+        make_json_http_request("/v1/image/read", Json{{"path", "/assets/rooted.png"}})
+    );
+    TEST_ASSERT(image_response.status == 200);
+
+    const HttpResponse path_info_response = route_request(
+        harness,
+        make_json_http_request("/v1/transfer/path-info", Json{{"path", "/assets/rooted.png"}})
+    );
+    TEST_ASSERT(path_info_response.status == 200);
+    const Json path_info = Json::parse(path_info_response.body);
+    TEST_ASSERT(path_info.at("exists").get<bool>());
+    TEST_ASSERT(!path_info.at("is_directory").get<bool>());
+
+    const HttpResponse patch_response = route_request(
+        harness,
+        make_json_http_request(
+            "/v1/patch/apply",
+            Json{
+                {"workdir", "/work"},
+                {"patch",
+                 "*** Begin Patch\n*** Add File: /work/rooted.txt\n+rooted\n*** End Patch\n"},
+            }
+        )
+    );
+    TEST_ASSERT(patch_response.status == 200);
+    TEST_ASSERT(fs::read_file_bytes(workdir / "rooted.txt") == "rooted\n");
+
+    const HttpResponse exec_response = route_request(
+        harness,
+        make_json_http_request(
+            "/v1/exec/start",
+            Json{
+                {"cmd", "echo %CD%"},
+                {"workdir", "/work"},
+                {"shell", "cmd.exe"},
+                {"login", false},
+                {"yield_time_ms", 5000UL},
+            }
+        )
+    );
+    TEST_ASSERT(exec_response.status == 200);
+    const Json exec = Json::parse(exec_response.body);
+    TEST_ASSERT(!exec.at("running").get<bool>());
+    TEST_ASSERT(exec.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(exec.at("output").get<std::string>().find(workdir.string()) != std::string::npos);
+}
+#endif
+
 static void assert_patch_route_audit_fields(TestRouteHarness& harness, const fs::path& root) {
     const fs::path patch_file = root / "patch-audit.txt";
     const std::string patch_text = "*** Begin Patch\n"
@@ -801,6 +871,9 @@ void run_platform_neutral_server_route_tests(TestRouteHarness& harness, const fs
     assert_disabled_exec_and_apply_patch_routes(root);
     assert_transfer_export_errors(harness, root);
     assert_image_routes(harness, root);
+#ifdef _WIN32
+    assert_windows_posix_root_routes(root);
+#endif
     assert_patch_route_audit_fields(harness, root);
     assert_transfer_path_info_routes(harness, root);
     const std::string export_body = assert_transfer_export_and_exclude_routes(harness, root);

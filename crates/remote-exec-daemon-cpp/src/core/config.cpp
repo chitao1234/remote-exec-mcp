@@ -12,6 +12,7 @@
 #include "core/text_utils.h"
 #include "platform/path_utils.h"
 #include "platform/scoped_file.h"
+#include "policy/path_policy.h"
 
 typedef std::map<std::string, std::string> ConfigValues;
 
@@ -445,6 +446,12 @@ static FilesystemSandbox read_sandbox(const ConfigValues& values) {
 }
 
 static void validate_daemon_config(const DaemonConfig& config) {
+#ifdef _WIN32
+    if (!config.windows_posix_root.empty()
+        && !is_absolute_for_policy(windows_path_policy(), config.windows_posix_root)) {
+        throw std::runtime_error("windows_posix_root must be an absolute path");
+    }
+#endif
     validate_existing_directory(config.default_workdir, "default_workdir");
     if (config.connection_mode == ConnectionMode::Listen && config.listen_port == 0
         && config.test_bound_addr_file.empty()) {
@@ -531,7 +538,19 @@ DaemonConfig load_config(const std::string& path) {
         }
     }
     config.test_bound_addr_file = read_optional_string(values, "test_bound_addr_file", "");
-    config.default_workdir = read_required_string(values, "default_workdir");
+    config.windows_posix_root = read_optional_string(values, "windows_posix_root", "");
+    const std::string configured_workdir = read_required_string(values, "default_workdir");
+    std::string resolved_workdir;
+    if (resolve_absolute_input_path_for_policy(
+            host_path_policy(),
+            configured_workdir,
+            config.windows_posix_root,
+            &resolved_workdir
+        )) {
+        config.default_workdir = resolved_workdir;
+    } else {
+        config.default_workdir = configured_workdir;
+    }
     config.default_shell = read_optional_string(values, "default_shell", "");
     config.allow_login_shell = read_optional_bool(values, "allow_login_shell", true);
     config.allow_exec = read_optional_bool(values, "allow_exec", true);

@@ -234,10 +234,13 @@ std::string normalize_absolute_path(const std::string& raw) {
     return normalize_path_segments(raw, NormalizedPathKind::Absolute);
 }
 
-std::string normalize_patch_path(const std::string& raw) {
+std::string normalize_patch_path(const std::string& raw, const std::string& windows_posix_root) {
     const PathPolicy policy = host_path_policy();
-    const std::string normalized = normalize_for_system(policy, raw);
-    if (is_absolute_for_policy(policy, raw) || is_absolute_for_policy(policy, normalized)) {
+    std::string resolved;
+    const bool absolute =
+        resolve_absolute_input_path_for_policy(policy, raw, windows_posix_root, &resolved);
+    const std::string normalized = absolute ? resolved : normalize_for_system(policy, raw);
+    if (absolute || is_absolute_for_policy(policy, normalized)) {
         return normalize_absolute_path(normalized);
     }
     if (raw.size() >= 2 && raw[1] == ':') {
@@ -532,7 +535,7 @@ static void parse_update_chunk_line(const std::string& line, UpdateChunk* chunk)
     throw std::runtime_error("invalid update hunk line");
 }
 
-ParsedPatch parse_patch(const std::string& patch_text) {
+ParsedPatch parse_patch(const std::string& patch_text, const std::string& windows_posix_root) {
     const std::vector<std::string> lines = split_patch_lines(patch_text);
     if (lines.empty() || trim_patch_whitespace(lines.front()) != "*** Begin Patch") {
         throw std::runtime_error("invalid patch header");
@@ -560,7 +563,7 @@ ParsedPatch parse_patch(const std::string& patch_text) {
         if (starts_with(line, "*** Add File: ")) {
             PatchAction action;
             action.kind = PatchKind::Add;
-            action.path = normalize_patch_path(line.substr(14));
+            action.path = normalize_patch_path(line.substr(14), windows_posix_root);
             ++index;
             while (index + 1 < lines.size() && !is_structural_line(lines[index])) {
                 if (lines[index].empty() || lines[index][0] != '+') {
@@ -576,7 +579,7 @@ ParsedPatch parse_patch(const std::string& patch_text) {
         if (starts_with(line, "*** Delete File: ")) {
             PatchAction action;
             action.kind = PatchKind::Delete;
-            action.path = normalize_patch_path(line.substr(17));
+            action.path = normalize_patch_path(line.substr(17), windows_posix_root);
             actions.push_back(action);
             ++index;
             continue;
@@ -585,13 +588,15 @@ ParsedPatch parse_patch(const std::string& patch_text) {
         if (starts_with(line, "*** Update File: ")) {
             PatchAction action;
             action.kind = PatchKind::Update;
-            action.path = normalize_patch_path(line.substr(17));
+            action.path = normalize_patch_path(line.substr(17), windows_posix_root);
             ++index;
 
             if (index + 1 < lines.size()
                 && starts_with(trim_patch_whitespace(lines[index]), "*** Move to: ")) {
-                action.move_to =
-                    normalize_patch_path(trim_patch_whitespace(lines[index]).substr(13));
+                action.move_to = normalize_patch_path(
+                    trim_patch_whitespace(lines[index]).substr(13),
+                    windows_posix_root
+                );
                 ++index;
             }
 
@@ -1077,9 +1082,10 @@ std::vector<std::string> execute_planned_actions(const std::vector<PlannedAction
 PatchApplyResult apply_patch(
     const std::string& root,
     const std::string& patch_text,
-    const PatchPathAuthorizer& authorizer
+    const PatchPathAuthorizer& authorizer,
+    const std::string& windows_posix_root
 ) {
-    const ParsedPatch parsed = parse_patch(patch_text);
+    const ParsedPatch parsed = parse_patch(patch_text, windows_posix_root);
     std::vector<std::string> summary;
     summary.reserve(parsed.actions.size());
 

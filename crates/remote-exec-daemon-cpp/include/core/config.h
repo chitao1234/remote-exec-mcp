@@ -102,6 +102,7 @@ struct DaemonConfig {
     int listen_port;
     std::string test_bound_addr_file;
     std::string default_workdir;
+    std::string windows_posix_root;
     std::string default_shell;
     bool allow_login_shell = true;
     bool allow_exec = true;

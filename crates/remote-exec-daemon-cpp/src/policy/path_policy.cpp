@@ -143,6 +143,45 @@ std::string join_for_policy(PathPolicy policy, const std::string& base, const st
     return normalized_base + separator + normalized_child;
 }
 
+bool resolve_absolute_input_path_for_policy(
+    PathPolicy policy,
+    const std::string& raw,
+    const std::string& windows_posix_root,
+    std::string* resolved
+) {
+    if (is_absolute_for_policy(policy, raw)) {
+        *resolved = normalize_for_system(policy, raw);
+        return true;
+    }
+
+    if (policy.style != PATH_STYLE_WINDOWS || windows_posix_root.empty() || raw.empty()
+        || raw[0] != '/' || (raw.size() >= 2U && raw[1] == '/')) {
+        return false;
+    }
+
+    std::size_t tail_start = 0U;
+    while (tail_start < raw.size() && raw[tail_start] == '/') {
+        ++tail_start;
+    }
+    const std::string root = normalize_for_system(policy, windows_posix_root);
+    *resolved =
+        tail_start == raw.size() ? root : join_for_policy(policy, root, raw.substr(tail_start));
+    return true;
+}
+
+std::string resolve_input_path_for_policy(
+    PathPolicy policy,
+    const std::string& base,
+    const std::string& raw,
+    const std::string& windows_posix_root
+) {
+    std::string resolved;
+    if (resolve_absolute_input_path_for_policy(policy, raw, windows_posix_root, &resolved)) {
+        return resolved;
+    }
+    return join_for_policy(policy, base, raw);
+}
+
 bool basename_for_policy(PathPolicy policy, const std::string& raw, std::string* basename) {
     const std::string normalized = normalize_for_system(policy, raw);
     if (policy.style == PATH_STYLE_POSIX) {

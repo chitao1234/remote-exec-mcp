@@ -215,7 +215,11 @@ void remove_env_key(std::vector<std::string>* values, const char* key) {
     values->swap(filtered);
 }
 
-ExecEnvironment build_exec_environment_values(bool tty) {
+ExecEnvironment build_exec_environment_values(
+    bool tty,
+    const std::string& shell,
+    const std::string& windows_posix_root
+) {
     ExecEnvironment env;
     for (char** current = environ; current != nullptr && *current != nullptr; ++current) {
         env.values.push_back(*current);
@@ -227,6 +231,9 @@ ExecEnvironment build_exec_environment_values(bool tty) {
         resolved_locale_env_plan().as_pairs();
     for (std::size_t i = 0; i < locale_pairs.size(); ++i) {
         upsert_env_value(&env.values, locale_pairs[i].first + "=" + locale_pairs[i].second);
+    }
+    if (platform::should_set_chere_invoking(shell, windows_posix_root)) {
+        upsert_env_value(&env.values, "CHERE_INVOKING=1");
     }
     if (tty) {
         bool has_term = false;
@@ -541,11 +548,13 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     const std::string& command,
     const std::string& workdir,
     const std::string& shell,
+    const std::string& windows_posix_root,
     bool login,
     bool tty
 ) {
     const std::vector<std::string> argv = platform::shell_argv(shell, login, command);
-    ExecEnvironment exec_environment = build_exec_environment_values(tty);
+    ExecEnvironment exec_environment =
+        build_exec_environment_values(tty, shell, windows_posix_root);
     exec_environment.refresh_pointers();
     const std::vector<char*> exec_argv = build_exec_argv(argv);
     const std::string executable_path = resolve_exec_path(argv[0], exec_environment);

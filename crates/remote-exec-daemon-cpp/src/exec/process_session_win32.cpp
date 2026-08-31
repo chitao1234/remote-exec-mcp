@@ -1,5 +1,6 @@
 #ifdef _WIN32
 
+#include <algorithm>
 #include <cstddef>
 #include <sstream>
 #include <stdexcept>
@@ -32,6 +33,131 @@ namespace {
 using platform_detail::is_windows_cmd_family;
 using platform_detail::is_windows_command_family;
 using platform_detail::shell_basename_lower;
+
+template <typename String> typename String::value_type ascii_env_char(char value) {
+    return static_cast<typename String::value_type>(static_cast<unsigned char>(value));
+}
+
+template <typename String>
+typename String::value_type ascii_env_upper(typename String::value_type value) {
+    const typename String::value_type lower_a = ascii_env_char<String>('a');
+    const typename String::value_type lower_z = ascii_env_char<String>('z');
+    if (value >= lower_a && value <= lower_z) {
+        return value - lower_a + ascii_env_char<String>('A');
+    }
+    return value;
+}
+
+template <typename String> String ascii_env_string(const char* value) {
+    String result;
+    while (value != nullptr && *value != '\0') {
+        result.push_back(ascii_env_char<String>(*value));
+        ++value;
+    }
+    return result;
+}
+
+template <typename String> bool environment_key_matches(const String& entry, const String& key) {
+    if (entry.size() <= key.size() || entry[key.size()] != ascii_env_char<String>('=')) {
+        return false;
+    }
+    for (std::size_t i = 0; i < key.size(); ++i) {
+        if (ascii_env_upper<String>(entry[i]) != ascii_env_upper<String>(key[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+template <typename String> bool environment_entry_less(const String& left, const String& right) {
+    const std::size_t shared = std::min(left.size(), right.size());
+    for (std::size_t i = 0; i < shared; ++i) {
+        const typename String::value_type left_ch = ascii_env_upper<String>(left[i]);
+        const typename String::value_type right_ch = ascii_env_upper<String>(right[i]);
+        if (left_ch != right_ch) {
+            return left_ch < right_ch;
+        }
+    }
+    return left.size() < right.size();
+}
+
+template <typename String>
+std::vector<typename String::value_type> environment_block_with_chere(
+    typename String::value_type* inherited,
+    bool set_chere_invoking
+) {
+    std::vector<String> entries;
+    const String chere_key = ascii_env_string<String>("CHERE_INVOKING");
+    for (typename String::value_type* current = inherited; current != nullptr && *current != 0;) {
+        const String entry(current);
+        if (!set_chere_invoking || !environment_key_matches(entry, chere_key)) {
+            entries.push_back(entry);
+        }
+        current += entry.size() + 1U;
+    }
+    if (set_chere_invoking) {
+        entries.push_back(chere_key + ascii_env_string<String>("=1"));
+    }
+    std::sort(entries.begin(), entries.end(), environment_entry_less<String>);
+
+    std::vector<typename String::value_type> block;
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        block.insert(block.end(), entries[i].begin(), entries[i].end());
+        block.push_back(0);
+    }
+    block.push_back(0);
+    if (entries.empty()) {
+        block.push_back(0);
+    }
+    return block;
+}
+
+struct NativeEnvironmentBlock {
+    std::vector<remote_exec_win32::NativeChar> data;
+    DWORD creation_flags;
+};
+
+NativeEnvironmentBlock native_environment_block(bool set_chere_invoking) {
+    remote_exec_win32::NativeChar* inherited = remote_exec_win32::get_environment_strings_native();
+    if (inherited == nullptr) {
+        throw std::runtime_error(last_error_message("GetEnvironmentStrings"));
+    }
+    NativeEnvironmentBlock result;
+    try {
+        result.data = environment_block_with_chere<remote_exec_win32::NativeString>(
+            inherited,
+            set_chere_invoking
+        );
+    } catch (...) {
+        remote_exec_win32::free_environment_strings_native(inherited);
+        throw;
+    }
+    remote_exec_win32::free_environment_strings_native(inherited);
+#ifdef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
+    result.creation_flags = 0;
+#else
+    result.creation_flags = CREATE_UNICODE_ENVIRONMENT;
+#endif
+    return result;
+}
+
+#ifdef REMOTE_EXEC_CPP_HAS_WINPTY
+std::vector<wchar_t> wide_environment_block(bool set_chere_invoking) {
+    wchar_t* inherited = GetEnvironmentStringsW();
+    if (inherited == nullptr) {
+        throw std::runtime_error(last_error_message("GetEnvironmentStringsW"));
+    }
+    std::vector<wchar_t> result;
+    try {
+        result = environment_block_with_chere<std::wstring>(inherited, set_chere_invoking);
+    } catch (...) {
+        FreeEnvironmentStringsW(inherited);
+        throw;
+    }
+    FreeEnvironmentStringsW(inherited);
+    return result;
+}
+#endif
 
 std::string windows_quote_arg(const std::string& arg) {
     if (arg.empty()) {
@@ -423,17 +549,20 @@ SpawnedWinptyProcess spawn_winpty_process(
     const std::string& command,
     const std::string& workdir,
     const std::string& shell,
+    const std::string& windows_posix_root,
     bool login
 ) {
     const std::string command_line = windows_process_command_line(command, shell, login);
     std::wstring wide_command_line = win32_utf8::wide_from_utf8(command_line);
     std::wstring wide_workdir =
         workdir.empty() ? std::wstring() : win32_utf8::wide_from_utf8(workdir);
+    std::vector<wchar_t> environment =
+        wide_environment_block(platform::should_set_chere_invoking(shell, windows_posix_root));
 
     WinptyErrorHandle error;
     UniqueWinptySpawnConfig spawn_config(winpty_spawn_config_new(
         WINPTY_SPAWN_FLAG_AUTO_SHUTDOWN | WINPTY_SPAWN_FLAG_EXIT_AFTER_SHUTDOWN,
-        nullptr,
+        &environment[0],
         wide_command_line.c_str(),
         workdir.empty() ? nullptr : wide_workdir.c_str(),
         nullptr,
@@ -610,13 +739,14 @@ std::unique_ptr<ProcessSession> launch_winpty_process_session(
     const std::string& command,
     const std::string& workdir,
     const std::string& shell,
+    const std::string& windows_posix_root,
     bool login
 ) {
     UniqueWinpty winpty = open_winpty_session();
     UniqueHandle stdin_write(open_winpty_pipe(winpty_conin_name(winpty.get()), GENERIC_WRITE));
     UniqueHandle stdout_read(open_winpty_pipe(winpty_conout_name(winpty.get()), GENERIC_READ));
     SpawnedWinptyProcess process =
-        spawn_winpty_process(winpty.get(), command, workdir, shell, login);
+        spawn_winpty_process(winpty.get(), command, workdir, shell, windows_posix_root, login);
 
     return std::unique_ptr<ProcessSession>(new WinptyProcessSession(
         std::move(winpty),
@@ -634,6 +764,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     const std::string& command,
     const std::string& workdir,
     const std::string& shell,
+    const std::string& windows_posix_root,
     bool login,
     bool tty
 ) {
@@ -642,7 +773,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         if (!process_session_supports_pty()) {
             throw std::runtime_error("tty is not supported on this host");
         }
-        return launch_winpty_process_session(command, workdir, shell, login);
+        return launch_winpty_process_session(command, workdir, shell, windows_posix_root, login);
 #else
         throw std::runtime_error("tty is not supported on this host");
 #endif
@@ -675,6 +806,8 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     const remote_exec_win32::NativeString native_workdir =
         workdir.empty() ? remote_exec_win32::NativeString()
                         : remote_exec_win32::native_from_utf8(workdir, "CreateProcess");
+    NativeEnvironmentBlock environment =
+        native_environment_block(platform::should_set_chere_invoking(shell, windows_posix_root));
 
     const BOOL created = remote_exec_win32::create_process_native(
         nullptr,
@@ -682,8 +815,8 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         nullptr,
         nullptr,
         TRUE,
-        0,
-        nullptr,
+        environment.creation_flags,
+        &environment.data[0],
         workdir.empty() ? nullptr : native_workdir.c_str(),
         &startup_info,
         &process_info

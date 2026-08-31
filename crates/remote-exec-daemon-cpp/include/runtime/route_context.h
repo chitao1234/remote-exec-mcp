@@ -22,11 +22,14 @@ struct HttpGateContext {
 struct PathResolutionContext {
     PathResolutionContext(
         const std::string& default_workdir_value,
+        const std::string& windows_posix_root_value,
         const CompiledFilesystemSandbox* active_sandbox_value
     )
-        : default_workdir(default_workdir_value), active_sandbox(active_sandbox_value) {}
+        : default_workdir(default_workdir_value), windows_posix_root(windows_posix_root_value),
+          active_sandbox(active_sandbox_value) {}
 
     const std::string& default_workdir;
+    const std::string& windows_posix_root;
     const CompiledFilesystemSandbox* active_sandbox;
 };
 

@@ -26,6 +26,7 @@ public:
         const std::string& command,
         const std::string& workdir,
         const std::string& shell,
+        const std::string& windows_posix_root,
         bool login,
         bool tty
     );

@@ -461,12 +461,14 @@ static Json start_test_command(
     unsigned long yield_time_ms,
     unsigned long max_output_tokens,
     const YieldTimeConfig& yield_time,
-    unsigned long max_open_sessions
+    unsigned long max_open_sessions,
+    const std::string& windows_posix_root = std::string()
 ) {
     ExecStartRequestSpec request;
     request.cmd = command;
     request.workdir = workdir;
     request.shell = shell;
+    request.windows_posix_root = windows_posix_root;
     request.login_requested = false;
     request.tty_requested = tty;
     request.has_yield_time_ms = true;
@@ -738,6 +740,12 @@ static void assert_windows_git_bash_selection_and_argument_passing() {
         TEST_ASSERT(platform::shell_supported(bash_names[i]));
     }
     TEST_ASSERT(platform::selected_shell("git-bash.exe", "cmd.exe") == "git-bash.exe");
+    TEST_ASSERT(
+        platform::selected_shell("/usr/bin/bash", "cmd.exe", "C:\\msys64")
+        == "C:\\msys64\\usr\\bin\\bash"
+    );
+    TEST_ASSERT(platform::should_set_chere_invoking("bash.exe"));
+    TEST_ASSERT(platform::should_set_chere_invoking("C:\\msys64\\usr\\bin\\zsh.exe", "C:\\msys64"));
 
     const std::vector<std::string> non_login_argv =
         platform::shell_argv("bash.exe", false, "printf alpha beta");
@@ -766,6 +774,32 @@ static void assert_windows_git_bash_selection_and_argument_passing() {
         )
         == "\"C:\\Program Files\\Git\\bin\\bash.exe\" -l -c \"printf alpha beta\""
     );
+}
+
+static void assert_windows_posix_shell_receives_chere_invoking(
+    SessionStore& store,
+    const fs::path& root,
+    const std::string& shell,
+    const YieldTimeConfig& yield_time
+) {
+    const fs::path shell_parent = fs::path(shell).parent_path();
+    if (shell_parent.string().empty()) {
+        return;
+    }
+    const Json response = start_test_command(
+        store,
+        "echo %CHERE_INVOKING%",
+        root.string(),
+        shell,
+        false,
+        5000UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time,
+        64UL,
+        shell_parent.string()
+    );
+    TEST_ASSERT(response.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(normalize_output(response.at("output").get<std::string>()) == "1\n");
 }
 #endif
 
@@ -2193,6 +2227,7 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     assert_windows_cmd_quotes_survive_non_tty_and_tty(store, root, shell, yield_time);
     assert_windows_cmd_runs_quoted_script_path_with_spaces(store, root, shell, yield_time);
+    assert_windows_posix_shell_receives_chere_invoking(store, root, shell, yield_time);
 #endif
     assert_posix_locale_and_late_output(store, root, shell, yield_time);
     assert_posix_exit_drain_boundaries(store, root, shell, yield_time);

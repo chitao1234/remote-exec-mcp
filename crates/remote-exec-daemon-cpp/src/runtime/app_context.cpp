@@ -7,7 +7,11 @@ ServerRouteContext make_server_route_context(
     AppServices& services
 ) {
     const HttpGateContext gate(config.http_auth_bearer_token);
-    const PathResolutionContext paths(config.default_workdir, sandbox.active());
+    const PathResolutionContext paths(
+        config.default_workdir,
+        config.windows_posix_root,
+        sandbox.active()
+    );
     const HealthRouteContext health(metadata.daemon_instance_id);
     const TargetInfoRouteContext target_info(
         config.target,

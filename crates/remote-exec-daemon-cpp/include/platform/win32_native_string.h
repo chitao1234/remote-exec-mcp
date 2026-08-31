@@ -331,6 +331,22 @@ inline BOOL create_process_native(
 #endif
 }
 
+inline NativeChar* get_environment_strings_native() {
+#ifdef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
+    return GetEnvironmentStringsA();
+#else
+    return GetEnvironmentStringsW();
+#endif
+}
+
+inline BOOL free_environment_strings_native(NativeChar* environment) {
+#ifdef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
+    return FreeEnvironmentStringsA(environment);
+#else
+    return FreeEnvironmentStringsW(environment);
+#endif
+}
+
 } // namespace remote_exec_win32
 
 #endif

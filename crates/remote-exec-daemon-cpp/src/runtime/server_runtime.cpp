@@ -148,7 +148,8 @@ ServerRuntime::ServerRuntime(const DaemonConfig& config)
       accept_thread_(), maintenance_thread_(), reverse_live_(0UL), reverse_busy_(0UL) {
     metadata_.daemon_instance_id = daemon_instance_id();
     metadata_.hostname = platform::hostname();
-    metadata_.default_shell = platform::resolve_default_shell(config.default_shell);
+    metadata_.default_shell =
+        platform::resolve_default_shell(config.default_shell, config.windows_posix_root);
     metadata_.capabilities = detect_daemon_capabilities(config_);
     sandbox_.enabled = config.sandbox_configured;
     if (sandbox_.enabled) {

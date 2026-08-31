@@ -9,12 +9,12 @@ const CompiledFilesystemSandbox* active_sandbox(const PathResolutionContext& con
     return context.active_sandbox;
 }
 
-std::string resolve_path_from_base(const std::string& base, const std::string& raw) {
-    const PathPolicy policy = host_path_policy();
-    if (is_absolute_for_policy(policy, raw)) {
-        return normalize_for_system(policy, raw);
-    }
-    return join_for_policy(policy, base, raw);
+std::string resolve_path_from_base(
+    const PathResolutionContext& context,
+    const std::string& base,
+    const std::string& raw
+) {
+    return resolve_input_path_for_policy(host_path_policy(), base, raw, context.windows_posix_root);
 }
 
 } // namespace
@@ -44,7 +44,7 @@ std::string resolve_workdir(const PathResolutionContext& context, const Json& bo
         return context.default_workdir;
     }
 
-    return resolve_path_from_base(context.default_workdir, raw);
+    return resolve_path_from_base(context, context.default_workdir, raw);
 }
 
 std::string resolve_authorized_workdir(
@@ -63,7 +63,7 @@ std::string resolve_input_path(
     const std::string& key
 ) {
     const std::string raw = body.at(key).get<std::string>();
-    return resolve_path_from_base(resolve_workdir(context, body), raw);
+    return resolve_path_from_base(context, resolve_workdir(context, body), raw);
 }
 
 std::string resolve_authorized_input_path(

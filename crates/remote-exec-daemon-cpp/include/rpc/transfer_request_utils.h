@@ -24,7 +24,10 @@ struct TransferImportRequestSpec {
     TransferPathAuthorizer authorizer;
 };
 
-std::string resolve_absolute_transfer_path(const std::string& path);
+std::string resolve_absolute_transfer_path(
+    const std::string& path,
+    const std::string& windows_posix_root = std::string()
+);
 std::string resolve_authorized_transfer_path(
     const PathResolutionContext& context,
     const std::string& path,

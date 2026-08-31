@@ -38,6 +38,7 @@ static void assert_default_config_values(const DaemonConfig& config) {
     TEST_ASSERT(config.max_open_sessions == DEFAULT_MAX_OPEN_SESSIONS);
     TEST_ASSERT(config.allow_exec);
     TEST_ASSERT(config.allow_apply_patch);
+    TEST_ASSERT(config.windows_posix_root.empty());
     TEST_ASSERT(config.http_connection_idle_timeout_ms == DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS);
     TEST_ASSERT(
         config.port_forward_limits.max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS
@@ -124,6 +125,9 @@ int main() {
             + quote_config_value(spaced_workdir.string())
             + "\n"
               "default_shell = /bin/sh\n"
+              "windows_posix_root = "
+            + quote_config_value(root.string())
+            + "\n"
               "allow_login_shell = false\n"
               "allow_exec = false\n"
               "allow_apply_patch = false\n"
@@ -218,6 +222,7 @@ int main() {
     TEST_ASSERT(reverse_tls_config.tls_handshake_timeout_ms == 5678UL);
     TEST_ASSERT(config.default_workdir == spaced_workdir.string());
     TEST_ASSERT(config.default_shell == "/bin/sh");
+    TEST_ASSERT(config.windows_posix_root == root.string());
     TEST_ASSERT(!config.allow_login_shell);
     TEST_ASSERT(!config.allow_exec);
     TEST_ASSERT(!config.allow_apply_patch);
@@ -246,6 +251,28 @@ int main() {
     TEST_ASSERT(config.yield_time.write_stdin_input.max_ms == 45000UL);
     TEST_ASSERT(config.yield_time.write_stdin_input.min_ms == 250UL);
     TEST_ASSERT(!config.sandbox_configured);
+
+#ifdef _WIN32
+    const fs::path synthetic_root = root / "synthetic-posix-root";
+    const fs::path synthetic_workdir = synthetic_root / "work";
+    fs::create_directories(synthetic_workdir);
+    const fs::path synthetic_config_path = root / "synthetic-posix.ini";
+    write_text(
+        synthetic_config_path,
+        minimal_config_text(fs::path("/work"))
+            + "windows_posix_root = " + quote_config_value(synthetic_root.string()) + "\n"
+    );
+    const DaemonConfig synthetic_config = load_config(synthetic_config_path.string());
+    TEST_ASSERT(synthetic_config.windows_posix_root == synthetic_root.string());
+    TEST_ASSERT(synthetic_config.default_workdir == synthetic_workdir.string());
+
+    const fs::path invalid_posix_root_config_path = root / "invalid-posix-root.ini";
+    write_text(
+        invalid_posix_root_config_path,
+        minimal_config_text(default_workdir) + "windows_posix_root = relative\\root\n"
+    );
+    TEST_ASSERT(config_rejected(invalid_posix_root_config_path));
+#endif
 
     const fs::path sandbox_workdir = root / "sandbox-work";
     const fs::path sandbox_tmp_workdir = root / "tmp-work";

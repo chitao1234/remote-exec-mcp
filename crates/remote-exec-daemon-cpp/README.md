@@ -82,7 +82,8 @@ plain reverse mode requires `reverse_bearer_token`.
 
 Optional settings cover:
 
-- `default_shell` and `allow_login_shell` for command execution;
+- `default_shell`, `allow_login_shell`, and Windows `windows_posix_root` for
+  command execution and single-slash POSIX path translation;
 - request, session, transfer, forwarding, and yield-time limits;
 - static `sandbox_*_allow` and `sandbox_*_deny` path rules.
 

@@ -25,6 +25,7 @@ struct ExecStartRequestSpec {
     std::string cmd;
     std::string workdir;
     std::string shell;
+    std::string windows_posix_root;
     bool login_requested;
     bool tty_requested;
     bool has_yield_time_ms;

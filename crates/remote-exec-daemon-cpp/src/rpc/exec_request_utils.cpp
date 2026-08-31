@@ -98,7 +98,12 @@ ExecStartRequestSpec prepare_exec_start_request(
                 "requested shell is not supported on this target"
             );
         }
-        parsed.shell = platform::selected_shell(shell_override, context.default_shell);
+        parsed.shell = platform::selected_shell(
+            shell_override,
+            context.default_shell,
+            context.paths.windows_posix_root
+        );
+        parsed.windows_posix_root = context.paths.windows_posix_root;
         parsed.workdir = resolve_authorized_workdir(context.paths, body, SANDBOX_EXEC_CWD);
         return parsed;
     } catch (const ExecRequestFailure&) {

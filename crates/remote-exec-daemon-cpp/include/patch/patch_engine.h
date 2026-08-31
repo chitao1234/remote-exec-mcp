@@ -30,5 +30,6 @@ private:
 PatchApplyResult apply_patch(
     const std::string& root,
     const std::string& patch_text,
-    const PatchPathAuthorizer& authorizer = PatchPathAuthorizer()
+    const PatchPathAuthorizer& authorizer = PatchPathAuthorizer(),
+    const std::string& windows_posix_root = std::string()
 );

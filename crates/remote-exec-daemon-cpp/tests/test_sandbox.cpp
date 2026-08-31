@@ -418,6 +418,35 @@ int main() {
         join_for_policy(windows_policy, "C:/Work", "nested/file.txt")
         == "C:\\Work\\nested\\file.txt"
     );
+    std::string resolved_windows_posix_path;
+    TEST_ASSERT(resolve_absolute_input_path_for_policy(
+        windows_policy,
+        "/usr/bin/bash",
+        "C:/msys64",
+        &resolved_windows_posix_path
+    ));
+    TEST_ASSERT(resolved_windows_posix_path == "C:\\msys64\\usr\\bin\\bash");
+    TEST_ASSERT(resolve_absolute_input_path_for_policy(
+        windows_policy,
+        "/",
+        "C:/msys64",
+        &resolved_windows_posix_path
+    ));
+    TEST_ASSERT(resolved_windows_posix_path == "C:\\msys64");
+    TEST_ASSERT(resolve_absolute_input_path_for_policy(
+        windows_policy,
+        "/c/Work/file.txt",
+        "D:/ignored",
+        &resolved_windows_posix_path
+    ));
+    TEST_ASSERT(resolved_windows_posix_path == "C:\\Work\\file.txt");
+    TEST_ASSERT(resolve_absolute_input_path_for_policy(
+        windows_policy,
+        "//server/share/file.txt",
+        "C:/msys64",
+        &resolved_windows_posix_path
+    ));
+    TEST_ASSERT(resolved_windows_posix_path == "\\\\server\\share\\file.txt");
 
 #ifdef _WIN32
     TEST_ASSERT(host_path_equal("/c/WORK/File.txt", "c:\\work\\file.txt"));

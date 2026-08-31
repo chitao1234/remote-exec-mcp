@@ -19,6 +19,8 @@
 #include "core/shell_policy_internal.h"
 #include "platform/path_utils.h"
 #include "platform/platform.h"
+#include "policy/path_compare.h"
+#include "policy/path_policy.h"
 #ifndef _WIN32
 #include "platform/posix_fd.h"
 #include "platform/posix_process.h"
@@ -52,6 +54,22 @@ std::string windows_default_shell_for_version(DWORD version) {
 
 std::string windows_default_shell_fallback() {
     return windows_default_shell_for_version(GetVersion());
+}
+
+std::string resolve_windows_shell_path(
+    const std::string& shell,
+    const std::string& windows_posix_root
+) {
+    std::string resolved;
+    if (resolve_absolute_input_path_for_policy(
+            windows_path_policy(),
+            shell,
+            windows_posix_root,
+            &resolved
+        )) {
+        return resolved;
+    }
+    return shell;
 }
 #endif
 
@@ -158,7 +176,10 @@ bool shell_supported(const std::string& shell) {
 #endif
 }
 
-std::string resolve_default_shell(const std::string& configured_default_shell) {
+std::string resolve_default_shell(
+    const std::string& configured_default_shell,
+    const std::string& windows_posix_root
+) {
 #ifdef _WIN32
     if (!configured_default_shell.empty()) {
         if (!shell_supported(configured_default_shell)) {
@@ -168,7 +189,7 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
                 "Git Bash (bash.exe, bash, sh.exe, sh, git-bash.exe, git-bash)"
             );
         }
-        return configured_default_shell;
+        return resolve_windows_shell_path(configured_default_shell, windows_posix_root);
     }
     const char* comspec = std::getenv("COMSPEC");
     if (comspec != nullptr && comspec[0] != '\0' && shell_supported(comspec)) {
@@ -176,6 +197,7 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
     }
     return windows_default_shell_fallback();
 #else
+    (void)windows_posix_root;
     if (!configured_default_shell.empty()) {
         const std::string resolved = validate_unix_shell_candidate(configured_default_shell);
         if (resolved.empty()) {
@@ -234,12 +256,38 @@ std::string windows_default_shell_for_version_for_test(unsigned long version) {
 }
 #endif
 
-std::string selected_shell(const std::string& shell_override, const std::string& default_shell) {
+std::string selected_shell(
+    const std::string& shell_override,
+    const std::string& default_shell,
+    const std::string& windows_posix_root
+) {
     const std::string shell = shell_override.empty() ? default_shell : shell_override;
     if (!shell_supported(shell)) {
         throw std::runtime_error("unsupported shell `" + shell + "`");
     }
+#ifdef _WIN32
+    return resolve_windows_shell_path(shell, windows_posix_root);
+#else
+    (void)windows_posix_root;
     return shell;
+#endif
+}
+
+bool should_set_chere_invoking(const std::string& shell, const std::string& windows_posix_root) {
+#ifdef __CYGWIN__
+    (void)shell;
+    (void)windows_posix_root;
+    return true;
+#elif defined(_WIN32)
+    if (platform_detail::is_windows_bash_family(platform_detail::shell_basename_lower(shell))) {
+        return true;
+    }
+    return !windows_posix_root.empty() && host_path_is_within(shell, windows_posix_root);
+#else
+    (void)shell;
+    (void)windows_posix_root;
+    return false;
+#endif
 }
 
 std::vector<std::string> shell_argv(

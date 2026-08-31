@@ -134,12 +134,14 @@ std::shared_ptr<LiveSession> launch_live_session(
     const std::string& command,
     const std::string& workdir,
     const std::string& shell,
+    const std::string& windows_posix_root,
     bool login,
     bool tty
 ) {
     std::shared_ptr<LiveSession> session(new LiveSession());
     session->id = make_exec_session_id();
-    session->process = ProcessSession::launch(command, workdir, shell, login, tty);
+    session->process =
+        ProcessSession::launch(command, workdir, shell, windows_posix_root, login, tty);
     session->started_at_ms = platform::monotonic_ms();
 #ifdef _WIN32
     session->stdin_open = true;
@@ -510,6 +512,7 @@ ExecSessionResult SessionStore::start_command(
         request.cmd,
         request.workdir,
         request.shell,
+        request.windows_posix_root,
         request.login_requested,
         request.tty_requested
     );

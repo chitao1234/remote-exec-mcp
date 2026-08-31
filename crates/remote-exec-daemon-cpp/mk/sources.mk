@@ -236,7 +236,8 @@ HOST_CONFIG_SRCS = \
 	$(SOURCE_PREFIX)tests/test_config.cpp \
 	$(CONFIG_SRCS) \
 	$(PATH_UTILS_SRCS) \
-	$(TEXT_UTILS_SRCS)
+	$(TEXT_UTILS_SRCS) \
+	$(SOURCE_PREFIX)src/policy/path_policy.cpp
 
 WINDOWS_CONFIG_TEST_SRCS = \
 	$(HOST_CONFIG_SRCS) \

@@ -26,12 +26,16 @@ TransferPathAuthorizer make_transfer_write_authorizer(const PathResolutionContex
 
 } // namespace
 
-std::string resolve_absolute_transfer_path(const std::string& path) {
+std::string resolve_absolute_transfer_path(
+    const std::string& path,
+    const std::string& windows_posix_root
+) {
     const PathPolicy policy = host_path_policy();
-    if (!is_absolute_for_policy(policy, path)) {
+    std::string resolved;
+    if (!resolve_absolute_input_path_for_policy(policy, path, windows_posix_root, &resolved)) {
         throw TransferFailure(TransferRpcCode::PathNotAbsolute, "transfer path is not absolute");
     }
-    return normalize_for_system(policy, path);
+    return resolved;
 }
 
 std::string resolve_authorized_transfer_path(
@@ -39,7 +43,7 @@ std::string resolve_authorized_transfer_path(
     const std::string& path,
     SandboxAccess access
 ) {
-    const std::string resolved = resolve_absolute_transfer_path(path);
+    const std::string resolved = resolve_absolute_transfer_path(path, context.windows_posix_root);
     authorize_sandbox_path(context, access, resolved);
     return resolved;
 }

@@ -248,6 +248,24 @@ int main() {
     TEST_ASSERT(absolute_add_result.output.find("A ") != std::string::npos);
     TEST_ASSERT(read_text(absolute_path) == "absolute file\n");
 
+#ifdef _WIN32
+    const fs::path windows_posix_root = root / "windows-posix-root";
+    const fs::path windows_posix_workdir = windows_posix_root / "work";
+    fs::create_directories(windows_posix_workdir);
+    const std::string windows_posix_patch = "*** Begin Patch\n"
+                                            "*** Add File: /work/rooted.txt\n"
+                                            "+rooted file\n"
+                                            "*** End Patch\n";
+    PatchApplyResult windows_posix_result = apply_patch(
+        windows_posix_workdir.string(),
+        windows_posix_patch,
+        PatchPathAuthorizer(),
+        windows_posix_root.string()
+    );
+    TEST_ASSERT(windows_posix_result.output.find("A ") != std::string::npos);
+    TEST_ASSERT(read_text(windows_posix_workdir / "rooted.txt") == "rooted file\n");
+#endif
+
     const std::string absolute_update_patch = "*** Begin Patch\n"
                                               "*** Update File: "
                                               + absolute_path.string()

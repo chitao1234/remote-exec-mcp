@@ -65,8 +65,19 @@ bool is_absolute_path(const std::string& path);
 std::string normalize_path_separators(std::string path);
 
 bool shell_supported(const std::string& shell);
-std::string resolve_default_shell(const std::string& configured_default_shell);
-std::string selected_shell(const std::string& shell_override, const std::string& default_shell);
+std::string resolve_default_shell(
+    const std::string& configured_default_shell,
+    const std::string& windows_posix_root = std::string()
+);
+std::string selected_shell(
+    const std::string& shell_override,
+    const std::string& default_shell,
+    const std::string& windows_posix_root = std::string()
+);
+bool should_set_chere_invoking(
+    const std::string& shell,
+    const std::string& windows_posix_root = std::string()
+);
 std::vector<std::string> shell_argv(
     const std::string& shell,
     bool login,
