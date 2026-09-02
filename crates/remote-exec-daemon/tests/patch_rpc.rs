@@ -123,6 +123,61 @@ async fn add_file_overwrites_existing_content() {
     assert_eq!(tokio::fs::read_to_string(path).await.unwrap(), "new\n");
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn patch_writes_follow_symlinks_and_preserve_the_link() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+    let target = fixture.workdir.join("target.txt");
+    let link = fixture.workdir.join("link.txt");
+    tokio::fs::write(&target, "old\n").await.unwrap();
+    symlink("target.txt", &link).unwrap();
+
+    let add_response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: "*** Begin Patch\n*** Add File: link.txt\n+new\n*** End Patch\n".to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(add_response.updated_paths, vec!["A link.txt"]);
+    assert_eq!(tokio::fs::read_to_string(&target).await.unwrap(), "new\n");
+    assert_eq!(
+        tokio::fs::read_link(&link).await.unwrap(),
+        std::path::PathBuf::from("target.txt")
+    );
+
+    tokio::fs::write(&target, "before\n").await.unwrap();
+    let update_response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: link.txt\n",
+                    "@@\n",
+                    "-before\n",
+                    "+after\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(update_response.updated_paths, vec!["M link.txt"]);
+    assert_eq!(tokio::fs::read_to_string(&target).await.unwrap(), "after\n");
+    assert_eq!(
+        tokio::fs::read_link(&link).await.unwrap(),
+        std::path::PathBuf::from("target.txt")
+    );
+}
+
 #[tokio::test]
 async fn malformed_patch_does_not_apply_earlier_actions() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;

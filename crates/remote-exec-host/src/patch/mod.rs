@@ -3,8 +3,8 @@ mod matcher;
 pub mod parser;
 mod verify;
 
+use std::path::Path;
 use std::sync::Arc;
-use std::{io::Write as _, path::Path};
 
 use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse, RpcErrorCode};
 
@@ -184,7 +184,7 @@ async fn add_file(
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    atomic_replace(path.to_path_buf(), content).await?;
+    tokio::fs::write(path, content).await?;
     Ok(format!("A {summary_path}"))
 }
 
@@ -243,7 +243,7 @@ async fn update_file(
     let summary_path = verify::display_relative(cwd, &destination_path);
 
     if !remove_source {
-        atomic_replace(destination_path, content).await?;
+        tokio::fs::write(destination_path, content).await?;
         return Ok(format!("M {summary_path}"));
     }
 
@@ -258,33 +258,6 @@ async fn update_file(
     tokio::fs::write(&destination_path, content).await?;
     tokio::fs::remove_file(&source_path).await?;
     Ok(format!("M {summary_path}"))
-}
-
-async fn atomic_replace(path: std::path::PathBuf, content: Vec<u8>) -> Result<(), PatchError> {
-    let parent = path.parent().map(Path::to_path_buf).ok_or_else(|| {
-        PatchError::failed(format!("`{}` has no parent directory", path.display()))
-    })?;
-
-    tokio::task::spawn_blocking(move || -> Result<(), std::io::Error> {
-        let existing_permissions = match std::fs::metadata(&path) {
-            Ok(metadata) => Some(metadata.permissions()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error),
-        };
-        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-        temporary.write_all(&content)?;
-        if let Some(permissions) = existing_permissions {
-            temporary.as_file().set_permissions(permissions)?;
-        }
-        temporary
-            .persist(path)
-            .map(|_| ())
-            .map_err(|error| error.error)
-    })
-    .await
-    .map_err(|error| PatchError::internal(format!("atomic patch write task failed: {error}")))??;
-
-    Ok(())
 }
 
 fn detect_line_ending(text: &str) -> &'static str {

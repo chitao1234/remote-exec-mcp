@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <cerrno>
 #include <cstdint>
@@ -16,14 +15,10 @@
 
 #include "platform/win32_error.h"
 #endif
-#ifndef _WIN32
-#include <unistd.h>
-#endif
 
 #include "core/stdio_retry.h"
 #include "patch/patch_engine.h"
 #include "platform/path_utils.h"
-#include "platform/platform.h"
 #include "platform/scoped_file.h"
 #include "policy/filesystem_sandbox.h"
 #include "policy/path_policy.h"
@@ -129,20 +124,6 @@ std::string action_description(const PlannedAction& action) {
 template <typename Action>
 std::string action_failure_message(const Action& action, const std::string& error_what) {
     return "failed to " + action_description(action) + ": " + error_what;
-}
-
-std::string unique_atomic_write_temp_path(const std::string& path) {
-    static std::atomic<unsigned long> next_suffix(1UL);
-
-    std::ostringstream out;
-    out << path << ".tmp."
-#ifdef _WIN32
-        << static_cast<unsigned long>(GetCurrentProcessId())
-#else
-        << static_cast<long>(getpid())
-#endif
-        << "." << platform::monotonic_ms() << "." << next_suffix.fetch_add(1UL);
-    return out.str();
 }
 
 NormalizedPathPrefix normalized_path_prefix(const std::string& raw, NormalizedPathKind kind) {
@@ -299,36 +280,18 @@ std::string read_text_file(const std::string& path) {
     return text;
 }
 
-void write_text_atomic(const std::string& path, const std::string& content) {
+void write_text_file(const std::string& path, const std::string& content) {
     path_utils::create_parent_directories(path);
-    const std::string temp_path = unique_atomic_write_temp_path(path);
-    path_utils::PathMetadata existing;
-    const bool preserve_mode = path_utils::path_metadata(path, &existing);
-
-    ScopedFile output(path_utils::open_file(temp_path, "wb"));
+    ScopedFile output(path_utils::open_file(path, "wb"));
     if (!output.valid()) {
-        throw std::runtime_error("unable to write " + temp_path + ": " + system_error_detail());
+        throw std::runtime_error("unable to write " + path + ": " + system_error_detail());
     }
     if (!content.empty()
         && !stdio_retry::fwrite_all(output.get(), content.data(), content.size())) {
-        throw std::runtime_error("unable to write " + temp_path + ": " + system_error_detail());
+        throw std::runtime_error("unable to write " + path + ": " + system_error_detail());
     }
     if (output.close() != 0) {
-        throw std::runtime_error("unable to write " + temp_path + ": " + system_error_detail());
-    }
-    if (preserve_mode && existing.has_mode_bits
-        && !path_utils::set_path_mode(temp_path, existing.mode_bits)) {
-        (void)path_utils::remove_path(temp_path);
-        throw std::runtime_error(
-            "unable to preserve mode for " + temp_path + ": " + system_error_detail()
-        );
-    }
-
-    if (!path_utils::rename_path(temp_path, path)) {
-        (void)path_utils::remove_path(temp_path);
-        throw std::runtime_error(
-            "unable to rename " + temp_path + " to " + path + ": " + system_error_detail()
-        );
+        throw std::runtime_error("unable to write " + path + ": " + system_error_detail());
     }
 }
 
@@ -1050,7 +1013,7 @@ std::vector<std::string> execute_planned_actions(const std::vector<PlannedAction
         const PlannedAction& action = actions[i];
         try {
             if (action.kind == PatchKind::Add) {
-                write_text_atomic(action.source_path, action.content);
+                write_text_file(action.source_path, action.content);
                 summary.push_back("A " + action.summary_path);
                 continue;
             }
@@ -1060,7 +1023,7 @@ std::vector<std::string> execute_planned_actions(const std::vector<PlannedAction
                 continue;
             }
 
-            write_text_atomic(action.destination_path, action.content);
+            write_text_file(action.destination_path, action.content);
             if (action.remove_source && file_exists(action.source_path)) {
                 remove_file_required(action.source_path);
             }

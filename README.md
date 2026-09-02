@@ -363,9 +363,10 @@ port forwards require a long-running broker, so prefer `--broker-url` for
 - executes valid patch actions sequentially and is non-transactional across
   actions, so a later filesystem, sandbox, decode, or hunk-match failure can
   leave earlier actions applied
-- atomically replaces the target for `*** Add File` and normal in-place
-  `*** Update File` actions; all update hunks apply or its original file remains
-  unchanged
+- writes directly to the target for `*** Add File` and normal in-place
+  `*** Update File` actions, following symlinks; all update hunks are resolved
+  before writing, but an underlying write failure can leave a partially written
+  file
 - can use experimental target encoding autodetection when enabled in config
 
 Standalone `apply_patch` executables print the action and underlying filesystem

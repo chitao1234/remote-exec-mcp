@@ -1,11 +1,6 @@
 #include "test_assert.h"
-#include <atomic>
-#include <iostream>
-#include <sstream>
 #include <stdexcept>
 #include <string>
-#include <thread>
-#include <vector>
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -34,78 +29,6 @@ static void expect_patch_failure(const fs::path& root, const std::string& patch)
     TEST_ASSERT(threw);
 }
 
-static std::string repeated_line_block(const std::string& prefix, int count) {
-    std::ostringstream out;
-    for (int i = 0; i < count; ++i) {
-        out << prefix << "-" << i << "\n";
-    }
-    return out.str();
-}
-
-static std::string add_file_patch(const std::string& relative_path, const std::string& content) {
-    std::ostringstream out;
-    out << "*** Begin Patch\n"
-        << "*** Add File: " << relative_path << "\n";
-    std::istringstream input(content);
-    std::string line;
-    while (std::getline(input, line)) {
-        out << "+" << line << "\n";
-    }
-    out << "*** End Patch\n";
-    return out.str();
-}
-
-static void assert_concurrent_patch_writes_share_no_fixed_temp_path(const fs::path& root) {
-    const std::string relative_path = "concurrent.txt";
-    const std::string alpha_content = repeated_line_block("alpha", 4096);
-    const std::string beta_content = repeated_line_block("beta", 4096);
-    const std::string alpha_patch = add_file_patch(relative_path, alpha_content);
-    const std::string beta_patch = add_file_patch(relative_path, beta_content);
-
-    for (int round = 0; round < 16; ++round) {
-        const fs::path target = root / "concurrent.txt";
-        const fs::path temp = root / "concurrent.txt.tmp";
-        fs::remove_all(target);
-        fs::remove_all(temp);
-
-        std::atomic<int> ready_count(0);
-        std::atomic<bool> release(false);
-        std::atomic<int> failure_count(0);
-        std::vector<std::thread> workers;
-
-        for (int i = 0; i < 4; ++i) {
-            const std::string& patch = (i % 2 == 0) ? alpha_patch : beta_patch;
-            workers.push_back(std::thread([&, patch]() {
-                ready_count.fetch_add(1);
-                while (!release.load()) {
-                    std::this_thread::yield();
-                }
-                try {
-                    (void)apply_patch(root.string(), patch);
-                } catch (const std::runtime_error& error) {
-                    std::cerr << "concurrent patch failure: " << error.what() << "\n";
-                    failure_count.fetch_add(1);
-                }
-            }));
-        }
-
-        while (ready_count.load() != 4) {
-            std::this_thread::yield();
-        }
-        release.store(true);
-
-        for (std::size_t i = 0; i < workers.size(); ++i) {
-            workers[i].join();
-        }
-
-        TEST_ASSERT(failure_count.load() == 0);
-        TEST_ASSERT(fs::exists(target));
-        const std::string final_text = read_text(target);
-        TEST_ASSERT(final_text == alpha_content || final_text == beta_content);
-        TEST_ASSERT(!fs::exists(temp));
-    }
-}
-
 #ifndef _WIN32
 static void assert_patch_update_preserves_existing_mode(const fs::path& root) {
     const fs::path script = root / "script.sh";
@@ -125,6 +48,36 @@ static void assert_patch_update_preserves_existing_mode(const fs::path& root) {
     struct stat st;
     TEST_ASSERT(stat(script.string().c_str(), &st) == 0);
     TEST_ASSERT((st.st_mode & 0777) == 0755);
+}
+
+static void assert_patch_writes_follow_symlinks(const fs::path& root) {
+    const fs::path target = root / "symlink-target.txt";
+    const fs::path link = root / "symlink.txt";
+    write_text(target, "old\n");
+    fs::create_symlink(fs::path("symlink-target.txt"), link);
+
+    const std::string add_patch = "*** Begin Patch\n"
+                                  "*** Add File: symlink.txt\n"
+                                  "+new\n"
+                                  "*** End Patch\n";
+    PatchApplyResult add_result = apply_patch(root.string(), add_patch);
+    TEST_ASSERT(add_result.updated_paths.size() == 1);
+    TEST_ASSERT(add_result.updated_paths[0] == "A symlink.txt");
+    TEST_ASSERT(read_text(target) == "new\n");
+    TEST_ASSERT(fs::read_symlink(link) == fs::path("symlink-target.txt"));
+
+    write_text(target, "before\n");
+    const std::string update_patch = "*** Begin Patch\n"
+                                     "*** Update File: symlink.txt\n"
+                                     "@@\n"
+                                     "-before\n"
+                                     "+after\n"
+                                     "*** End Patch\n";
+    PatchApplyResult update_result = apply_patch(root.string(), update_patch);
+    TEST_ASSERT(update_result.updated_paths.size() == 1);
+    TEST_ASSERT(update_result.updated_paths[0] == "M symlink.txt");
+    TEST_ASSERT(read_text(target) == "after\n");
+    TEST_ASSERT(fs::read_symlink(link) == fs::path("symlink-target.txt"));
 }
 #endif
 
@@ -153,6 +106,7 @@ int main() {
     TEST_ASSERT(read_text(root / "hello.txt") == "hello xp\n");
 #ifndef _WIN32
     assert_patch_update_preserves_existing_mode(root);
+    assert_patch_writes_follow_symlinks(root);
 #endif
 
     write_text(root / "crlf.txt", "hello\r\nworld\r\n");
@@ -523,8 +477,6 @@ int main() {
 
     expect_patch_failure(root, blocked_add_patch);
     TEST_ASSERT(!fs::exists(root / "blocked.txt.tmp"));
-
-    assert_concurrent_patch_writes_share_no_fixed_temp_path(root);
 
     return 0;
 }
