@@ -350,6 +350,11 @@ WINDOWS_TEST_BUNDLE_MANIFEST := $(WINDOWS_TEST_BUNDLE_DIR)/tests.txt
 DEP_FILES += $(WINDOWS_VARIANT_OBJS:.o=.d)
 DEP_FILES += $(WINDOWS_VARIANT_APPLY_PATCH_OBJS:.o=.d)
 
+define run_windows_variant_tests
+$(foreach test,$(WINDOWS_VARIANT_TEST_CASES),$(WINDOWS_TEST_ENV) $(call windows_test_case_bin,$(test))
+)
+endef
+
 all-windows: $(WINDOWS_VARIANT_TARGET) $(WINDOWS_VARIANT_APPLY_PATCH_TARGET)
 
 apply-patch-windows: $(WINDOWS_VARIANT_APPLY_PATCH_TARGET)
@@ -410,10 +415,11 @@ test-bundle-windows: all-windows $(WINDOWS_VARIANT_TEST_BINS) $(WINDOWS_TEST_BUN
 	} > $(WINDOWS_TEST_BUNDLE_MANIFEST)
 	@echo "C++ Windows test bundle: $(WINDOWS_TEST_BUNDLE_DIR)"
 
-test-windows: test-bundle-windows
-	$(WINDOWS_TEST_ENV) "$(WINDOWS_TEST_BUNDLE_RUNNER)"
+test-windows: $(WINDOWS_VARIANT_TEST_BINS)
+	$(run_windows_variant_tests)
 
-check-windows: all-windows test-windows
+check-windows: all-windows test-windows test-bundle-windows
+	$(WINDOWS_TEST_ENV) "$(WINDOWS_TEST_BUNDLE_RUNNER)" --list >/dev/null
 
 windows_variant_make_args = \
 	WINDOWS_TOOLCHAIN=$1 \
