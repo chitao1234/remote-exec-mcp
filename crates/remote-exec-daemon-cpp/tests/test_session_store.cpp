@@ -2212,16 +2212,19 @@ static void assert_stdin_and_tty_behavior(
     assert_non_tty_stdin_closed_rejected(store, root, shell, yield_time);
 #else
     const bool wine = test_exec_pty::is_wine_runtime();
+    // Keep the Wine fallback safely beyond the poll boundary, then reap it with this scoped store.
+    SessionStore wine_store;
+    SessionStore& stdin_store = wine ? wine_store : store;
     const std::string non_tty_command =
-        wine ? "echo ready&" + test_exec_pty::windows_ping_sleep_command(5UL)
+        wine ? "echo ready&" + test_exec_pty::windows_ping_sleep_command(30UL)
              : windows_stdin_echo_helper_command("got");
     const Json xp_running =
-        start_command_session(store, root, non_tty_command, shell, false, 250UL, yield_time);
+        start_command_session(stdin_store, root, non_tty_command, shell, false, 250UL, yield_time);
     TEST_ASSERT(xp_running.at("running").get<bool>());
     const std::string xp_initial = normalize_output(xp_running.at("output").get<std::string>());
 
     const std::string xp_session_id = xp_running.at("daemon_session_id").get<std::string>();
-    Json xp_completed = poll_session(store, xp_session_id, yield_time, "hello\r\n", 5000UL);
+    Json xp_completed = poll_session(stdin_store, xp_session_id, yield_time, "hello\r\n", 5000UL);
     std::string xp_output =
         xp_initial + normalize_output(xp_completed.at("output").get<std::string>());
     TEST_ASSERT(xp_output.find("ready\n") != std::string::npos);
@@ -2229,7 +2232,7 @@ static void assert_stdin_and_tty_behavior(
         TEST_ASSERT(xp_completed.at("running").get<bool>());
     } else {
         xp_completed = poll_session_until_done(
-            store,
+            stdin_store,
             xp_session_id,
             xp_completed,
             yield_time,
