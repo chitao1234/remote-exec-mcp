@@ -123,6 +123,77 @@ Windows/TLS variant. MSVC binaries are under `build/msvc-native`,
 `build/msvc-xp`, or `build/msvc-xp-x64`. Each daemon build also produces the
 standalone `apply_patch` CLI for that variant.
 
+## Separate build and test machines
+
+The build targets can stage a relocatable test-bundle directory without
+running target binaries. This lets a compiler machine produce the daemon,
+`apply_patch`, the test executables, runtime companions such as
+`winpty-agent.exe`, and all test fixtures, then lets a different compatible
+machine run that exact payload without a source checkout, Make/NMAKE, or a C++
+compiler.
+
+Create a bundle on the build machine:
+
+```sh
+# Native POSIX, with GNU make or BSD make.
+make test-bundle-posix
+bmake test-bundle-posix
+
+# Cross-compiled GNU Windows variants; no Wine execution occurs here.
+make test-bundle-windows-xp TLS=off
+make test-bundle-windows-x64 TLS=off
+```
+
+For MSVC, use the equivalent target from the matching developer prompt:
+
+```bat
+nmake /f NMakefile test-bundle-msvc-native TLS=off
+nmake /f NMakefile test-bundle-msvc-xp TLS=off
+nmake /f NMakefile test-bundle-msvc-xp-x64 TLS=off
+```
+
+Each command prints its bundle directory under `build/test-bundles/`. Copy that
+whole directory to the execution machine, preserving its layout and executable
+permissions. A tar archive is a convenient way to preserve POSIX permissions.
+On the execution machine, run all tests, list them, or select individual tests:
+
+```sh
+./run-tests
+./run-tests --list
+./run-tests transfer server-streaming
+```
+
+```bat
+run-tests.exe
+run-tests.exe --list
+run-tests.exe transfer server-streaming
+```
+
+Set `TEST_BUNDLE_DIR` to stage directly into an artifact-collection directory:
+
+```sh
+make test-bundle-windows-xp TLS=off TEST_BUNDLE_DIR=/staging/cpp-xp-tests
+```
+
+```bat
+nmake /f NMakefile test-bundle-msvc-xp TLS=off TEST_BUNDLE_DIR=C:\staging\cpp-xp-tests
+```
+
+Use a fresh or variant-specific destination when overriding the directory; a
+custom destination is not removed by `make clean`.
+
+The runner changes to its own directory before reading `tests.txt`, so the
+bundle can be unpacked anywhere and launched by path from another working
+directory. POSIX bundles use `sh` for the `apply-patch-cli` test. The execution
+machine must match the built OS/architecture compatibility target and provide
+any dynamically linked libraries selected by custom compiler or TLS flags.
+The repository's prepared OpenSSL paths are static by default.
+
+The existing `check-posix`, `check-windows-*`, and `check-msvc-*` targets remain
+the local build-and-test entry points and also validate the corresponding
+bundle workflow. Existing focused test targets remain available for
+source-tree development.
+
 ## TLS builds
 
 `TLS=auto` is the default:
@@ -190,7 +261,9 @@ bmake check-posix
 ```
 
 On non-Windows hosts, GNU Windows tests use `WINDOWS_TEST_RUNNER` (normally
-Wine). Run the MSVC checks from the appropriate Visual Studio developer prompt.
+Wine). The `test-bundle-windows-*` targets only build and stage the payload;
+they do not invoke Wine. Run the MSVC checks from the appropriate Visual Studio
+developer prompt.
 
 For the complete repository quality gate and cross-crate integration tests, see
 the root [README](../../README.md). The Makefiles are the source of truth for

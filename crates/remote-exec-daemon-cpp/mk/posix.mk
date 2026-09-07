@@ -5,6 +5,7 @@ STRESS_JOBS ?= 8
 POSIX_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp
 POSIX_APPLY_PATCH_TARGET := $(BUILD_DIR)/apply_patch
 POSIX_APPLY_PATCH_TEST_SCRIPT := $(MAKEFILE_DIR)tests/test_apply_patch_cli.sh
+POSIX_TEST_BUNDLE_RUNNER_SRC := $(MAKEFILE_DIR)tests/test_bundle_runner.cpp
 POSIX_CONFIG_HEADER := $(BUILD_DIR)/generated/remote_exec_cpp_config.h
 POSIX_CONFIG_SCRIPT := $(MAKEFILE_DIR)scripts/write_posix_config_header.sh
 POSIX_FEATURE_CPPFLAGS_SCRIPT := $(MAKEFILE_DIR)scripts/print_posix_feature_cppflags.sh
@@ -46,7 +47,11 @@ include $(MAKEFILE_DIR)mk/host-tests.mk
 
 $(foreach test,$(HOST_POSIX_TESTS),$(eval HOST_$(test) := $(BUILD_DIR)/$(HOST_$(test)_BIN)))
 
+HOST_TEST_BINS := $(foreach test,$(HOST_POSIX_TESTS),$(HOST_$(test)))
 HOST_TEST_PHONY_TARGETS := $(foreach test,$(HOST_POSIX_TESTS),$(HOST_$(test)_TEST_TARGET))
+POSIX_TEST_BUNDLE_DIR ?= $(if $(TEST_BUNDLE_DIR),$(TEST_BUNDLE_DIR),$(BUILD_DIR)/test-bundles/posix-$(POSIX_TLS))
+POSIX_TEST_BUNDLE_RUNNER := $(POSIX_TEST_BUNDLE_DIR)/run-tests
+POSIX_TEST_BUNDLE_MANIFEST := $(POSIX_TEST_BUNDLE_DIR)/tests.txt
 
 POSIX_OBJS := $(sort $(call cpp_objs,$(HOST_PROD_OBJ_DIR),$(POSIX_SRCS)))
 POSIX_APPLY_PATCH_OBJS := $(sort $(call cpp_objs,$(HOST_PROD_OBJ_DIR),$(APPLY_PATCH_CLI_SRCS)))
@@ -79,6 +84,10 @@ $(POSIX_APPLY_PATCH_TARGET): $(POSIX_APPLY_PATCH_OBJS)
 	mkdir -p $(dir $@)
 	$(HOST_CXX) $(HOST_PROD_CXXFLAGS) $(HOST_PROD_LDFLAGS) -o $@ $^ $(HOST_PROD_LDLIBS)
 
+$(POSIX_TEST_BUNDLE_RUNNER): $(POSIX_TEST_BUNDLE_RUNNER_SRC)
+	mkdir -p $(dir $@)
+	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) $(HOST_TEST_LDFLAGS) -o $@ $<
+
 $(POSIX_CONFIG_HEADER): $(POSIX_CONFIG_SCRIPT) force-posix-config
 	mkdir -p $(dir $@)
 	HOST_CXX="$(HOST_CXX)" \
@@ -100,7 +109,21 @@ $(foreach test,$(HOST_POSIX_TESTS),$(call register_host_test,$(test)))
 
 test-server-streaming: $(HOST_SERVER_STREAMING_TEST_TARGET)
 
-check-posix: $(HOST_TEST_PHONY_TARGETS) test-host-apply-patch-cli all-posix
+test-bundle-posix: all-posix $(HOST_TEST_BINS) $(POSIX_TEST_BUNDLE_RUNNER)
+	mkdir -p $(POSIX_TEST_BUNDLE_DIR)/config $(POSIX_TEST_BUNDLE_DIR)/tests
+	cp $(POSIX_TARGET) $(POSIX_APPLY_PATCH_TARGET) $(HOST_TEST_BINS) $(POSIX_TEST_BUNDLE_DIR)/
+	cp $(MAKEFILE_DIR)config/daemon-cpp.example.ini $(POSIX_TEST_BUNDLE_DIR)/config/
+	cp -R $(MAKEFILE_DIR)tests/fixtures $(POSIX_TEST_BUNDLE_DIR)/tests/
+	cp -R $(MAKEFILE_DIR)../../tests/contracts $(POSIX_TEST_BUNDLE_DIR)/tests/
+	cp $(POSIX_APPLY_PATCH_TEST_SCRIPT) $(POSIX_TEST_BUNDLE_DIR)/tests/
+	{ \
+		$(foreach test,$(HOST_POSIX_TESTS),printf '%s %s\n' '$(HOST_$(test)_NAME)' './$(HOST_$(test)_BIN)';) \
+		printf '%s %s\n' 'apply-patch-cli' 'sh tests/test_apply_patch_cli.sh ./apply_patch'; \
+	} > $(POSIX_TEST_BUNDLE_MANIFEST)
+	@echo "C++ POSIX test bundle: $(POSIX_TEST_BUNDLE_DIR)"
+
+check-posix: $(HOST_TEST_PHONY_TARGETS) test-host-apply-patch-cli test-bundle-posix
+	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(POSIX_TEST_BUNDLE_RUNNER) --list >/dev/null
 
 test-host-apply-patch-cli: $(POSIX_APPLY_PATCH_TARGET) $(POSIX_APPLY_PATCH_TEST_SCRIPT)
 	sh $(POSIX_APPLY_PATCH_TEST_SCRIPT) $(POSIX_APPLY_PATCH_TARGET)
@@ -115,4 +138,4 @@ stress-posix:
 		i=$$((i + 1)); \
 	done
 
-.PHONY: all-posix apply-patch-posix $(HOST_TEST_PHONY_TARGETS) test-host-apply-patch-cli test-server-streaming check-posix force-posix-config stress-posix
+.PHONY: all-posix apply-patch-posix $(HOST_TEST_PHONY_TARGETS) test-host-apply-patch-cli test-server-streaming test-bundle-posix check-posix force-posix-config stress-posix

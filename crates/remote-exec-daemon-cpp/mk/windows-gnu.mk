@@ -343,13 +343,12 @@ $(foreach test,$(WINDOWS_VARIANT_TEST_CASES),$(eval $(call define_windows_test_c
 
 WINDOWS_VARIANT_TEST_BINS := $(foreach test,$(WINDOWS_VARIANT_TEST_CASES),$(call windows_test_case_bin,$(test)))
 WINDOWS_VARIANT_TEST_PHONIES := $(foreach test,$(WINDOWS_VARIANT_TEST_CASES),$(call windows_test_case_phony,$(test)))
+WINDOWS_TEST_BUNDLE_RUNNER_SRC := $(MAKEFILE_DIR)tests/test_bundle_runner.cpp
+WINDOWS_TEST_BUNDLE_DIR ?= $(if $(TEST_BUNDLE_DIR),$(TEST_BUNDLE_DIR),$(BUILD_DIR)/test-bundles/windows-$(WINDOWS_VARIANT_BINARY_TAG))
+WINDOWS_TEST_BUNDLE_RUNNER := $(WINDOWS_TEST_BUNDLE_DIR)/run-tests.exe
+WINDOWS_TEST_BUNDLE_MANIFEST := $(WINDOWS_TEST_BUNDLE_DIR)/tests.txt
 DEP_FILES += $(WINDOWS_VARIANT_OBJS:.o=.d)
 DEP_FILES += $(WINDOWS_VARIANT_APPLY_PATCH_OBJS:.o=.d)
-
-define run_windows_variant_tests
-$(foreach test,$(WINDOWS_VARIANT_TEST_CASES),$(WINDOWS_TEST_ENV) $(call windows_test_case_bin,$(test))
-)
-endef
 
 all-windows: $(WINDOWS_VARIANT_TARGET) $(WINDOWS_VARIANT_APPLY_PATCH_TARGET)
 
@@ -362,6 +361,10 @@ $(WINDOWS_VARIANT_TARGET): $(WINDOWS_VARIANT_OBJS) $(WINDOWS_VARIANT_BUILD_ARTIF
 $(WINDOWS_VARIANT_APPLY_PATCH_TARGET): $(WINDOWS_VARIANT_APPLY_PATCH_OBJS)
 	mkdir -p $(dir $@)
 	$(WINDOWS_CXX) $(WINDOWS_PROD_CXXFLAGS) $(WINDOWS_LDFLAGS) -o $@ $(WINDOWS_VARIANT_APPLY_PATCH_OBJS) $(WINDOWS_VARIANT_APPLY_PATCH_LDLIBS)
+
+$(WINDOWS_TEST_BUNDLE_RUNNER): $(WINDOWS_TEST_BUNDLE_RUNNER_SRC)
+	mkdir -p $(dir $@)
+	$(WINDOWS_CXX) $(WINDOWS_VARIANT_TEST_CPPFLAGS) $(WINDOWS_TEST_CXXFLAGS) $(WINDOWS_LDFLAGS) -o $@ $<
 
 $(WINPTY_VERSION_HEADER): $(WINPTY_VENDOR_DIR)/VERSION.txt
 	mkdir -p $(dir $@)
@@ -393,8 +396,22 @@ $(WINDOWS_VARIANT_TEST_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
 	mkdir -p $(dir $@)
 	$(WINDOWS_CXX) $(WINDOWS_VARIANT_TEST_CPPFLAGS) $(WINDOWS_TEST_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 
-test-windows: $(WINDOWS_VARIANT_TEST_BINS)
-	$(run_windows_variant_tests)
+test-bundle-windows: all-windows $(WINDOWS_VARIANT_TEST_BINS) $(WINDOWS_TEST_BUNDLE_RUNNER)
+	mkdir -p $(WINDOWS_TEST_BUNDLE_DIR)/config $(WINDOWS_TEST_BUNDLE_DIR)/tests
+	cp $(WINDOWS_VARIANT_TARGET) $(WINDOWS_TEST_BUNDLE_DIR)/remote-exec-daemon-cpp.exe
+	cp $(WINDOWS_VARIANT_APPLY_PATCH_TARGET) $(WINDOWS_TEST_BUNDLE_DIR)/apply_patch.exe
+	$(if $(strip $(WINDOWS_VARIANT_RUNTIME_ARTIFACTS)),cp $(WINDOWS_VARIANT_RUNTIME_ARTIFACTS) $(WINDOWS_TEST_BUNDLE_DIR)/;)
+	$(foreach test,$(WINDOWS_VARIANT_TEST_CASES),cp $(call windows_test_case_bin,$(test)) $(WINDOWS_TEST_BUNDLE_DIR)/$(WINDOWS_TEST_CASE_$(test)_BASE).exe;)
+	cp $(MAKEFILE_DIR)config/daemon-cpp.example.ini $(WINDOWS_TEST_BUNDLE_DIR)/config/
+	cp -R $(MAKEFILE_DIR)tests/fixtures $(WINDOWS_TEST_BUNDLE_DIR)/tests/
+	cp -R $(MAKEFILE_DIR)../../tests/contracts $(WINDOWS_TEST_BUNDLE_DIR)/tests/
+	{ \
+		$(foreach test,$(WINDOWS_VARIANT_TEST_CASES),printf '%s %s\n' '$(WINDOWS_TEST_CASE_$(test)_NAME)' '$(WINDOWS_TEST_CASE_$(test)_BASE).exe';) \
+	} > $(WINDOWS_TEST_BUNDLE_MANIFEST)
+	@echo "C++ Windows test bundle: $(WINDOWS_TEST_BUNDLE_DIR)"
+
+test-windows: test-bundle-windows
+	$(WINDOWS_TEST_ENV) "$(WINDOWS_TEST_BUNDLE_RUNNER)"
 
 check-windows: all-windows test-windows
 
@@ -416,6 +433,7 @@ endef
 
 define define_windows_variant_alias_bundle
 $(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,all-windows-$(alias_name),all-windows,$2,$3,$4,$5,$6,$7,$8)))
+$(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,test-bundle-windows-$(alias_name),test-bundle-windows,$2,$3,$4,$5,$6,$7,$8)))
 $(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,test-windows-$(alias_name),test-windows,$2,$3,$4,$5,$6,$7,$8)))
 $(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,check-windows-$(alias_name),check-windows,$2,$3,$4,$5,$6,$7,$8)))
 endef
@@ -467,7 +485,7 @@ $(eval $(call define_windows_named_test_aliases,9x-ws1-ansi,$(WINDOWS_COMMON_TES
 $(eval $(call define_windows_named_test_aliases,9x-ws2-ansi,$(WINDOWS_COMMON_TEST_CASES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_9X),$(WINDOWS_WINSOCK2),$(WINDOWS_CHAR_API_ANSI),$(WINDOWS_FAMILY_9X),$(WINDOWS_ARCH_X86)))
 
 windows_named_test_alias_phonies = $(foreach test,$2,test-windows-$1-$(WINDOWS_TEST_CASE_$(test)_NAME))
-windows_variant_alias_phonies = $(foreach alias_name,$1,all-windows-$(alias_name) test-windows-$(alias_name) check-windows-$(alias_name))
+windows_variant_alias_phonies = $(foreach alias_name,$1,all-windows-$(alias_name) test-bundle-windows-$(alias_name) test-windows-$(alias_name) check-windows-$(alias_name))
 
 WINDOWS_NT3X_WS1_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,nt3x-ws1,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND)
 WINDOWS_XP_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,xp,$(WINDOWS_COMMON_TEST_CASES))
@@ -497,6 +515,7 @@ WINDOWS_VARIANT_ALIAS_PHONIES := \
 .PHONY: \
 	all-windows \
 	apply-patch-windows \
+	test-bundle-windows \
 	test-windows \
 	check-windows \
 	$(WINDOWS_VARIANT_ALIAS_PHONIES) \

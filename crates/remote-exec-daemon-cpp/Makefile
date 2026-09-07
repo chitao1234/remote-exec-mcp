@@ -92,6 +92,7 @@ HOST_TEST_OBJ_DIR = ${OBJ_DIR}/host-test-${POSIX_TLS}
 POSIX_TARGET = ${BUILD_DIR}/remote-exec-daemon-cpp
 POSIX_APPLY_PATCH_TARGET = ${BUILD_DIR}/apply_patch
 POSIX_APPLY_PATCH_TEST_SCRIPT = ${MAKEFILE_DIR}tests/test_apply_patch_cli.sh
+POSIX_TEST_BUNDLE_RUNNER_SRC = ${MAKEFILE_DIR}tests/test_bundle_runner.cpp
 
 SOURCE_PREFIX =
 .include "${MAKEFILE_DIR}mk/sources.mk"
@@ -107,11 +108,19 @@ DEP_FILES += ${POSIX_APPLY_PATCH_OBJS:S|.o|.d|}
 HOST_${test} = ${BUILD_DIR}/${HOST_${test}_BIN}
 HOST_${test}_OBJS = ${HOST_${test}_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
 HOST_TEST_SRCS += ${HOST_${test}_SRCS}
+HOST_TEST_BINS += ${HOST_${test}}
 HOST_TEST_PHONY_TARGETS += ${HOST_${test}_TEST_TARGET}
 DEP_FILES += ${HOST_${test}_OBJS:S|.o|.d|}
 .endfor
 
 HOST_TEST_COMPILE_SRCS = ${HOST_TEST_SRCS:O:u}
+.if defined(TEST_BUNDLE_DIR) && !empty(TEST_BUNDLE_DIR)
+POSIX_TEST_BUNDLE_DIR ?= ${TEST_BUNDLE_DIR}
+.else
+POSIX_TEST_BUNDLE_DIR ?= ${BUILD_DIR}/test-bundles/posix-${POSIX_TLS}
+.endif
+POSIX_TEST_BUNDLE_RUNNER = ${POSIX_TEST_BUNDLE_DIR}/run-tests
+POSIX_TEST_BUNDLE_MANIFEST = ${POSIX_TEST_BUNDLE_DIR}/tests.txt
 
 all: all-posix
 
@@ -121,7 +130,8 @@ apply-patch-posix: ${POSIX_APPLY_PATCH_TARGET}
 
 check: check-posix
 
-check-posix: ${HOST_TEST_PHONY_TARGETS} test-host-apply-patch-cli all-posix
+check-posix: ${HOST_TEST_PHONY_TARGETS} test-host-apply-patch-cli test-bundle-posix
+	REMOTE_EXEC_LOG=${TEST_LOG_LEVEL} ${POSIX_TEST_BUNDLE_RUNNER} --list >/dev/null
 
 force-posix-config:
 
@@ -138,6 +148,20 @@ test-server-streaming: ${HOST_SERVER_STREAMING_TEST_TARGET}
 test-host-apply-patch-cli: ${POSIX_APPLY_PATCH_TARGET} ${POSIX_APPLY_PATCH_TEST_SCRIPT}
 	sh ${POSIX_APPLY_PATCH_TEST_SCRIPT} ${POSIX_APPLY_PATCH_TARGET}
 
+test-bundle-posix: all-posix ${HOST_TEST_BINS} ${POSIX_TEST_BUNDLE_RUNNER}
+	mkdir -p ${POSIX_TEST_BUNDLE_DIR}/config ${POSIX_TEST_BUNDLE_DIR}/tests
+	cp ${POSIX_TARGET} ${POSIX_APPLY_PATCH_TARGET} ${HOST_TEST_BINS} ${POSIX_TEST_BUNDLE_DIR}/
+	cp ${MAKEFILE_DIR}config/daemon-cpp.example.ini ${POSIX_TEST_BUNDLE_DIR}/config/
+	cp -R ${MAKEFILE_DIR}tests/fixtures ${POSIX_TEST_BUNDLE_DIR}/tests/
+	cp -R ${MAKEFILE_DIR}../../tests/contracts ${POSIX_TEST_BUNDLE_DIR}/tests/
+	cp ${POSIX_APPLY_PATCH_TEST_SCRIPT} ${POSIX_TEST_BUNDLE_DIR}/tests/
+	: > ${POSIX_TEST_BUNDLE_MANIFEST}
+.for test in ${HOST_POSIX_TESTS}
+	printf '%s %s\n' '${HOST_${test}_NAME}' './${HOST_${test}_BIN}' >> ${POSIX_TEST_BUNDLE_MANIFEST}
+.endfor
+	printf '%s %s\n' 'apply-patch-cli' 'sh tests/test_apply_patch_cli.sh ./apply_patch' >> ${POSIX_TEST_BUNDLE_MANIFEST}
+	@echo "C++ POSIX test bundle: ${POSIX_TEST_BUNDLE_DIR}"
+
 .for test in ${HOST_POSIX_TESTS}
 ${HOST_${test}_TEST_TARGET}: ${HOST_${test}}
 	${TEST_LOG_ENV} ${HOST_${test}}
@@ -150,6 +174,10 @@ ${POSIX_TARGET}: ${POSIX_OBJS}
 ${POSIX_APPLY_PATCH_TARGET}: ${POSIX_APPLY_PATCH_OBJS}
 	mkdir -p ${.TARGET:H}
 	${HOST_CXX} ${HOST_PROD_CXXFLAGS} ${HOST_PROD_LDFLAGS} -o ${.TARGET} ${.ALLSRC} ${HOST_PROD_LDLIBS}
+
+${POSIX_TEST_BUNDLE_RUNNER}: ${POSIX_TEST_BUNDLE_RUNNER_SRC}
+	mkdir -p ${.TARGET:H}
+	${HOST_CXX} ${HOST_TEST_CXXFLAGS} ${HOST_TEST_LDFLAGS} -o ${.TARGET} ${.ALLSRC}
 
 ${POSIX_CONFIG_HEADER}: ${POSIX_CONFIG_SCRIPT} force-posix-config
 	mkdir -p ${.TARGET:H}
@@ -185,5 +213,5 @@ ${HOST_TEST_OBJ_DIR}/${src:S|.cpp|.o|}: ${src} ${POSIX_CONFIG_HEADER}
 clean:
 	rm -rf ${BUILD_DIR}
 
-.PHONY: all all-posix apply-patch-posix check check-posix clean force-posix-config stress-posix test-host-apply-patch-cli test-server-streaming \
+.PHONY: all all-posix apply-patch-posix check check-posix clean force-posix-config stress-posix test-bundle-posix test-host-apply-patch-cli test-server-streaming \
 	${HOST_TEST_PHONY_TARGETS}

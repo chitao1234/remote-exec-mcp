@@ -555,6 +555,25 @@ make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws2
 bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
 
+Build and execution can be split across machines. `test-bundle-*` targets
+compile and stage a relocatable directory containing the daemon, `apply_patch`,
+test binaries, runtime companions, fixtures, and a native test runner, without
+launching target binaries:
+
+```bash
+make -C crates/remote-exec-daemon-cpp test-bundle-posix
+make -C crates/remote-exec-daemon-cpp test-bundle-windows-xp TLS=off
+```
+
+Copy the printed directory under `build/test-bundles/` to a compatible machine,
+preserving executable permissions, then run `./run-tests` on POSIX or
+`run-tests.exe` on Windows. Pass `--list` to inspect the test names or pass names
+such as `transfer server-streaming` to run a subset. Set `TEST_BUNDLE_DIR` to
+stage directly into a fresh artifact output directory. The execution machine
+does not need the repository, Make/NMAKE, or a compiler, but it must provide any
+dynamically linked libraries selected at build time. The C++ daemon README
+documents the GNU, BSD make, and MSVC bundle targets in detail.
+
 For OpenSSL-backed C++ builds, run the matching `prepare-openssl` or
 `prepare-openssl-xp` target first and pass the resulting `OPENSSL_ROOT`.
 LibreSSL and BoringSSL builds use the existing `TLS=openssl` compatibility mode

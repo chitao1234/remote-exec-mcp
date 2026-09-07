@@ -34,6 +34,21 @@ HOST_SERVER_ROUTES_BIN = test_server_routes
 HOST_SANDBOX_BIN = test_sandbox
 HOST_PORT_TUNNEL_FRAME_BIN = test_port_tunnel_frame
 
+HOST_BASIC_MUTEX_NAME = basic-mutex
+HOST_PATCH_NAME = patch
+HOST_TRANSFER_NAME = transfer
+HOST_CONFIG_NAME = config
+HOST_HTTP_REQUEST_NAME = http-request
+HOST_SERVER_TRANSPORT_NAME = server-transport
+HOST_SERVER_STREAMING_NAME = server-streaming
+HOST_SESSION_STORE_NAME = session-store
+HOST_CONNECTION_MANAGER_NAME = connection-manager
+HOST_TLS_TRANSPORT_NAME = tls-transport
+HOST_SERVER_RUNTIME_NAME = server-runtime
+HOST_SERVER_ROUTES_NAME = server-routes
+HOST_SANDBOX_NAME = sandbox
+HOST_PORT_TUNNEL_FRAME_NAME = port-tunnel-frame
+
 HOST_BASIC_MUTEX_TEST_TARGET = test-host-basic-mutex
 HOST_PATCH_TEST_TARGET = test-host-patch
 HOST_TRANSFER_TEST_TARGET = test-host-transfer

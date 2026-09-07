@@ -28,6 +28,10 @@ DAEMON_CPP_DIR=crates\remote-exec-daemon-cpp
 BUILD_DIR=$(DAEMON_CPP_DIR)\build
 !ENDIF
 
+!IFNDEF TEST_BUNDLE_DIR
+TEST_BUNDLE_DIR=
+!ENDIF
+
 !IFNDEF CXX
 CXX=cl
 !ENDIF
@@ -256,7 +260,7 @@ TEST_LOG_LEVEL=off
 !ENDIF
 !ENDIF
 
-MSVC_REENTER_BASE=nmake /nologo /f "$(DAEMON_CPP_DIR)\NMakefile" DAEMON_CPP_DIR="$(DAEMON_CPP_DIR)" BUILD_DIR="$(BUILD_DIR)" CXX="$(CXX)" DEBUG="$(DEBUG)" TEST_LOG_LEVEL="$(TEST_LOG_LEVEL)" MSVC_JOBS="$(MSVC_JOBS)" TLS="$(TLS)" OPENSSL_ROOT="$(OPENSSL_ROOT)" OPENSSL_CPPFLAGS="$(OPENSSL_CPPFLAGS)" OPENSSL_LDLIBS="$(OPENSSL_LDLIBS)"
+MSVC_REENTER_BASE=nmake /nologo /f "$(DAEMON_CPP_DIR)\NMakefile" DAEMON_CPP_DIR="$(DAEMON_CPP_DIR)" BUILD_DIR="$(BUILD_DIR)" TEST_BUNDLE_DIR="$(TEST_BUNDLE_DIR)" CXX="$(CXX)" DEBUG="$(DEBUG)" TEST_LOG_LEVEL="$(TEST_LOG_LEVEL)" MSVC_JOBS="$(MSVC_JOBS)" TLS="$(TLS)" OPENSSL_ROOT="$(OPENSSL_ROOT)" OPENSSL_CPPFLAGS="$(OPENSSL_CPPFLAGS)" OPENSSL_LDLIBS="$(OPENSSL_LDLIBS)"
 MSVC_REENTER_NATIVE=$(MSVC_REENTER_BASE) MSVC_VARIANT=$(MSVC_VARIANT_NATIVE)
 MSVC_REENTER_XP=$(MSVC_REENTER_BASE) MSVC_VARIANT=$(MSVC_VARIANT_XP) MSVC_ARCH="$(MSVC_ARCH)" MSVC_XP_WINSDK_DIR="$(MSVC_XP_WINSDK_DIR)"
 MSVC_REENTER_XP_X64=$(MSVC_REENTER_BASE) MSVC_VARIANT=$(MSVC_VARIANT_XP) MSVC_ARCH=$(MSVC_ARCH_X64) MSVC_XP_WINSDK_DIR="$(MSVC_XP_WINSDK_DIR)"
@@ -375,6 +379,36 @@ MSVC_SERVER_ROUTES_TEST=$(MSVC_SELECTED_BIN_DIR)\test_server_routes-$(MSVC_SELEC
 MSVC_SERVER_RUNTIME_TEST=$(MSVC_SELECTED_BIN_DIR)\test_server_runtime-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_SANDBOX_TEST=$(MSVC_SELECTED_BIN_DIR)\test_sandbox-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_PORT_TUNNEL_FRAME_TEST=$(MSVC_SELECTED_BIN_DIR)\test_port_tunnel_frame-$(MSVC_SELECTED_BINARY_TAG).exe
+MSVC_TEST_BINS= \
+    $(MSVC_BASIC_MUTEX_TEST) \
+    $(MSVC_CONSOLE_OUTPUT_TEST) \
+    $(MSVC_PATCH_TEST) \
+    $(MSVC_SESSION_STORE_TEST) \
+    $(MSVC_SERVER_STREAMING_TEST) \
+    $(MSVC_TRANSFER_TEST) \
+    $(MSVC_CONFIG_TEST) \
+    $(MSVC_HTTP_REQUEST_TEST) \
+    $(MSVC_SERVER_TRANSPORT_TEST) \
+    $(MSVC_CONNECTION_MANAGER_TEST) \
+    $(MSVC_TLS_TRANSPORT_TEST) \
+    $(MSVC_SERVER_ROUTES_COMMON_TEST) \
+    $(MSVC_SERVER_ROUTES_TEST) \
+    $(MSVC_SERVER_RUNTIME_TEST) \
+    $(MSVC_SANDBOX_TEST) \
+    $(MSVC_PORT_TUNNEL_FRAME_TEST)
+!IF "$(TEST_BUNDLE_DIR)" != ""
+MSVC_TEST_BUNDLE_DIR=$(TEST_BUNDLE_DIR)
+!ELSE
+!IFNDEF MSVC_TEST_BUNDLE_DIR
+MSVC_TEST_BUNDLE_DIR=$(BUILD_DIR)\test-bundles\windows-$(MSVC_SELECTED_BINARY_TAG)
+!ENDIF
+!ENDIF
+MSVC_TEST_BUNDLE_RUNNER=$(MSVC_TEST_BUNDLE_DIR)\run-tests.exe
+MSVC_TEST_BUNDLE_RUNNER_SRC=$(DAEMON_CPP_DIR)\tests\test_bundle_runner.cpp
+MSVC_TEST_BUNDLE_MANIFEST=$(MSVC_TEST_BUNDLE_DIR)\tests.txt
+MSVC_ENSURE_TEST_BUNDLE_DIR=if not exist "$(MSVC_TEST_BUNDLE_DIR)" mkdir "$(MSVC_TEST_BUNDLE_DIR)"
+MSVC_ENSURE_TEST_BUNDLE_CONFIG_DIR=if not exist "$(MSVC_TEST_BUNDLE_DIR)\config" mkdir "$(MSVC_TEST_BUNDLE_DIR)\config"
+MSVC_ENSURE_TEST_BUNDLE_TESTS_DIR=if not exist "$(MSVC_TEST_BUNDLE_DIR)\tests" mkdir "$(MSVC_TEST_BUNDLE_DIR)\tests"
 
 MSVC_TEST_PHONY_TARGETS= \
     test-msvc-basic-mutex \
@@ -400,7 +434,51 @@ all-msvc: $(MSVC_SELECTED_TARGET) $(MSVC_SELECTED_APPLY_PATCH_TARGET)
 
 apply-patch-msvc: $(MSVC_SELECTED_APPLY_PATCH_TARGET)
 
-test-msvc: $(MSVC_TEST_PHONY_TARGETS)
+test-bundle-msvc: all-msvc $(MSVC_SELECTED_WINPTY_AGENT) $(MSVC_TEST_BINS) $(MSVC_TEST_BUNDLE_RUNNER)
+	@$(MSVC_ENSURE_TEST_BUNDLE_CONFIG_DIR)
+	@$(MSVC_ENSURE_TEST_BUNDLE_TESTS_DIR)
+	@copy /Y "$(MSVC_SELECTED_TARGET)" "$(MSVC_TEST_BUNDLE_DIR)\remote-exec-daemon-cpp.exe" >nul
+	@copy /Y "$(MSVC_SELECTED_APPLY_PATCH_TARGET)" "$(MSVC_TEST_BUNDLE_DIR)\apply_patch.exe" >nul
+	@copy /Y "$(MSVC_SELECTED_WINPTY_AGENT)" "$(MSVC_TEST_BUNDLE_DIR)\winpty-agent.exe" >nul
+	@copy /Y "$(MSVC_BASIC_MUTEX_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_basic_mutex.exe" >nul
+	@copy /Y "$(MSVC_CONSOLE_OUTPUT_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_console_output.exe" >nul
+	@copy /Y "$(MSVC_PATCH_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_patch.exe" >nul
+	@copy /Y "$(MSVC_SESSION_STORE_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_session_store.exe" >nul
+	@copy /Y "$(MSVC_SERVER_STREAMING_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_server_streaming.exe" >nul
+	@copy /Y "$(MSVC_TRANSFER_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_transfer.exe" >nul
+	@copy /Y "$(MSVC_CONFIG_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_config.exe" >nul
+	@copy /Y "$(MSVC_HTTP_REQUEST_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_http_request.exe" >nul
+	@copy /Y "$(MSVC_SERVER_TRANSPORT_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_server_transport.exe" >nul
+	@copy /Y "$(MSVC_CONNECTION_MANAGER_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_connection_manager.exe" >nul
+	@copy /Y "$(MSVC_TLS_TRANSPORT_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_tls_transport.exe" >nul
+	@copy /Y "$(MSVC_SERVER_ROUTES_COMMON_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_server_routes_common.exe" >nul
+	@copy /Y "$(MSVC_SERVER_ROUTES_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_server_routes.exe" >nul
+	@copy /Y "$(MSVC_SERVER_RUNTIME_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_server_runtime.exe" >nul
+	@copy /Y "$(MSVC_SANDBOX_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_sandbox.exe" >nul
+	@copy /Y "$(MSVC_PORT_TUNNEL_FRAME_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_port_tunnel_frame.exe" >nul
+	@copy /Y "$(DAEMON_CPP_DIR)\config\daemon-cpp.example.ini" "$(MSVC_TEST_BUNDLE_DIR)\config\" >nul
+	@xcopy /E /I /Y "$(DAEMON_CPP_DIR)\tests\fixtures" "$(MSVC_TEST_BUNDLE_DIR)\tests\fixtures" >nul
+	@xcopy /E /I /Y "$(DAEMON_CPP_DIR)\..\..\tests\contracts" "$(MSVC_TEST_BUNDLE_DIR)\tests\contracts" >nul
+	@echo basic-mutex test_basic_mutex.exe>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo console-output test_console_output.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo patch test_patch.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo session-store test_session_store.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo server-streaming test_server_streaming.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo transfer test_transfer.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo config test_config.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo http-request test_http_request.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo server-transport test_server_transport.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo connection-manager test_connection_manager.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo tls-transport test_tls_transport.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo server-routes-common test_server_routes_common.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo server-routes test_server_routes.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo server-runtime test_server_runtime.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo sandbox test_sandbox.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo port-tunnel-frame test_port_tunnel_frame.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
+	@echo C++ MSVC test bundle: $(MSVC_TEST_BUNDLE_DIR)
+
+test-msvc: test-bundle-msvc
+	@set "REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL)" && "$(MSVC_TEST_BUNDLE_RUNNER)"
 
 test-msvc-basic-mutex: $(MSVC_BASIC_MUTEX_TEST)
 	$(MSVC_RUN_TEST)
@@ -458,6 +536,9 @@ all-msvc-native:
 apply-patch-msvc-native:
 	@$(MSVC_REENTER_NATIVE) apply-patch-msvc
 
+test-bundle-msvc-native:
+	@$(MSVC_REENTER_NATIVE) test-bundle-msvc
+
 test-msvc-native:
 	@$(MSVC_REENTER_NATIVE) test-msvc
 
@@ -470,6 +551,9 @@ all-msvc-xp:
 apply-patch-msvc-xp:
 	@$(MSVC_REENTER_XP) apply-patch-msvc
 
+test-bundle-msvc-xp:
+	@$(MSVC_REENTER_XP) test-bundle-msvc
+
 test-msvc-xp:
 	@$(MSVC_REENTER_XP) test-msvc
 
@@ -481,6 +565,9 @@ all-msvc-xp-x64:
 
 apply-patch-msvc-xp-x64:
 	@$(MSVC_REENTER_XP_X64) apply-patch-msvc
+
+test-bundle-msvc-xp-x64:
+	@$(MSVC_REENTER_XP_X64) test-bundle-msvc
 
 test-msvc-xp-x64:
 	@$(MSVC_REENTER_XP_X64) test-msvc
@@ -603,6 +690,11 @@ $(MSVC_SELECTED_APPLY_PATCH_TARGET): $(MSVC_APPLY_PATCH_SRCS)
 	@$(MSVC_ENSURE_SELECTED_OBJ_DIR)
 	$(MSVC_BUILD_SELECTED_PREFIX) $(MSVC_APPLY_PATCH_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
 
+$(MSVC_TEST_BUNDLE_RUNNER): $(MSVC_TEST_BUNDLE_RUNNER_SRC)
+	@$(MSVC_ENSURE_TEST_BUNDLE_DIR)
+	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
+	$(CXX) $(MSVC_CXXFLAGS) $(MSVC_SELECTED_TEST_CPPFLAGS) /Fd$(MSVC_SELECTED_TEST_OBJ_DIR)\vc-test-bundle-runner.pdb /Fo$(MSVC_SELECTED_TEST_OBJ_DIR)\test_bundle_runner.obj /Fe"$@" "$(MSVC_TEST_BUNDLE_RUNNER_SRC)" $(MSVC_SELECTED_LDFLAGS)
+
 $(MSVC_BASIC_MUTEX_TEST): $(MSVC_BASIC_MUTEX_TEST_SRCS)
 	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
 	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
@@ -691,12 +783,16 @@ clean:
     all \
     all-msvc \
     apply-patch-msvc \
+    test-bundle-msvc \
     all-msvc-native \
     apply-patch-msvc-native \
+    test-bundle-msvc-native \
     all-msvc-xp \
     apply-patch-msvc-xp \
+    test-bundle-msvc-xp \
     all-msvc-xp-x64 \
     apply-patch-msvc-xp-x64 \
+    test-bundle-msvc-xp-x64 \
     test-msvc \
     $(MSVC_TEST_PHONY_TARGETS) \
     test-msvc-native \
