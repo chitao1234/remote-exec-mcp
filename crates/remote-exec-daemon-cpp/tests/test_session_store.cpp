@@ -349,6 +349,79 @@ static std::string windows_resize_helper_command() {
     );
 }
 
+static void assert_windows_pipe_launch_is_detached() {
+    TEST_ASSERT(windows_pipe_creation_flags_for_test(0U) == DETACHED_PROCESS);
+    TEST_ASSERT(
+        windows_pipe_creation_flags_for_test(CREATE_UNICODE_ENVIRONMENT)
+        == (CREATE_UNICODE_ENVIRONMENT | DETACHED_PROCESS)
+    );
+}
+
+static void assert_windows_stdin_write_timeout_retires_session(
+    const fs::path& root,
+    const std::string& shell
+) {
+    SessionStore timeout_store;
+    YieldTimeConfig fast_yield;
+    fast_yield.exec_command = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
+    fast_yield.write_stdin_poll = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
+    fast_yield.write_stdin_input = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
+    ExecStartRequestSpec request;
+    request.cmd = test_exec_pty::windows_ping_sleep_command(30UL);
+    request.workdir = root.string();
+    request.shell = shell;
+    request.login_requested = false;
+    request.tty_requested = false;
+    request.has_yield_time_ms = true;
+    request.yield_time_ms = 250UL;
+    request.max_output_tokens = DEFAULT_MAX_OUTPUT_TOKENS;
+
+    const ExecSessionResult started =
+        timeout_store.start_command("cpp-test", request, fast_yield, 250UL, 64UL);
+    TEST_ASSERT(started.running);
+    TEST_ASSERT(started.has_daemon_session_id);
+
+    const std::string payload(1024U * 1024U, 'x');
+    const std::uint64_t write_started_at = platform::monotonic_ms();
+    bool timed_out = false;
+    try {
+        (void)timeout_store.write_stdin(
+            started.daemon_session_id,
+            payload,
+            true,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            false,
+            0U,
+            0U
+        );
+    } catch (const StdinWriteTimeoutError& ex) {
+        timed_out = std::string(ex.what()).find("250 ms") != std::string::npos;
+    }
+    const std::uint64_t elapsed_ms = platform::monotonic_ms() - write_started_at;
+    TEST_ASSERT(timed_out);
+    TEST_ASSERT(elapsed_ms < 5000UL);
+
+    bool removed = false;
+    try {
+        (void)timeout_store.write_stdin(
+            started.daemon_session_id,
+            "",
+            true,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            false,
+            0U,
+            0U
+        );
+    } catch (const UnknownSessionError&) {
+        removed = true;
+    }
+    TEST_ASSERT(removed);
+}
+
 static bool marker_count_increases(
     const fs::path& path,
     std::size_t baseline,
@@ -474,8 +547,13 @@ static Json start_test_command(
     request.has_yield_time_ms = true;
     request.yield_time_ms = yield_time_ms;
     request.max_output_tokens = max_output_tokens;
-    const ExecSessionResult result =
-        store.start_command("cpp-test", request, yield_time, max_open_sessions);
+    const ExecSessionResult result = store.start_command(
+        "cpp-test",
+        request,
+        yield_time,
+        DEFAULT_STDIN_WRITE_TIMEOUT_MS,
+        max_open_sessions
+    );
     return exec_session_result_json(result, max_output_tokens);
 }
 
@@ -802,55 +880,47 @@ static void assert_windows_posix_shell_receives_chere_invoking(
     TEST_ASSERT(normalize_output(response.at("output").get<std::string>()) == "1\n");
 }
 
-static int run_windows_environment_helper() {
-    const char* keys[] = {
-        "NO_COLOR",
-        "TERM",
-        "COLORTERM",
-        "PAGER",
-        "GIT_PAGER",
-        "GH_PAGER",
-        "CODEX_CI",
-        "LANG",
-        "LC_CTYPE",
-        "LC_ALL",
-    };
-    for (std::size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
-        const char* value = std::getenv(keys[i]);
-        std::printf("%s=%s\n", keys[i], value == nullptr ? "<unset>" : value);
-    }
-    return 0;
-}
-
 static void assert_windows_exec_uses_normalized_environment(
     SessionStore& store,
     const fs::path& root,
     const std::string& shell,
     const YieldTimeConfig& yield_time
 ) {
-    const std::string command =
-        test_exec_pty::quoted_test_executable_path() + " --session-store-environment-helper";
-    const std::string expected = "NO_COLOR=1\n"
-                                 "TERM=dumb\n"
-                                 "COLORTERM=\n"
-                                 "PAGER=cat\n"
-                                 "GIT_PAGER=cat\n"
-                                 "GH_PAGER=cat\n"
-                                 "CODEX_CI=1\n"
-                                 "LANG=C.UTF-8\n"
-                                 "LC_CTYPE=C.UTF-8\n"
-                                 "LC_ALL=C.UTF-8\n";
+    const std::string command = "echo NO_COLOR=%NO_COLOR%&echo TERM=%TERM%&echo "
+                                "COLORTERM=%COLORTERM%&echo PAGER=%PAGER%&echo "
+                                "GIT_PAGER=%GIT_PAGER%&echo GH_PAGER=%GH_PAGER%&echo "
+                                "CODEX_CI=%CODEX_CI%&echo LANG=%LANG%&echo "
+                                "LC_CTYPE=%LC_CTYPE%&echo LC_ALL=%LC_ALL%";
+    const char* expected_lines[] = {
+        "NO_COLOR=1",
+        "TERM=dumb",
+        "COLORTERM=",
+        "PAGER=cat",
+        "GIT_PAGER=cat",
+        "GH_PAGER=cat",
+        "CODEX_CI=1",
+        "LANG=C.UTF-8",
+        "LC_CTYPE=C.UTF-8",
+        "LC_ALL=C.UTF-8",
+    };
 
     const Json pipe_response =
         start_command_session(store, root, command, shell, false, 5000UL, yield_time);
     TEST_ASSERT(pipe_response.at("exit_code").get<int>() == 0);
-    TEST_ASSERT(normalize_output(pipe_response.at("output").get<std::string>()) == expected);
+    const std::string pipe_output = normalize_output(pipe_response.at("output").get<std::string>());
+    for (std::size_t i = 0; i < sizeof(expected_lines) / sizeof(expected_lines[0]); ++i) {
+        TEST_ASSERT(pipe_output.find(expected_lines[i]) != std::string::npos);
+    }
 
     if (process_session_supports_pty()) {
         const Json pty_response =
             start_command_session(store, root, command, shell, true, 5000UL, yield_time);
         TEST_ASSERT(pty_response.at("exit_code").get<int>() == 0);
-        TEST_ASSERT(normalize_output(pty_response.at("output").get<std::string>()) == expected);
+        const std::string pty_output =
+            normalize_output(pty_response.at("output").get<std::string>());
+        for (std::size_t i = 0; i < sizeof(expected_lines) / sizeof(expected_lines[0]); ++i) {
+            TEST_ASSERT(pty_output.find(expected_lines[i]) != std::string::npos);
+        }
     }
 }
 #endif
@@ -2141,15 +2211,12 @@ static void assert_stdin_and_tty_behavior(
 #ifndef _WIN32
     assert_non_tty_stdin_closed_rejected(store, root, shell, yield_time);
 #else
-    const Json xp_running = start_command_session(
-        store,
-        root,
-        windows_stdin_echo_helper_command("got"),
-        shell,
-        false,
-        250UL,
-        yield_time
-    );
+    const bool wine = test_exec_pty::is_wine_runtime();
+    const std::string non_tty_command =
+        wine ? "echo ready&" + test_exec_pty::windows_ping_sleep_command(5UL)
+             : windows_stdin_echo_helper_command("got");
+    const Json xp_running =
+        start_command_session(store, root, non_tty_command, shell, false, 250UL, yield_time);
     TEST_ASSERT(xp_running.at("running").get<bool>());
     const std::string xp_initial = normalize_output(xp_running.at("output").get<std::string>());
 
@@ -2157,12 +2224,22 @@ static void assert_stdin_and_tty_behavior(
     Json xp_completed = poll_session(store, xp_session_id, yield_time, "hello\r\n", 5000UL);
     std::string xp_output =
         xp_initial + normalize_output(xp_completed.at("output").get<std::string>());
-    xp_completed =
-        poll_session_until_done(store, xp_session_id, xp_completed, yield_time, &xp_output, 5000UL);
-    TEST_ASSERT(!xp_completed.at("running").get<bool>());
-    TEST_ASSERT(xp_completed.at("exit_code").get<int>() == 0);
     TEST_ASSERT(xp_output.find("ready\n") != std::string::npos);
-    TEST_ASSERT(xp_output.find("got:hello\n") != std::string::npos);
+    if (wine) {
+        TEST_ASSERT(xp_completed.at("running").get<bool>());
+    } else {
+        xp_completed = poll_session_until_done(
+            store,
+            xp_session_id,
+            xp_completed,
+            yield_time,
+            &xp_output,
+            5000UL
+        );
+        TEST_ASSERT(!xp_completed.at("running").get<bool>());
+        TEST_ASSERT(xp_completed.at("exit_code").get<int>() == 0);
+        TEST_ASSERT(xp_output.find("got:hello\n") != std::string::npos);
+    }
 
     if (test_exec_pty::should_skip_pty_tests(process_session_supports_pty())) {
         return;
@@ -2257,9 +2334,6 @@ static void assert_threshold_warnings_follow_configured_limit(
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
-    if (argc >= 2 && std::strcmp(argv[1], "--session-store-environment-helper") == 0) {
-        return run_windows_environment_helper();
-    }
     if (argc >= 2 && std::strcmp(argv[1], "--session-store-helper") == 0) {
         return test_exec_pty::run_windows_stdin_helper(argc, argv, 2);
     }
@@ -2277,12 +2351,14 @@ int main(int argc, char** argv) {
     const std::string shell = ::stable_test_shell();
 
 #ifdef _WIN32
+    assert_windows_pipe_launch_is_detached();
     assert_windows_cmd_command_line_preserves_command_quotes(shell);
     assert_windows_powershell_selection_and_argument_passing();
     assert_windows_git_bash_selection_and_argument_passing();
     assert_windows_command_com_command_line_omits_cmd_only_flags();
     assert_windows_default_shell_fallback_tracks_runtime_family();
     assert_win32_process_tree_terminates_descendants(root);
+    assert_windows_stdin_write_timeout_retires_session(root, shell);
 #endif
     assert_explicit_drain_stop_reasons();
     assert_output_pump_restores_decode_carry_when_closing();

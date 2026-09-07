@@ -112,6 +112,12 @@ HttpResponse handle_exec_rpc_route(
         response.status = 400;
         write_rpc_error(response, 400, "stdin_closed", ex.what());
         return response;
+    } catch (const StdinWriteTimeoutError& ex) {
+        log_message(LOG_WARN, "server", route_name + " stdin write timed out: " + ex.what());
+        HttpResponse response;
+        response.status = 408;
+        write_rpc_error(response, 408, "stdin_write_timeout", ex.what());
+        return response;
     } catch (const ProcessPtyResizeUnsupportedError& ex) {
         log_message(LOG_WARN, "server", route_name + " pty resize unsupported: " + ex.what());
         HttpResponse response;

@@ -84,7 +84,8 @@ Optional settings cover:
 
 - `default_shell`, `allow_login_shell`, and Windows `windows_posix_root` for
   command execution and single-slash POSIX path translation;
-- request, session, transfer, forwarding, and yield-time limits;
+- request, session, transfer, forwarding, yield-time limits, and
+  `stdin_write_timeout_ms` (30 seconds by default);
 - static `sandbox_*_allow` and `sandbox_*_deny` path rules.
 
 Omitted or empty allow lists permit all paths for that access class; deny rules
@@ -154,6 +155,12 @@ OpenSSL 1.0.x remains available when a legacy compatibility path requires it.
 
 - POSIX non-PTY command output merges stdout and stderr in emitted order. Use
   `tty=true` for interactive commands that need later stdin writes.
+- Windows non-PTY commands run detached from the daemon's console while their
+  standard streams remain connected to daemon-owned pipes. A stdin pipe write
+  that exceeds `stdin_write_timeout_ms` terminates and retires the session so
+  the request and daemon shutdown cannot remain blocked indefinitely.
+- Console detachment does not provide a PTY. Legacy Windows builds without a
+  usable WinPTY continue to advertise `supports_pty = false`.
 - Transfers and patch actions are non-transactional: a later failure can leave
   earlier filesystem changes in place. Transfer overwrite modes are `fail`,
   `merge`, and `replace`.

@@ -40,6 +40,7 @@ static void assert_default_config_values(const DaemonConfig& config) {
     TEST_ASSERT(config.allow_apply_patch);
     TEST_ASSERT(config.windows_posix_root.empty());
     TEST_ASSERT(config.http_connection_idle_timeout_ms == DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS);
+    TEST_ASSERT(config.stdin_write_timeout_ms == DEFAULT_STDIN_WRITE_TIMEOUT_MS);
     TEST_ASSERT(
         config.port_forward_limits.max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS
     );
@@ -135,6 +136,7 @@ int main() {
               "max_request_header_bytes = 32768\n"
               "max_request_body_bytes = 1048576\n"
               "http_connection_idle_timeout_ms = 9000\n"
+              "stdin_write_timeout_ms = 4321\n"
               "transfer_max_archive_bytes = 4096\n"
               "transfer_max_entry_bytes = 1024\n"
               "max_open_sessions = 12\n"
@@ -230,6 +232,7 @@ int main() {
     TEST_ASSERT(config.max_request_header_bytes == 32768UL);
     TEST_ASSERT(config.max_request_body_bytes == 1048576UL);
     TEST_ASSERT(config.http_connection_idle_timeout_ms == 9000UL);
+    TEST_ASSERT(config.stdin_write_timeout_ms == 4321UL);
     TEST_ASSERT(config.transfer_limits.max_archive_bytes == 4096ULL);
     TEST_ASSERT(config.transfer_limits.max_entry_bytes == 1024ULL);
     TEST_ASSERT(config.max_open_sessions == 12UL);
@@ -398,6 +401,7 @@ int main() {
 
     const char* invalid_limit_keys[] = {
         "http_connection_idle_timeout_ms",
+        "stdin_write_timeout_ms",
         "port_forward_max_retained_sessions",
         "port_forward_max_retained_listeners",
         "port_forward_max_udp_binds",

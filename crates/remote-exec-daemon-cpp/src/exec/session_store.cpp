@@ -136,12 +136,20 @@ std::shared_ptr<LiveSession> launch_live_session(
     const std::string& shell,
     const std::string& windows_posix_root,
     bool login,
-    bool tty
+    bool tty,
+    unsigned long stdin_write_timeout_ms
 ) {
     std::shared_ptr<LiveSession> session(new LiveSession());
     session->id = make_exec_session_id();
-    session->process =
-        ProcessSession::launch(command, workdir, shell, windows_posix_root, login, tty);
+    session->process = ProcessSession::launch(
+        command,
+        workdir,
+        shell,
+        windows_posix_root,
+        login,
+        tty,
+        stdin_write_timeout_ms
+    );
     session->started_at_ms = platform::monotonic_ms();
 #ifdef _WIN32
     session->stdin_open = true;
@@ -201,14 +209,24 @@ PollResult wait_for_session_activity(
     }
 }
 
-void retire_session(const std::shared_ptr<LiveSession>& session) {
-    BasicLockGuard session_lock(session->mutex_);
-    session->retired = true;
-    session->closing = true;
-    session->cond_.broadcast();
-    if (session->process.get() != nullptr) {
+void retire_session_under_operation_lock(const std::shared_ptr<LiveSession>& session) {
+    bool should_terminate = false;
+    {
+        BasicLockGuard session_lock(session->mutex_);
+        should_terminate = !session->closing;
+        session->retired = true;
+        session->closing = true;
+        session->stdin_open = false;
+        session->cond_.broadcast();
+    }
+    if (should_terminate && session->process.get() != nullptr) {
         session->process->terminate();
     }
+}
+
+void retire_session(const std::shared_ptr<LiveSession>& session) {
+    BasicLockGuard operation_lock(session->operation_mutex_);
+    retire_session_under_operation_lock(session);
 }
 
 void retire_and_join_session(const std::shared_ptr<LiveSession>& session) {
@@ -227,8 +245,8 @@ void retire_remove_and_join_session(
     join_session_pump(session.get());
 }
 
-void apply_write_stdin_request_locked(
-    LiveSession* session,
+void validate_write_stdin_request_locked(
+    const LiveSession& session,
     const std::string& chars,
     bool has_pty_size,
     unsigned short pty_rows,
@@ -238,22 +256,12 @@ void apply_write_stdin_request_locked(
         if (pty_rows == 0U || pty_cols == 0U) {
             throw ProcessPtyResizeUnsupportedError("PTY rows and cols must be greater than zero");
         }
-        session->process->resize_pty(pty_rows, pty_cols);
     }
 
-    if (chars.empty()) {
-        return;
-    }
-    if (!session->stdin_open) {
+    if (!chars.empty() && !session.stdin_open) {
         throw StdinClosedError(
             "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
         );
-    }
-    try {
-        session->process->write_stdin(chars);
-    } catch (const ProcessStdinClosedError& ex) {
-        session->stdin_open = false;
-        throw StdinClosedError(ex.what());
     }
 }
 
@@ -449,6 +457,7 @@ bool SessionStore::prune_one_session_for_start(unsigned long max_open_sessions) 
         PruneCandidate victim;
         bool found_exited = false;
         for (std::size_t i = 0; i < prunable_count; ++i) {
+            BasicLockGuard operation_lock(snapshot[i].session->operation_mutex_);
             BasicLockGuard session_lock(snapshot[i].session->mutex_);
             int exit_code = 0;
             if (snapshot[i].session->retired || snapshot[i].session->output_.exited
@@ -492,6 +501,7 @@ ExecSessionResult SessionStore::start_command(
     const std::string& target,
     const ExecStartRequestSpec& request,
     const YieldTimeConfig& yield_time,
+    unsigned long stdin_write_timeout_ms,
     unsigned long max_open_sessions
 ) {
     if (!reserve_pending_start(max_open_sessions)) {
@@ -514,7 +524,8 @@ ExecSessionResult SessionStore::start_command(
         request.shell,
         request.windows_posix_root,
         request.login_requested,
-        request.tty_requested
+        request.tty_requested,
+        stdin_write_timeout_ms
     );
     start_session_pump(session);
 
@@ -615,6 +626,7 @@ ExecSessionResult SessionStore::write_stdin(
     }
 
     PollResult poll_result;
+    std::string stdin_write_timeout_message;
     {
         BasicLockGuard operation_lock(session->operation_mutex_);
         {
@@ -622,19 +634,37 @@ ExecSessionResult SessionStore::write_stdin(
             if (session->retired) {
                 throw_unknown_daemon_session(daemon_session_id);
             }
-            apply_write_stdin_request_locked(
-                session.get(),
-                chars,
-                has_pty_size,
-                pty_rows,
-                pty_cols
-            );
+            validate_write_stdin_request_locked(*session, chars, has_pty_size, pty_rows, pty_cols);
         }
-        const YieldTimeOperationConfig& operation_config =
-            chars.empty() ? yield_time.write_stdin_poll : yield_time.write_stdin_input;
-        const unsigned long timeout_ms =
-            resolve_yield_time_ms(operation_config, has_yield_time_ms, yield_time_ms);
-        poll_result = wait_for_session_activity(session, timeout_ms);
+
+        if (has_pty_size) {
+            session->process->resize_pty(pty_rows, pty_cols);
+        }
+        if (!chars.empty()) {
+            try {
+                session->process->write_stdin(chars);
+            } catch (const ProcessStdinWriteTimeoutError& ex) {
+                stdin_write_timeout_message = ex.what();
+                retire_session_under_operation_lock(session);
+            } catch (const ProcessStdinClosedError& ex) {
+                BasicLockGuard session_lock(session->mutex_);
+                session->stdin_open = false;
+                throw StdinClosedError(ex.what());
+            }
+        }
+        if (stdin_write_timeout_message.empty()) {
+            const YieldTimeOperationConfig& operation_config =
+                chars.empty() ? yield_time.write_stdin_poll : yield_time.write_stdin_input;
+            const unsigned long timeout_ms =
+                resolve_yield_time_ms(operation_config, has_yield_time_ms, yield_time_ms);
+            poll_result = wait_for_session_activity(session, timeout_ms);
+        }
+    }
+
+    if (!stdin_write_timeout_message.empty()) {
+        erase_session_if_current(mutex_, sessions_, daemon_session_id, session);
+        join_session_pump(session.get());
+        throw StdinWriteTimeoutError(stdin_write_timeout_message);
     }
 
     if (poll_result.completed) {

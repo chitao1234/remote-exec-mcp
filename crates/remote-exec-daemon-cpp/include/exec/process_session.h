@@ -9,6 +9,12 @@ public:
     explicit ProcessStdinClosedError(const std::string& message) : std::runtime_error(message) {}
 };
 
+class ProcessStdinWriteTimeoutError : public std::runtime_error {
+public:
+    explicit ProcessStdinWriteTimeoutError(const std::string& message)
+        : std::runtime_error(message) {}
+};
+
 class ProcessPtyResizeUnsupportedError : public std::runtime_error {
 public:
     explicit ProcessPtyResizeUnsupportedError(const std::string& message)
@@ -28,7 +34,8 @@ public:
         const std::string& shell,
         const std::string& windows_posix_root,
         bool login,
-        bool tty
+        bool tty,
+        unsigned long stdin_write_timeout_ms
     );
 
     // Owns OS-specific process handles, stdio/PTY handles, process waiting,
@@ -58,4 +65,5 @@ std::string windows_process_command_line_for_test(
     const std::string& shell,
     bool login
 );
+unsigned long windows_pipe_creation_flags_for_test(unsigned long environment_flags);
 #endif

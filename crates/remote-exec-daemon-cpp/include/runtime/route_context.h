@@ -78,18 +78,21 @@ struct ExecRouteContext {
         const std::string& target_value,
         SessionStore& sessions_value,
         const YieldTimeConfig& yield_time_value,
+        unsigned long stdin_write_timeout_ms_value,
         unsigned long max_open_sessions_value,
         const std::string& daemon_instance_id_value,
         bool allow_exec_value
     )
         : request(request_value), target(target_value), sessions(sessions_value),
-          yield_time(yield_time_value), max_open_sessions(max_open_sessions_value),
-          daemon_instance_id(daemon_instance_id_value), allow_exec(allow_exec_value) {}
+          yield_time(yield_time_value), stdin_write_timeout_ms(stdin_write_timeout_ms_value),
+          max_open_sessions(max_open_sessions_value), daemon_instance_id(daemon_instance_id_value),
+          allow_exec(allow_exec_value) {}
 
     ExecRequestContext request;
     const std::string& target;
     SessionStore& sessions;
     const YieldTimeConfig& yield_time;
+    unsigned long stdin_write_timeout_ms;
     unsigned long max_open_sessions;
     const std::string& daemon_instance_id;
     bool allow_exec;

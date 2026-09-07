@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <exception>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -20,6 +23,8 @@
 #include "exec/process_environment.h"
 #include "exec/process_session.h"
 #include "exec/utf8_stream_decode.h"
+#include "platform/basic_mutex.h"
+#include "platform/deadline.h"
 #include "platform/platform.h"
 #include "platform/win32_dynamic.h"
 #include "platform/win32_error.h"
@@ -30,6 +35,9 @@
 #include "win32_pipe_io.h"
 
 namespace {
+
+const unsigned long WINDOWS_PIPE_READ_POLL_MS = 25UL;
+const DWORD WINDOWS_PROCESS_TERMINATE_WAIT_MS = 2000UL;
 
 using platform_detail::is_windows_cmd_family;
 using platform_detail::is_windows_command_family;
@@ -314,6 +322,15 @@ void make_handle_non_inheritable(UniqueHandle* handle, const char* label) {
     handle->reset(duplicate.release());
 }
 
+BasicMutex& inherited_handle_launch_mutex() {
+    static BasicMutex mutex;
+    return mutex;
+}
+
+DWORD windows_pipe_creation_flags(DWORD environment_flags) {
+    return environment_flags | DETACHED_PROCESS;
+}
+
 void write_stdin_to_pipe(const UniqueHandle& stdin_write, const std::string& chars) {
     const char* data = chars.data();
     std::size_t remaining = chars.size();
@@ -336,6 +353,70 @@ void write_stdin_to_pipe(const UniqueHandle& stdin_write, const std::string& cha
     }
 }
 
+struct PipeWriteState {
+    PipeWriteState(UniqueHandle write_handle_value, const std::string& chars_value)
+        : write_handle(std::move(write_handle_value)), chars(chars_value), completed(false) {}
+
+    UniqueHandle write_handle;
+    std::string chars;
+    BasicMutex mutex;
+    BasicCondVar cond;
+    std::exception_ptr error;
+    bool completed;
+};
+
+void run_pipe_write(const std::shared_ptr<PipeWriteState>& state) {
+    std::exception_ptr error;
+    try {
+        write_stdin_to_pipe(state->write_handle, state->chars);
+    } catch (...) {
+        error = std::current_exception();
+    }
+
+    BasicLockGuard lock(state->mutex);
+    state->error = error;
+    state->completed = true;
+    state->cond.broadcast();
+}
+
+void write_stdin_to_pipe_with_timeout(
+    const UniqueHandle& stdin_write,
+    const std::string& chars,
+    unsigned long timeout_ms
+) {
+    if (!stdin_write.valid()) {
+        throw ProcessStdinClosedError("stdin is closed for this session; rerun exec_command with "
+                                      "tty=true to keep stdin open");
+    }
+
+    UniqueHandle duplicate =
+        duplicate_non_inheritable_handle(stdin_write.get(), "DuplicateHandle(stdin write)");
+    const std::shared_ptr<PipeWriteState> state(new PipeWriteState(std::move(duplicate), chars));
+    std::thread writer(run_pipe_write, state);
+
+    bool completed = false;
+    {
+        platform::MonotonicDeadline deadline(timeout_ms);
+        BasicLockGuard lock(state->mutex);
+        while (!state->completed && !deadline.expired()) {
+            state->cond.timed_wait_ms(state->mutex, deadline.remaining_ms());
+        }
+        completed = state->completed;
+    }
+
+    if (!completed) {
+        writer.detach();
+        std::ostringstream message;
+        message << "stdin write exceeded configured timeout of " << timeout_ms << " ms";
+        throw ProcessStdinWriteTimeoutError(message.str());
+    }
+
+    writer.join();
+    if (state->error) {
+        std::rethrow_exception(state->error);
+    }
+}
+
 bool process_has_exited(const UniqueHandle& process_handle, int* exit_code) {
     if (!process_handle.valid()) {
         *exit_code = 1;
@@ -354,16 +435,19 @@ class Win32ProcessSession : public ProcessSession {
 public:
     Win32ProcessSession(
         UniqueHandle process_handle,
+        DWORD process_id,
         UniqueHandle stdin_write,
-        UniqueHandle stdout_read
+        UniqueHandle stdout_read,
+        unsigned long stdin_write_timeout_ms
     )
-        : process_handle_(std::move(process_handle)), stdin_write_(std::move(stdin_write)),
-          stdout_read_(std::move(stdout_read)) {}
+        : process_handle_(std::move(process_handle)), process_id_(process_id),
+          stdin_write_(std::move(stdin_write)), stdout_read_(std::move(stdout_read)),
+          stdin_write_timeout_ms_(stdin_write_timeout_ms) {}
 
     ~Win32ProcessSession() override { terminate(); }
 
     void write_stdin(const std::string& chars) override {
-        write_stdin_to_pipe(stdin_write_, chars);
+        write_stdin_to_pipe_with_timeout(stdin_write_, chars, stdin_write_timeout_ms_);
     }
 
     void resize_pty(unsigned short rows, unsigned short cols) override {
@@ -373,7 +457,11 @@ public:
     }
 
     std::string read_output(bool block, bool* eof, std::string* carry) override {
-        return read_console_output(stdout_read_.get(), block, eof, carry);
+        const std::string output = read_console_output(stdout_read_.get(), false, eof, carry);
+        if (block && output.empty() && !*eof) {
+            platform::sleep_ms(WINDOWS_PIPE_READ_POLL_MS);
+        }
+        return output;
     }
 
     std::string flush_carry(std::string* carry) override {
@@ -385,16 +473,62 @@ public:
     }
 
     void terminate() override {
-        if (process_handle_.valid()) {
-            TerminateProcess(process_handle_.get(), 1);
-            process_handle_.reset();
+        stdin_write_.reset();
+        if (!process_handle_.valid()) {
+            process_id_ = 0U;
+            return;
         }
+
+        if (process_id_ != 0U && win32_process_tree::process_tree_snapshot_supported()) {
+            (void)win32_process_tree::terminate_process_tree(process_id_);
+        }
+
+        if (WaitForSingleObject(process_handle_.get(), 0) != WAIT_OBJECT_0
+            && TerminateProcess(process_handle_.get(), 1U) == 0) {
+            log_message(
+                LOG_WARN,
+                "process_session",
+                std::string("TerminateProcess failed: ") + last_error_message("TerminateProcess")
+            );
+        }
+
+        const DWORD wait_result =
+            WaitForSingleObject(process_handle_.get(), WINDOWS_PROCESS_TERMINATE_WAIT_MS);
+        if (wait_result == WAIT_TIMEOUT) {
+            log_message(
+                LOG_WARN,
+                "process_session",
+                "process did not terminate within "
+                    + std::to_string(WINDOWS_PROCESS_TERMINATE_WAIT_MS)
+                    + " ms; releasing the process handle"
+            );
+        } else if (wait_result == WAIT_FAILED) {
+            log_message(
+                LOG_WARN,
+                "process_session",
+                std::string("process termination wait failed: ")
+                    + last_error_message("WaitForSingleObject")
+            );
+        }
+        process_handle_.reset();
+        process_id_ = 0U;
+    }
+
+    bool terminate_descendants() override {
+        stdin_write_.reset();
+        if (process_id_ == 0U || !win32_process_tree::process_tree_snapshot_supported()) {
+            return false;
+        }
+        (void)win32_process_tree::terminate_process_descendants(process_id_);
+        return true;
     }
 
 private:
     UniqueHandle process_handle_;
+    DWORD process_id_;
     UniqueHandle stdin_write_;
     UniqueHandle stdout_read_;
+    unsigned long stdin_write_timeout_ms_;
 };
 
 #ifdef REMOTE_EXEC_CPP_HAS_WINPTY
@@ -645,17 +779,19 @@ public:
         UniqueHandle process_handle,
         DWORD process_id,
         UniqueHandle stdin_write,
-        UniqueHandle stdout_read
+        UniqueHandle stdout_read,
+        unsigned long stdin_write_timeout_ms
     )
         : winpty_(std::move(winpty)), process_handle_(std::move(process_handle)),
           process_id_(process_id), stdin_write_(std::move(stdin_write)),
           stdout_read_(std::move(stdout_read)), console_closed_(false),
+          stdin_write_timeout_ms_(stdin_write_timeout_ms),
           output_filter_(WINPTY_OUTPUT_DEBOUNCE_MS, WINPTY_OUTPUT_MAX_HOLD_MS) {}
 
     ~WinptyProcessSession() override { terminate(); }
 
     void write_stdin(const std::string& chars) override {
-        write_stdin_to_pipe(stdin_write_, chars);
+        write_stdin_to_pipe_with_timeout(stdin_write_, chars, stdin_write_timeout_ms_);
     }
 
     void resize_pty(unsigned short rows, unsigned short cols) override {
@@ -766,6 +902,7 @@ private:
     UniqueHandle stdin_write_;
     UniqueHandle stdout_read_;
     bool console_closed_;
+    unsigned long stdin_write_timeout_ms_;
     TerminalOutputFilter output_filter_;
 };
 
@@ -774,7 +911,8 @@ std::unique_ptr<ProcessSession> launch_winpty_process_session(
     const std::string& workdir,
     const std::string& shell,
     const std::string& windows_posix_root,
-    bool login
+    bool login,
+    unsigned long stdin_write_timeout_ms
 ) {
     UniqueWinpty winpty = open_winpty_session();
     UniqueHandle stdin_write(open_winpty_pipe(winpty_conin_name(winpty.get()), GENERIC_WRITE));
@@ -787,7 +925,8 @@ std::unique_ptr<ProcessSession> launch_winpty_process_session(
         std::move(process.process_handle),
         process.process_id,
         std::move(stdin_write),
-        std::move(stdout_read)
+        std::move(stdout_read),
+        stdin_write_timeout_ms
     ));
 }
 #endif
@@ -800,19 +939,28 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     const std::string& shell,
     const std::string& windows_posix_root,
     bool login,
-    bool tty
+    bool tty,
+    unsigned long stdin_write_timeout_ms
 ) {
     if (tty) {
 #ifdef REMOTE_EXEC_CPP_HAS_WINPTY
         if (!process_session_supports_pty()) {
             throw std::runtime_error("tty is not supported on this host");
         }
-        return launch_winpty_process_session(command, workdir, shell, windows_posix_root, login);
+        return launch_winpty_process_session(
+            command,
+            workdir,
+            shell,
+            windows_posix_root,
+            login,
+            stdin_write_timeout_ms
+        );
 #else
         throw std::runtime_error("tty is not supported on this host");
 #endif
     }
 
+    BasicLockGuard launch_lock(inherited_handle_launch_mutex());
     PipePair stdout_pipe = create_pipe_pair("CreatePipe(stdout)");
     PipePair stdin_pipe = create_pipe_pair("CreatePipe(stdin)");
     make_handle_non_inheritable(&stdout_pipe.read_end, "DuplicateHandle(stdout)");
@@ -849,7 +997,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         nullptr,
         nullptr,
         TRUE,
-        environment.creation_flags,
+        windows_pipe_creation_flags(environment.creation_flags),
         &environment.data[0],
         workdir.empty() ? nullptr : native_workdir.c_str(),
         &startup_info,
@@ -871,8 +1019,10 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
 
     return std::unique_ptr<ProcessSession>(new Win32ProcessSession(
         std::move(process_handle),
+        process_info.dwProcessId,
         std::move(stdin_pipe.write_end),
-        std::move(stdout_pipe.read_end)
+        std::move(stdout_pipe.read_end),
+        stdin_write_timeout_ms
     ));
 }
 
@@ -899,6 +1049,14 @@ bool process_session_supports_pty() {
     return false;
 #endif
 }
+
+#ifdef REMOTE_EXEC_CPP_TESTING
+unsigned long windows_pipe_creation_flags_for_test(unsigned long environment_flags) {
+    return static_cast<unsigned long>(
+        windows_pipe_creation_flags(static_cast<DWORD>(environment_flags))
+    );
+}
+#endif
 
 #ifdef REMOTE_EXEC_CPP_TESTING
 std::string windows_process_command_line_for_test(

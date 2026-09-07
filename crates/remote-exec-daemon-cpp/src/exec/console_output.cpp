@@ -332,7 +332,7 @@ std::string read_console_output(HANDLE pipe, bool block, bool* eof, std::string*
         primary_console_output_code_page(),
         CP_ACP,
         carry,
-        read_pipe_available_raw(pipe, nullptr, false),
+        read_pipe_available_raw(pipe, eof, false),
         false
     );
 }

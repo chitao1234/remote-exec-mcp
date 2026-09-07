@@ -34,6 +34,7 @@ pub enum RpcErrorCode {
     UnknownPortBind,
     SandboxDenied,
     StdinClosed,
+    StdinWriteTimeout,
     TtyDisabled,
     TtyUnsupported,
     InvalidPtySize,
@@ -94,6 +95,7 @@ impl RpcErrorCode {
             Self::UnknownPortBind => "unknown_port_bind",
             Self::SandboxDenied => "sandbox_denied",
             Self::StdinClosed => "stdin_closed",
+            Self::StdinWriteTimeout => "stdin_write_timeout",
             Self::TtyDisabled => "tty_disabled",
             Self::TtyUnsupported => "tty_unsupported",
             Self::InvalidPtySize => "invalid_pty_size",
@@ -154,6 +156,7 @@ impl RpcErrorCode {
             "unknown_port_bind" => Some(Self::UnknownPortBind),
             "sandbox_denied" => Some(Self::SandboxDenied),
             "stdin_closed" => Some(Self::StdinClosed),
+            "stdin_write_timeout" => Some(Self::StdinWriteTimeout),
             "tty_disabled" => Some(Self::TtyDisabled),
             "tty_unsupported" => Some(Self::TtyUnsupported),
             "invalid_pty_size" => Some(Self::InvalidPtySize),
@@ -236,6 +239,18 @@ mod tests {
         assert_eq!(
             RpcErrorCode::from_wire_value("exec_session_lock_timeout"),
             Some(RpcErrorCode::ExecSessionLockTimeout)
+        );
+    }
+
+    #[test]
+    fn rpc_error_code_stdin_write_timeout_round_trips() {
+        assert_eq!(
+            RpcErrorCode::StdinWriteTimeout.wire_value(),
+            "stdin_write_timeout"
+        );
+        assert_eq!(
+            RpcErrorCode::from_wire_value("stdin_write_timeout"),
+            Some(RpcErrorCode::StdinWriteTimeout)
         );
     }
 

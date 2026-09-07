@@ -25,6 +25,7 @@ constexpr unsigned long DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS = 30000UL;
 constexpr unsigned long DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS = 10000UL;
 constexpr unsigned long DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS = 30000UL;
 constexpr unsigned long DEFAULT_TLS_HANDSHAKE_TIMEOUT_MS = 10000UL;
+constexpr unsigned long DEFAULT_STDIN_WRITE_TIMEOUT_MS = 30000UL;
 constexpr unsigned long DEFAULT_REVERSE_MIN_IDLE_CONNECTIONS = 4UL;
 constexpr unsigned long DEFAULT_REVERSE_MAX_CONNECTIONS = 128UL;
 constexpr unsigned long DEFAULT_REVERSE_RECONNECT_MS = 1000UL;
@@ -127,6 +128,7 @@ struct DaemonConfig {
     std::size_t max_request_header_bytes = DEFAULT_MAX_REQUEST_HEADER_BYTES;
     std::size_t max_request_body_bytes = DEFAULT_MAX_REQUEST_BODY_BYTES;
     unsigned long http_connection_idle_timeout_ms = DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS;
+    unsigned long stdin_write_timeout_ms = DEFAULT_STDIN_WRITE_TIMEOUT_MS;
     TransferLimitConfig transfer_limits = default_transfer_limit_config();
     unsigned long max_open_sessions = DEFAULT_MAX_OPEN_SESSIONS;
     PortForwardLimitConfig port_forward_limits;

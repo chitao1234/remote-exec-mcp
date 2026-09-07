@@ -30,6 +30,7 @@ ServerRouteContext make_server_route_context(
         config.target,
         services.sessions,
         config.yield_time,
+        config.stdin_write_timeout_ms,
         config.max_open_sessions,
         metadata.daemon_instance_id,
         config.allow_exec

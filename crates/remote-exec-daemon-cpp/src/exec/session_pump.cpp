@@ -142,8 +142,10 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
         std::string chunk;
         {
             // Move the carry out under lock. The lock must be released before
-            // read_output because it is a blocking I/O call. The carry is
-            // moved back under lock after the call completes or throws.
+            // read_output because it may wait for I/O. Backends return
+            // periodically so closing can be observed without holding this
+            // mutex. The carry is moved back under lock after the call
+            // completes or throws.
             BasicLockGuard lock(session->mutex_);
             carry = std::move(session->output_.decode_carry);
         }

@@ -538,8 +538,10 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     const std::string& shell,
     const std::string& windows_posix_root,
     bool login,
-    bool tty
+    bool tty,
+    unsigned long stdin_write_timeout_ms
 ) {
+    (void)stdin_write_timeout_ms;
     const std::vector<std::string> argv = platform::shell_argv(shell, login, command);
     ExecEnvironment exec_environment = build_exec_environment_values(shell, windows_posix_root);
     exec_environment.refresh_pointers();

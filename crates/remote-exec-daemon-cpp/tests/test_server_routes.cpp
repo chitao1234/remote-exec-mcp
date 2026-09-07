@@ -48,6 +48,62 @@ static std::string trim_trailing_exec_output(std::string output) {
 static bool contains_terminal_escape(const std::string& input) {
     return input.find('\x1b') != std::string::npos;
 }
+
+static void assert_stdin_write_timeout_route(TestRouteHarness& harness, const fs::path& root) {
+    harness.state.config.stdin_write_timeout_ms = 250UL;
+    harness.refresh_context();
+
+    const HttpResponse start_response = route_request(
+        harness,
+        make_json_http_request(
+            "/v1/exec/start",
+            Json{
+                {"cmd", test_exec_pty::windows_ping_sleep_command(30UL)},
+                {"workdir", root.string()},
+                {"login", false},
+                {"tty", false},
+                {"yield_time_ms", 250},
+            }
+        )
+    );
+    TEST_ASSERT(start_response.status == 200);
+    const Json started = Json::parse(start_response.body);
+    TEST_ASSERT(started.at("running").get<bool>());
+    const std::string daemon_session_id = started.at("daemon_session_id").get<std::string>();
+
+    const std::uint64_t write_started_at = platform::monotonic_ms();
+    const HttpResponse timeout_response = route_request(
+        harness,
+        make_json_http_request(
+            "/v1/exec/write",
+            Json{
+                {"daemon_session_id", daemon_session_id},
+                {"chars", std::string(1024U * 1024U, 'x')},
+                {"yield_time_ms", 250},
+            }
+        )
+    );
+    const std::uint64_t elapsed_ms = platform::monotonic_ms() - write_started_at;
+    TEST_ASSERT(timeout_response.status == 408);
+    const Json timeout_body = Json::parse(timeout_response.body);
+    TEST_ASSERT(timeout_body.at("code").get<std::string>() == "stdin_write_timeout");
+    TEST_ASSERT(timeout_body.at("message").get<std::string>().find("250 ms") != std::string::npos);
+    TEST_ASSERT(elapsed_ms < 5000UL);
+
+    const HttpResponse poll_response = route_request(
+        harness,
+        make_json_http_request(
+            "/v1/exec/write",
+            Json{
+                {"daemon_session_id", daemon_session_id},
+                {"chars", ""},
+                {"yield_time_ms", 250},
+            }
+        )
+    );
+    TEST_ASSERT(poll_response.status == 400);
+    TEST_ASSERT(Json::parse(poll_response.body).at("code").get<std::string>() == "unknown_session");
+}
 #endif
 
 static Json exec_write_json(
@@ -113,11 +169,8 @@ static Json poll_exec_until_done(
 
 static std::string long_running_non_tty_command() {
 #ifdef _WIN32
-    return test_exec_pty::windows_stdin_echo_sleep_helper_command(
-        "--server-routes-helper",
-        "ignored",
-        WINDOWS_LIVE_SESSION_SLEEP_SECONDS
-    );
+    return "echo ready&"
+           + test_exec_pty::windows_ping_sleep_command(WINDOWS_LIVE_SESSION_SLEEP_SECONDS);
 #else
     return "printf ready; sleep 5";
 #endif
@@ -485,6 +538,12 @@ int main(int argc, char** argv) {
     TestRouteHarness harness(root);
     run_platform_neutral_server_route_tests(harness, root);
     assert_exec_routes(harness, root);
+#ifdef _WIN32
+    const fs::path timeout_root =
+        make_daemon_test_root("remote-exec-cpp-server-routes-stdin-timeout-test");
+    TestRouteHarness timeout_harness(timeout_root);
+    assert_stdin_write_timeout_route(timeout_harness, timeout_root);
+#endif
 
     return 0;
 }

@@ -54,6 +54,11 @@ public:
     explicit StdinClosedError(const std::string& message) : std::runtime_error(message) {}
 };
 
+class StdinWriteTimeoutError : public std::runtime_error {
+public:
+    explicit StdinWriteTimeoutError(const std::string& message) : std::runtime_error(message) {}
+};
+
 class SessionStore {
 public:
     SessionStore();
@@ -67,6 +72,7 @@ public:
         const std::string& target,
         const ExecStartRequestSpec& request,
         const YieldTimeConfig& yield_time,
+        unsigned long stdin_write_timeout_ms,
         unsigned long max_open_sessions
     );
     ExecSessionResult write_stdin(
