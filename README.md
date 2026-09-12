@@ -1,9 +1,9 @@
 # remote-exec-mcp
 
 `remote-exec-mcp` is a remote-first MCP server for running Codex-style local
-system tools on configured Linux and Windows machines. Agents connect to one
-broker, choose an explicit target, and use familiar tools for command execution,
-stdin, patching, image reads, file transfer, and TCP/UDP forwarding.
+system tools on configured Linux, macOS, and Windows machines. Agents connect to
+one broker, choose an explicit target, and use familiar tools for command
+execution, stdin, patching, image reads, file transfer, and TCP/UDP forwarding.
 
 The tool interface is influenced by
 [Codex](https://github.com/openai/codex), but this repository is a separate
@@ -165,6 +165,14 @@ Common rules:
 - Both daemons support reverse TLS and explicit insecure HTTP. The C++ daemon
   requires an OpenSSL- or LibreSSL-backed build, or a BoringSSL-backed POSIX
   build, for TLS.
+
+On macOS, use an existing directory such as `/Users/you/work` in place of the
+examples' `/srv/work` paths. The Rust broker, Rust daemon, and C++ daemon support
+native command execution, PTYs, file operations, transfers, and TCP/UDP forwards.
+The system `sh`, Bash, and zsh load their login profiles when `login` is omitted
+or true; set `login: false` to skip profile initialization. C++ builds use the
+Xcode Command Line Tools' `c++` and `make` through the existing `all-posix` and
+`check-posix` targets.
 
 ## TLS And Bootstrap
 
@@ -727,11 +735,11 @@ cargo clippy --workspace --all-targets --all-features --target x86_64-pc-windows
 cargo build --workspace --all-targets --all-features --target x86_64-pc-windows-gnu
 ```
 
-CI covers Rust broker/daemon paths on Linux and Windows, standalone C++ daemon
-jobs on Linux and Windows, C++ formatting, selected Wine runs for legacy GNU
-Windows binaries when available, and periodic/manual BSD coverage using BSD
-make. Rust broker integration tests consume a prebuilt C++ daemon binary when
-one is present and skip C++ daemon scenarios when it is absent.
+CI covers Rust broker/daemon paths on Linux, macOS, and Windows, standalone C++
+daemon jobs on Linux, macOS, and Windows, C++ formatting, selected Wine runs for
+legacy GNU Windows binaries when available, and periodic/manual BSD coverage
+using BSD make. Rust broker integration tests consume a prebuilt C++ daemon
+binary when one is present and skip C++ daemon scenarios when it is absent.
 
 ## References
 

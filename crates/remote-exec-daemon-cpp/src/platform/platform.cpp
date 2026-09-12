@@ -70,6 +70,8 @@ std::string hostname() {
 std::string platform_name() {
 #ifdef _WIN32
     return "windows";
+#elif defined(__APPLE__) && defined(__MACH__)
+    return "macos";
 #else
     struct utsname uts;
     if (uname(&uts) == 0) {
@@ -91,6 +93,8 @@ std::string arch_name() {
 #else
     return "unknown";
 #endif
+#elif defined(__APPLE__) && defined(__MACH__) && defined(__aarch64__)
+    return "aarch64";
 #else
     struct utsname uts;
     if (uname(&uts) == 0 && uts.machine[0] != '\0') {

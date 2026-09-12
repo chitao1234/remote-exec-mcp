@@ -223,11 +223,14 @@ ExecEnvironment build_exec_environment_values(
 ) {
     ExecEnvironment env;
     for (char** current = environ; current != nullptr && *current != nullptr; ++current) {
+        // LC_ALL and the LC_* category variables outrank LANG and LC_CTYPE, so
+        // an inherited override would defeat the locale plan applied below.
+        if (std::strncmp(*current, "LC_", 3U) == 0) {
+            continue;
+        }
         env.values.push_back(*current);
     }
     remove_env_key(&env.values, "LANG");
-    remove_env_key(&env.values, "LC_CTYPE");
-    remove_env_key(&env.values, "LC_ALL");
     const std::vector<ProcessEnvironmentPair> normalized_pairs =
         normalized_process_environment_pairs(resolved_locale_env_plan().as_pairs());
     for (std::size_t i = 0; i < normalized_pairs.size(); ++i) {

@@ -29,6 +29,52 @@ fn assert_exit_code(output: &std::process::Output, expected: i32) {
     );
 }
 
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn remote_exec_cli_local_macos_shells_load_login_profiles() {
+    let fixture = support::spawners::spawn_broker_config_local_only().await;
+    let home = tempfile::tempdir().unwrap();
+    for profile in [".profile", ".bash_profile", ".zprofile"] {
+        std::fs::write(home.path().join(profile), "export LOGIN_SENTINEL=loaded\n").unwrap();
+    }
+
+    for shell in ["/bin/sh", "/bin/bash", "/bin/zsh"] {
+        for login in [true, false] {
+            let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
+                .env("HOME", home.path())
+                .env("ZDOTDIR", home.path())
+                .env_remove("LOGIN_SENTINEL")
+                .arg("--broker-config")
+                .arg(&fixture.config_path)
+                .args([
+                    "--json",
+                    "exec-command",
+                    "--target",
+                    "local",
+                    "--shell",
+                    shell,
+                ])
+                .arg(if login { "--login" } else { "--no-login" })
+                .args([
+                    "--yield-time-ms",
+                    "10000",
+                    "printf '%s' \"${LOGIN_SENTINEL-unset}\"",
+                ])
+                .output()
+                .await
+                .unwrap();
+            assert_exit_code(&output, 0);
+            let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(response["structured_content"]["exit_code"], 0);
+            assert_eq!(
+                response["structured_content"]["output"],
+                if login { "loaded" } else { "unset" },
+                "shell={shell}, login={login}: {response}"
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn remote_exec_cli_lists_targets_from_broker_config() {
     let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;

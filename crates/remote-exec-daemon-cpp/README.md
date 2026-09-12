@@ -79,6 +79,13 @@ From this directory, build and test the native POSIX path:
 make check-posix
 ```
 
+On macOS these commands work with the GNU Make 3.81 and Apple Clang supplied
+by the Xcode Command Line Tools. Feature probes respect the compiler's macOS
+deployment target, so an SDK declaration for a newer API does not enable calls
+that are unavailable on the target OS. Set `MACOSX_DEPLOYMENT_TARGET` when
+building for an older macOS release. Target metadata reports `macos`, with
+`aarch64` for native Apple Silicon builds and `x86_64` for Intel builds.
+
 Run the daemon with the example configuration:
 
 ```sh
@@ -284,6 +291,12 @@ OpenSSL 1.0.x remains available when a legacy compatibility path requires it.
   argument.
 - POSIX non-PTY command output merges stdout and stderr in emitted order. Use
   `tty=true` for interactive commands that need later stdin writes.
+- POSIX login shells run with `-l`. On macOS, `bash` and the `sh` shipped as
+  Bash load their profiles this way for noninteractive commands.
+- POSIX child environments drop inherited `LANG` and every `LC_*` override,
+  then apply the locale plan. macOS uses `LANG=C` with a UTF-8 `LC_CTYPE`
+  because `C.UTF-8` is absent there; other systems prefer `C.UTF-8` when it
+  exists.
 - Windows non-PTY commands run detached from the daemon's console while their
   standard streams remain connected to daemon-owned pipes. A stdin pipe write
   that exceeds `stdin_write_timeout_ms` terminates and retires the session so

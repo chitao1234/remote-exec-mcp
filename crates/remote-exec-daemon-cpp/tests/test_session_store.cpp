@@ -1542,15 +1542,17 @@ static void assert_posix_locale_and_late_output(
     ScopedEnvVar lang_guard("LANG");
     ScopedEnvVar lc_ctype_guard("LC_CTYPE");
     ScopedEnvVar lc_all_guard("LC_ALL");
+    ScopedEnvVar lc_messages_guard("LC_MESSAGES");
     lang_guard.set("parent-lang-must-not-leak");
     lc_ctype_guard.set("parent-lc-ctype-must-not-leak");
     lc_all_guard.set("parent-lc-all-must-not-leak");
+    lc_messages_guard.set("parent-lc-messages-must-not-leak");
     const std::vector<std::pair<std::string, std::string>> expected_locale =
         resolved_locale_env_plan().as_pairs();
     const Json locale_response = start_command_session(
         store,
         root,
-        "printf '%s|%s|%s\\n' \"$LC_ALL\" \"$LANG\" \"$LC_CTYPE\"",
+        "printf '%s|%s|%s|%s\\n' \"$LC_ALL\" \"$LANG\" \"$LC_CTYPE\" \"$LC_MESSAGES\"",
         shell,
         false,
         5000UL,
@@ -1561,7 +1563,8 @@ static void assert_posix_locale_and_late_output(
         locale_response.at("output").get<std::string>()
         == locale_pair_value(expected_locale, "LC_ALL") + "|"
                + locale_pair_value(expected_locale, "LANG") + "|"
-               + locale_pair_value(expected_locale, "LC_CTYPE") + "\n"
+               + locale_pair_value(expected_locale, "LC_CTYPE") + "|"
+               + locale_pair_value(expected_locale, "LC_MESSAGES") + "\n"
     );
 
     const Json newline_preserved = start_test_command(

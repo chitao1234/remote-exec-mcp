@@ -3,6 +3,8 @@ listen = "0.0.0.0:9443"
 # Must already exist when the daemon starts.
 default_workdir = "/srv/work"
 allow_login_shell = true
+# Login commands load the selected shell's profiles, including sh, Bash, and
+# zsh on macOS. Set login=false per command to skip profile initialization.
 # Optional operation policies. Both default to true for compatibility.
 # `allow_exec = false` rejects command start and stdin/write RPCs.
 # `allow_apply_patch = false` rejects patch RPCs only; commands can still modify files.
