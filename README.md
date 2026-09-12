@@ -1,7 +1,7 @@
 # remote-exec-mcp
 
 `remote-exec-mcp` is a remote-first MCP server for running Codex-style local
-system tools on multiple Linux and Windows machines. Agents connect to one
+system tools on multiple Linux, macOS, and Windows machines. Agents connect to one
 broker, choose an explicit target, and use familiar tools for command
 execution, stdin, patching, text-file reads/writes, image reads, file transfer,
 and TCP/UDP forwarding.
@@ -146,6 +146,14 @@ Daemon config covers:
 
 `default_workdir` must already exist when a broker `[local]` target or daemon
 starts.
+
+On macOS, use an existing directory such as `/Users/you/work` in place of the
+examples' `/srv/work` paths. The Rust broker, Rust daemon, and C++ daemon support
+native command execution, PTYs, file operations, transfers, and TCP/UDP forwards.
+The system `sh`, Bash, and zsh load their login profiles when `login` is omitted
+or true; set `login: false` to skip profile initialization. C++ builds use the
+Xcode Command Line Tools' `c++` and `make` through the existing `all-posix` and
+`check-posix` targets.
 
 ## TLS And Bootstrap
 
@@ -653,14 +661,15 @@ CI also exercises broker, daemon, and host `--no-default-features` test and
 clippy jobs on Ubuntu so the `tls-disabled` and host feature-gated code paths
 stay intentionally covered.
 
-CI exercises the Rust broker and Rust daemon on Linux and Windows. The Rust
-broker integration tests consume a prebuilt C++ daemon binary when one is
+CI exercises the Rust broker and Rust daemon on Linux, macOS, and Windows. The
+Rust broker integration tests consume a prebuilt C++ daemon binary when one is
 present, and skip the C++ daemon scenarios when it is absent; they do not build
 the C++ daemon themselves. CI builds that C++ daemon binary in an explicit step
-before the Rust test job. The standalone C++ daemon also has its own Linux and
-Windows CI job: POSIX runtime tests run on Linux, Windows 2000, GNU x64, NT
-3.x/Winsock 1, and NT 4.0/Winsock 1 test binaries run under Wine on Linux when
-available, and the 32-bit host-native MSVC NMAKE path runs on `windows-latest`.
+before the Rust test job. The standalone C++ daemon also has its own Linux,
+macOS, and Windows CI jobs: POSIX runtime tests run on Linux and macOS; Windows
+2000, GNU x64, NT 3.x/Winsock 1, and NT 4.0/Winsock 1 test binaries run under Wine
+on Linux when available, and the 32-bit host-native MSVC NMAKE path runs on
+`windows-latest`.
 CI also gates owned C++ daemon source formatting with `clang-format`. The GNU
 Winsock 1.1 Unicode variant has also been manually tested on Windows NT 3.51,
 and the GNU ANSI API path has been tested on Windows 95 and Windows 98 SE. The

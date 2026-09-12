@@ -45,8 +45,8 @@ $1: $2
 endef
 
 define register_host_test
-$(eval $(call run_test,$(HOST_$(1)_TEST_TARGET),$(HOST_$(1))))
-$(eval $(call link_host_test,$(HOST_$(1)),$(HOST_$(1)_OBJS)))
+$(call run_test,$(HOST_$(1)_TEST_TARGET),$(HOST_$(1)))
+$(call link_host_test,$(HOST_$(1)),$(HOST_$(1)_OBJS))
 endef
 
 all-posix: $(POSIX_TARGET)
@@ -72,7 +72,9 @@ $(HOST_TEST_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp $(POSIX_CONFIG_HEADER)
 	mkdir -p $(dir $@)
 	$(HOST_CXX) $(HOST_TEST_CPPFLAGS) $(HOST_TEST_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 
-$(foreach test,$(HOST_POSIX_TESTS),$(call register_host_test,$(test)))
+# Expand complete rule blocks inside eval; GNU make 3.81 rejects the leftover
+# newlines from a foreach whose body contains multiple separate eval calls.
+$(foreach test,$(HOST_POSIX_TESTS),$(eval $(call register_host_test,$(test))))
 
 test-server-streaming: $(HOST_SERVER_STREAMING_TEST_TARGET)
 

@@ -103,6 +103,13 @@ Host-native POSIX daemon:
   load-sensitive lifecycle flakes. Override with `STRESS_RUNS=<n>` and
   `STRESS_JOBS=<n>`.
 
+On macOS these commands work with the GNU Make 3.81 and Apple Clang supplied
+by the Xcode Command Line Tools. Feature probes respect the compiler's macOS
+deployment target, so an SDK declaration for a newer API does not enable calls
+that are unavailable on the target OS. Set `MACOSX_DEPLOYMENT_TARGET` when
+building for an older macOS release. Target metadata reports `macos`, with
+`aarch64` for native Apple Silicon builds and `x86_64` for Intel builds.
+
 Windows GNU build matrix:
 
 - `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2`
@@ -617,7 +624,10 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - POSIX default shell selection follows the Rust daemon's policy: configured
   `default_shell`, then `SHELL`, passwd shell, `bash`, and `/bin/sh`.
 - POSIX exec uses `shell -c <cmd>` or `shell -l -c <cmd>` for login shells.
-- POSIX child processes currently force `LC_ALL=C.UTF-8` and `LANG=C.UTF-8`.
+- macOS child processes use `LANG=C` and `LC_CTYPE=en_US.UTF-8`, clearing
+  inherited `LC_*` overrides. This keeps C formatting and messages with UTF-8
+  text handling on releases that do not provide `C.UTF-8`.
+- Other POSIX child processes currently force `LC_ALL=C.UTF-8` and `LANG=C.UTF-8`.
 - Windows C++ exec supports `cmd.exe` and `command.com`. `cmd.exe` uses `/C`
   and adds `/D` when `login=false`; `command.com` uses `/C` without `/D`
   because `/D` is a `cmd.exe`-specific flag. The default shell is configured

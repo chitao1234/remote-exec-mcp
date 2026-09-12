@@ -70,6 +70,7 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
+          - macos-latest
 
     steps:
       - name: Checkout
@@ -93,7 +94,7 @@ jobs:
           prefix-key: v1-rust-test-nodebug
 
       - name: Run tests
-        if: runner.os == 'Linux'
+        if: runner.os != 'Windows'
         shell: bash
         env:
           REMOTE_EXEC_CPP_DAEMON: ${{ github.workspace }}/crates/remote-exec-daemon-cpp/build/remote-exec-daemon-cpp
@@ -197,6 +198,7 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
+          - macos-latest
 
     steps:
       - name: Checkout
@@ -248,9 +250,16 @@ jobs:
         run: cargo clippy -p remote-exec-host --no-default-features --all-targets --locked -- -D warnings
 
   cpp-posix:
-    name: C++ daemon POSIX (ubuntu-latest)
-    runs-on: ubuntu-latest
+    name: C++ daemon POSIX (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
 
     steps:
       - name: Checkout
@@ -268,6 +277,7 @@ jobs:
             cpp-${{ runner.os }}-
 
       - name: Install Linux C++ dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y g++ make
@@ -275,7 +285,7 @@ jobs:
       - name: Run POSIX C++ checks
         shell: bash
         run: |
-          make -k -j"$(nproc)" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-posix check-posix
+          make -k -j"$(getconf _NPROCESSORS_ONLN)" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-posix check-posix
 
   cpp-windows-cross:
     name: C++ daemon Windows cross (${{ matrix.name }})

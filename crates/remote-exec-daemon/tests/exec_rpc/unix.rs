@@ -182,6 +182,55 @@ async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
     assert_eq!(response.output().output, "default-ready");
 }
 
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn macos_login_profiles_work_in_pipe_and_pty_modes() {
+    let home = tempfile::tempdir().unwrap();
+    for profile in [".profile", ".bash_profile", ".zprofile"] {
+        std::fs::write(home.path().join(profile), "export LOGIN_SENTINEL=loaded\n").unwrap();
+    }
+    let home_text = home.path().to_str().unwrap();
+    let fixture = support::spawn::spawn_daemon_with_process_environment(
+        DEFAULT_TEST_TARGET,
+        process_environment_with(&[
+            ("HOME", home_text),
+            ("ZDOTDIR", home_text),
+            ("LOGIN_SENTINEL", "unset"),
+        ]),
+    )
+    .await;
+
+    for shell in ["sh", "/bin/sh", "/bin/bash", "/bin/zsh"] {
+        for tty in [false, true] {
+            for login in [None, Some(false)] {
+                let response = fixture
+                    .rpc::<ExecStartRequest, ExecResponse>(
+                        "/v1/exec/start",
+                        &test_exec_start_request(
+                            Some(shell),
+                            "printf '%s' \"$LOGIN_SENTINEL\"",
+                            tty,
+                            Some(COMPLETED_COMMAND_YIELD_MS),
+                            None,
+                            login,
+                        ),
+                    )
+                    .await;
+                assert_eq!(response.output().exit_code, Some(0), "{response:#?}");
+                assert_eq!(
+                    response.output().output,
+                    if login == Some(false) {
+                        "unset"
+                    } else {
+                        "loaded"
+                    },
+                    "shell={shell}, tty={tty}, login={login:?}"
+                );
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn exec_start_rejects_explicit_login_when_disabled_by_config() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
@@ -517,11 +566,13 @@ async fn exec_output_preserves_pipe_mode_output_after_external_pipeline_steps() 
 async fn exec_output_uses_one_pipe_for_stdout_and_stderr_in_pipe_mode() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
+    // Include a negative control: comparing failed /proc readlinks would
+    // otherwise report equal empty strings on hosts without Linux procfs.
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &unix_start_request(
-                r#"if [ "$(readlink /proc/$$/fd/1)" = "$(readlink /proc/$$/fd/2)" ]; then printf 'shared\n'; else printf 'separate\n'; fi"#,
+                r#"if [ /dev/fd/1 -ef /dev/fd/2 ]; then printf 'shared\n'; else printf 'separate\n'; fi; (exec 2>/dev/null; if [ /dev/fd/1 -ef /dev/fd/2 ]; then printf 'shared\n'; else printf 'separate\n'; fi)"#,
                 false,
                 Some(COMPLETED_COMMAND_YIELD_MS),
                 None,
@@ -531,7 +582,7 @@ async fn exec_output_uses_one_pipe_for_stdout_and_stderr_in_pipe_mode() {
 
     assert!(!response.output().running);
     assert_eq!(response.output().exit_code, Some(0));
-    assert_eq!(response.output().output, "shared\n");
+    assert_eq!(response.output().output, "shared\nseparate\n");
 }
 
 #[tokio::test]

@@ -187,10 +187,24 @@ void upsert_env_value(std::vector<std::string>* values, const std::string& assig
 ExecEnvironment build_exec_environment_values(bool tty) {
     ExecEnvironment env;
     for (char** current = environ; current != nullptr && *current != nullptr; ++current) {
+#ifdef __APPLE__
+        // An inherited LC_ALL or category override would defeat the macOS plan.
+        if (std::strncmp(*current, "LC_", 3U) == 0) {
+            continue;
+        }
+#endif
         env.values.push_back(*current);
     }
+#ifdef __APPLE__
+    // C.UTF-8 is absent on older macOS releases. Keep C formatting and messages
+    // while using the system-provided UTF-8 character locale, without changing
+    // the daemon's process-global locale in this multithreaded launch path.
+    upsert_env_value(&env.values, "LANG=C");
+    upsert_env_value(&env.values, "LC_CTYPE=en_US.UTF-8");
+#else
     upsert_env_value(&env.values, "LC_ALL=C.UTF-8");
     upsert_env_value(&env.values, "LANG=C.UTF-8");
+#endif
     if (tty) {
         bool has_term = false;
         for (std::size_t i = 0; i < env.values.size(); ++i) {

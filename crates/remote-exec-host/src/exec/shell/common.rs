@@ -43,10 +43,22 @@ fn shell_command_with_login_flag(shell: &str, login: bool, cmd: &str) -> SpawnCo
 }
 
 fn unix_shell_command(shell: &str, login: bool, cmd: &str) -> SpawnCommand {
+    let mut args = Vec::new();
+    // Some Bash builds (including Apple's) only read profiles for a
+    // noninteractive login shell when -l is explicit. macOS also ships Bash
+    // as /bin/sh. Other POSIX shells need not support this option.
+    if login
+        && (shell_basename(shell) == "bash"
+            || (cfg!(target_os = "macos") && shell_basename(shell) == "sh"))
+    {
+        args.push("-l".to_string());
+    }
+    args.push("-c".to_string());
+    args.push(cmd.to_string());
     SpawnCommand {
         program: shell.to_string(),
         argv0: login.then(|| format!("-{}", shell_basename(shell))),
-        args: vec!["-c".to_string(), cmd.to_string()],
+        args,
         windows_raw_arg_tail: None,
     }
 }
@@ -217,10 +229,10 @@ mod tests {
     #[test]
     fn unix_shell_command_uses_login_argv0_for_login_shells() {
         assert_eq!(
-            shell_command_for_platform(false, "/bin/sh", true, "printf ok"),
+            shell_command_for_platform(false, "/bin/ksh", true, "printf ok"),
             SpawnCommand {
-                program: "/bin/sh".to_string(),
-                argv0: Some("-sh".to_string()),
+                program: "/bin/ksh".to_string(),
+                argv0: Some("-ksh".to_string()),
                 args: vec!["-c".to_string(), "printf ok".to_string()],
                 windows_raw_arg_tail: None,
             }

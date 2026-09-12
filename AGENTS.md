@@ -26,7 +26,7 @@ explicitly changes that assumption.
 ## Project Overview
 
 This repository is a Rust 2024 workspace for a remote-first MCP server that
-exposes Codex-style local-system tools across configured Linux and Windows
+exposes Codex-style local-system tools across configured Linux, macOS, and Windows
 targets. It also contains a narrower standalone C++11 daemon with native POSIX
 and legacy Windows build paths. The GNU make matrix separates the Win32 API
 floor from the Winsock version and Windows family macros, covering a Winsock 1

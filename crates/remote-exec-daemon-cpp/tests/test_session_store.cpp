@@ -905,6 +905,14 @@ static void assert_posix_locale_and_late_output(
     (void)shell;
     (void)yield_time;
 #else
+#ifdef __APPLE__
+    ScopedEnvVar lc_all_guard("LC_ALL");
+    ScopedEnvVar lc_ctype_guard("LC_CTYPE");
+    ScopedEnvVar lc_messages_guard("LC_MESSAGES");
+    lc_all_guard.set("invalid-locale");
+    lc_ctype_guard.set("invalid-locale");
+    lc_messages_guard.set("invalid-locale");
+#endif
     const Json locale_response = start_test_command(
         store,
         "printf '%s %s\\n' \"$LC_ALL\" \"$LANG\"",
@@ -917,7 +925,24 @@ static void assert_posix_locale_and_late_output(
         64UL
     );
     TEST_ASSERT(locale_response.at("exit_code").get<int>() == 0);
+#ifdef __APPLE__
+    TEST_ASSERT(locale_response.at("output").get<std::string>() == " C\n");
+    const Json charmap_response = start_test_command(
+        store,
+        "locale charmap; value='é'; printf '%s\\n' \"${#value}\"",
+        root.string(),
+        shell,
+        false,
+        5000UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time,
+        64UL
+    );
+    TEST_ASSERT(charmap_response.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(charmap_response.at("output").get<std::string>() == "UTF-8\n1\n");
+#else
     TEST_ASSERT(locale_response.at("output").get<std::string>() == "C.UTF-8 C.UTF-8\n");
+#endif
 
     const Json newline_preserved = start_test_command(
         store,
@@ -1087,9 +1112,14 @@ static void assert_posix_exec_uses_parent_built_environment_and_path(
     );
     TEST_ASSERT(pipe_response.at("exit_code").get<int>() == 0);
     const std::string pipe_output = pipe_response.at("output").get<std::string>();
+#ifdef __APPLE__
+    const std::string locale_prefix = "|C|";
+#else
+    const std::string locale_prefix = "C.UTF-8|C.UTF-8|";
+#endif
     // Haiku /bin/sh initializes TERM=dumb even under env -i; LC_ALL/LANG are
     // still the daemon-provided values this test is asserting.
-    TEST_ASSERT(pipe_output == "C.UTF-8|C.UTF-8|\n" || pipe_output == "C.UTF-8|C.UTF-8|dumb\n");
+    TEST_ASSERT(pipe_output == locale_prefix + "\n" || pipe_output == locale_prefix + "dumb\n");
 
     if (process_session_supports_pty()) {
         const Json pty_response = start_test_command(
@@ -1106,7 +1136,7 @@ static void assert_posix_exec_uses_parent_built_environment_and_path(
         TEST_ASSERT(pty_response.at("exit_code").get<int>() == 0);
         TEST_ASSERT(
             normalize_output(pty_response.at("output").get<std::string>())
-            == "C.UTF-8|C.UTF-8|xterm-256color\n"
+            == locale_prefix + "xterm-256color\n"
         );
     }
 

@@ -48,6 +48,11 @@ async fn assert_list_targets_smoke(fixture: &CppDaemonBrokerFixture) {
         .expect("C++ daemon target should be listed");
     assert_eq!(target["healthy"], true);
     let daemon_info = &target["daemon_info"];
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(daemon_info["platform"], "macos");
+        assert_eq!(daemon_info["arch"], std::env::consts::ARCH);
+    }
     assert!(daemon_info["supports_pty"].as_bool().is_some());
     assert_eq!(daemon_info["supports_port_forward"], true);
     assert!(daemon_info.get("port_forward_protocol_version").is_none());
@@ -81,6 +86,27 @@ async fn assert_exec_command_smoke(fixture: &CppDaemonBrokerFixture) {
         "unexpected exec output: {}",
         result.text_output
     );
+
+    #[cfg(target_os = "macos")]
+    {
+        let result = fixture
+            .client
+            .call_tool(
+                "exec_command",
+                &serde_json::json!({
+                    "target": CPP_TARGET,
+                    "cmd": "locale charmap; value='é'; printf '%s\\n' \"${#value}\"",
+                    "shell": "/bin/sh",
+                    "login": false,
+                    "yield_time_ms": 5000
+                }),
+            )
+            .await
+            .unwrap();
+        assert_tool_ok(&result, "exec_command UTF-8 locale");
+        assert_eq!(result.structured_content["exit_code"], 0);
+        assert_eq!(result.structured_content["output"], "UTF-8\n1\n");
+    }
 }
 
 async fn assert_write_stdin_smoke(fixture: &CppDaemonBrokerFixture) {

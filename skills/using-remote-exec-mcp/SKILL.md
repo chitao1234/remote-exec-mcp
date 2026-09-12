@@ -118,6 +118,9 @@ Input:
 Guidance:
 
 - Set `workdir` intentionally.
+- macOS targets accept Unix paths and support the system `sh`, Bash, and zsh.
+  Login shells load the selected shell's profiles by default; use `login: false`
+  when profile initialization is unwanted.
 - Use `tty: true` for interactive programs or when later stdin input matters.
 - Keep `session_id` when present.
 - `session_id: null` means the command completed.
