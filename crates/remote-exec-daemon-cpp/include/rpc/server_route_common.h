@@ -16,6 +16,7 @@ typedef std::function<void(HttpResponse&)> RpcRouteBody;
 
 HttpResponse handle_transfer_rpc_route(const std::string& route_name, const RpcRouteBody& body);
 HttpResponse handle_image_rpc_route(const std::string& route_name, const RpcRouteBody& body);
+HttpResponse handle_file_rpc_route(const std::string& route_name, const RpcRouteBody& body);
 HttpResponse handle_exec_rpc_route(
     const std::string& route_name,
     ExecRouteKind kind,

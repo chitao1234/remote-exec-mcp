@@ -12,6 +12,9 @@ enum RouteId {
     ROUTE_EXEC_START,
     ROUTE_EXEC_WRITE,
     ROUTE_PATCH_APPLY,
+    ROUTE_FILE_READ,
+    ROUTE_FILE_WRITE,
+    ROUTE_FILE_EDIT,
     ROUTE_TRANSFER_EXPORT,
     ROUTE_TRANSFER_PATH_INFO,
     ROUTE_TRANSFER_IMPORT,
@@ -42,5 +45,7 @@ extern const char PORT_TUNNEL_UPGRADE_TOKEN[];
 extern const char PORT_TUNNEL_VERSION_HEADER[];
 extern const char PORT_TUNNEL_VERSION_VALUE[];
 extern const unsigned int PORT_TUNNEL_PROTOCOL_VERSION;
+
+extern const unsigned int FILE_TOOL_PROTOCOL_VERSION;
 
 } // namespace server_contract

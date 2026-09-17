@@ -37,8 +37,12 @@ ServerRouteContext make_server_route_context(
     );
     const PatchRouteContext patch(paths, metadata.daemon_instance_id, config.allow_apply_patch);
     const ImageRouteContext image(paths);
+    TextDecodeSettings text_decode;
+    text_decode.allow_encoding_autodetect =
+        config.experimental_apply_patch_target_encoding_autodetect;
+    const FileRouteContext file(paths, text_decode);
     const TransferRouteContext transfer(gate, paths, config.transfer_limits);
-    return ServerRouteContext(gate, health, target_info, exec, patch, image, transfer);
+    return ServerRouteContext(gate, health, target_info, exec, patch, image, file, transfer);
 }
 
 PortTunnelRouteContext make_port_tunnel_route_context(

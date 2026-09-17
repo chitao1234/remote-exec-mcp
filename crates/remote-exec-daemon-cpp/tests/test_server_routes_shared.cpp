@@ -17,6 +17,7 @@
 #include "rpc/server_routes.h"
 #include "rpc/transfer_wire.h"
 #include "test_contract_fixtures.h"
+#include "test_file_routes_shared.h"
 #include "test_filesystem.h"
 #include "test_server_routes_shared.h"
 #include "test_tar_helpers.h"
@@ -875,6 +876,7 @@ void run_platform_neutral_server_route_tests(TestRouteHarness& harness, const fs
     assert_windows_posix_root_routes(root);
 #endif
     assert_patch_route_audit_fields(harness, root);
+    run_file_tool_route_tests(harness, root);
     assert_transfer_path_info_routes(harness, root);
     const std::string export_body = assert_transfer_export_and_exclude_routes(harness, root);
     assert_transfer_import_routes(harness, root, export_body);

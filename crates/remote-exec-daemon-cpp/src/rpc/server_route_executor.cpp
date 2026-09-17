@@ -7,6 +7,7 @@
 #include "rpc/server_route_common.h"
 #include "rpc/server_route_exec.h"
 #include "rpc/server_route_executor.h"
+#include "rpc/server_route_file.h"
 #include "rpc/server_route_image.h"
 #include "rpc/server_route_port_tunnel.h"
 #include "rpc/server_route_transfer.h"
@@ -48,6 +49,18 @@ HttpResponse route_patch_apply(const ServerRouteContext& context, const HttpRequ
     return handle_patch_apply(context.patch, request);
 }
 
+HttpResponse route_file_read(const ServerRouteContext& context, const HttpRequest& request) {
+    return handle_file_read(context.file, request);
+}
+
+HttpResponse route_file_write(const ServerRouteContext& context, const HttpRequest& request) {
+    return handle_file_write(context.file, request);
+}
+
+HttpResponse route_file_edit(const ServerRouteContext& context, const HttpRequest& request) {
+    return handle_file_edit(context.file, request);
+}
+
 HttpResponse route_transfer_export(const ServerRouteContext& context, const HttpRequest& request) {
     return handle_transfer_export(context.transfer, request);
 }
@@ -76,6 +89,9 @@ const RouteDispatchEntry ROUTE_DISPATCH[] = {
     {server_contract::ROUTE_EXEC_START, &route_exec_start, ROUTE_EXECUTION_BUFFERED},
     {server_contract::ROUTE_EXEC_WRITE, &route_exec_write, ROUTE_EXECUTION_BUFFERED},
     {server_contract::ROUTE_PATCH_APPLY, &route_patch_apply, ROUTE_EXECUTION_BUFFERED},
+    {server_contract::ROUTE_FILE_READ, &route_file_read, ROUTE_EXECUTION_BUFFERED},
+    {server_contract::ROUTE_FILE_WRITE, &route_file_write, ROUTE_EXECUTION_BUFFERED},
+    {server_contract::ROUTE_FILE_EDIT, &route_file_edit, ROUTE_EXECUTION_BUFFERED},
     {server_contract::ROUTE_TRANSFER_EXPORT,
      &route_transfer_export,
      ROUTE_EXECUTION_STREAMING_EXPORT},

@@ -20,6 +20,7 @@ TRANSFER_SRCS = \
 POLICY_SRCS = \
 	$(SOURCE_PREFIX)src/policy/path_policy.cpp \
 	$(SOURCE_PREFIX)src/policy/path_compare.cpp \
+	$(SOURCE_PREFIX)src/policy/file_ops.cpp \
 	$(SOURCE_PREFIX)src/policy/filesystem_sandbox.cpp
 
 RPC_FAILURE_SRCS = $(SOURCE_PREFIX)src/rpc/rpc_failures.cpp
@@ -46,7 +47,9 @@ CONFIG_SRCS = $(SOURCE_PREFIX)src/core/config.cpp
 
 LOGGING_SRCS = $(SOURCE_PREFIX)src/core/logging.cpp
 
-TEXT_UTILS_SRCS = $(SOURCE_PREFIX)src/core/text_utils.cpp
+TEXT_UTILS_SRCS = \
+	$(SOURCE_PREFIX)src/core/text_utils.cpp \
+	$(SOURCE_PREFIX)src/core/text_file.cpp
 
 SHELL_POLICY_SRCS = $(SOURCE_PREFIX)src/core/shell_policy.cpp
 
@@ -99,9 +102,11 @@ ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/rpc/server_routes.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_common.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_exec.cpp \
+	$(SOURCE_PREFIX)src/rpc/server_route_file.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_image.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_port_tunnel.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_transfer.cpp \
+	$(SOURCE_PREFIX)src/rpc/file_request_utils.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_http_codec.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_stream_codec.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_stream_io.cpp \
@@ -407,6 +412,7 @@ WINDOWS_SERVER_RUNTIME_TEST_SUPPORT_SRCS = \
 SERVER_ROUTES_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
 	$(SOURCE_PREFIX)tests/test_server_routes_shared.cpp \
+	$(SOURCE_PREFIX)tests/test_file_routes_shared.cpp \
 	$(APP_CONTEXT_SRCS) \
 	$(CAPABILITIES_SRCS) \
 	$(ROUTE_SRCS) \

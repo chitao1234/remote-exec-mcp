@@ -36,7 +36,16 @@ impl CppDaemonBrokerFixture {
     }
 
     pub async fn spawn_with_daemon_config(extra_daemon_config: &str) -> Option<Self> {
-        Self::spawn_with_transport(extra_daemon_config, None).await
+        Self::spawn_with_transport(extra_daemon_config, "", None).await
+    }
+
+    /// Spawns with extra broker config appended after `[local]`, which is where
+    /// `[tools.file]` belongs when a test needs the hidden file tools.
+    pub async fn spawn_with_daemon_and_broker_config(
+        extra_daemon_config: &str,
+        extra_broker_config: &str,
+    ) -> Option<Self> {
+        Self::spawn_with_transport(extra_daemon_config, extra_broker_config, None).await
     }
 
     #[cfg(feature = "broker-tls")]
@@ -55,11 +64,12 @@ impl CppDaemonBrokerFixture {
             daemon_cert: cert_dir.join("server.pem"),
             daemon_key: cert_dir.join("server.key"),
         };
-        Self::spawn_with_transport(extra_daemon_config, Some((None, certs))).await
+        Self::spawn_with_transport(extra_daemon_config, "", Some((None, certs))).await
     }
 
     async fn spawn_with_transport(
         extra_daemon_config: &str,
+        extra_broker_config: &str,
         #[cfg(feature = "broker-tls")] tls: Option<(Option<TempDir>, TestCerts)>,
         #[cfg(not(feature = "broker-tls"))] _tls: Option<()>,
     ) -> Option<Self> {
@@ -161,11 +171,13 @@ impl CppDaemonBrokerFixture {
 [local]
 default_workdir = {local_workdir}
 pty = "none"
+{extra_broker_config}
 "#,
                 target = CPP_TARGET,
                 broker_target = broker_target,
                 local_workdir =
                     super::test_helpers::toml_string(&local_workdir.display().to_string()),
+                extra_broker_config = extra_broker_config,
             ),
         )
         .unwrap();

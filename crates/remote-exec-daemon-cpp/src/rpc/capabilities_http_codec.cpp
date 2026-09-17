@@ -9,4 +9,5 @@ void write_daemon_capabilities(Json* target, const DaemonCapabilities& capabilit
     (*target)["supports_port_forward"] = capabilities.supports_port_forward;
     (*target)["port_forward_protocol_version"] = capabilities.port_forward_protocol_version;
     (*target)["transfer_stream_protocol_version"] = capabilities.transfer_stream_protocol_version;
+    (*target)["file_tool_protocol_version"] = capabilities.file_tool_protocol_version;
 }

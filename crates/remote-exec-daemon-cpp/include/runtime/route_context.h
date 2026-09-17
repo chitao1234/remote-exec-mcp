@@ -8,6 +8,7 @@
 #include "capabilities/daemon_capabilities.h"
 #include "core/config.h"
 #include "exec/session_store.h"
+#include "policy/file_ops.h"
 #include "policy/filesystem_sandbox.h"
 
 class PortTunnelService;
@@ -118,6 +119,17 @@ struct ImageRouteContext {
     PathResolutionContext paths;
 };
 
+struct FileRouteContext {
+    FileRouteContext(
+        const PathResolutionContext& paths_value,
+        const TextDecodeSettings& text_decode_value
+    )
+        : paths(paths_value), text_decode(text_decode_value) {}
+
+    PathResolutionContext paths;
+    TextDecodeSettings text_decode;
+};
+
 struct TransferRouteContext {
     TransferRouteContext(
         const HttpGateContext& gate_value,
@@ -152,10 +164,11 @@ struct ServerRouteContext {
         const ExecRouteContext& exec_value,
         const PatchRouteContext& patch_value,
         const ImageRouteContext& image_value,
+        const FileRouteContext& file_value,
         const TransferRouteContext& transfer_value
     )
         : gate(gate_value), health(health_value), target_info(target_info_value), exec(exec_value),
-          patch(patch_value), image(image_value), transfer(transfer_value) {}
+          patch(patch_value), image(image_value), file(file_value), transfer(transfer_value) {}
 
     HttpGateContext gate;
     HealthRouteContext health;
@@ -163,6 +176,7 @@ struct ServerRouteContext {
     ExecRouteContext exec;
     PatchRouteContext patch;
     ImageRouteContext image;
+    FileRouteContext file;
     TransferRouteContext transfer;
 };
 

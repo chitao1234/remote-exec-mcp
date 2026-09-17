@@ -7,6 +7,7 @@
 #include "platform/platform.h"
 #include "rpc/capabilities_http_codec.h"
 #include "rpc/exec_request_utils.h"
+#include "rpc/file_request_utils.h"
 #include "rpc/rpc_failures.h"
 #include "rpc/server_request_utils.h"
 #include "rpc/server_route_common.h"
@@ -76,6 +77,43 @@ HttpResponse handle_image_rpc_route(const std::string& route_name, const RpcRout
         const int status = image_error_status(ImageRpcCode::Internal);
         response.status = status;
         write_rpc_error(response, status, image_error_code_name(ImageRpcCode::Internal), message);
+        return response;
+    }
+}
+
+HttpResponse handle_file_rpc_route(const std::string& route_name, const RpcRouteBody& body) {
+    try {
+        return run_rpc_route(body);
+    } catch (const SandboxError& ex) {
+        log_message(LOG_WARN, "server", route_name + " denied: " + ex.what());
+        HttpResponse response;
+        const int status = file_error_status(FileRpcCode::SandboxDenied);
+        response.status = status;
+        write_rpc_error(
+            response,
+            status,
+            file_error_code_name(FileRpcCode::SandboxDenied),
+            ex.what()
+        );
+        return response;
+    } catch (const FileFailure& failure) {
+        log_message(
+            level_for_status(file_error_status(failure.code)),
+            "server",
+            route_name + " failed: " + failure.what()
+        );
+        HttpResponse response;
+        const int status = file_error_status(failure.code);
+        response.status = status;
+        write_rpc_error(response, status, file_error_code_name(failure.code), failure.what());
+        return response;
+    } catch (const std::exception& ex) {
+        const std::string message = ex.what();
+        log_message(LOG_ERROR, "server", route_name + " failed: " + message);
+        HttpResponse response;
+        const int status = file_error_status(FileRpcCode::Internal);
+        response.status = status;
+        write_rpc_error(response, status, file_error_code_name(FileRpcCode::Internal), message);
         return response;
     }
 }

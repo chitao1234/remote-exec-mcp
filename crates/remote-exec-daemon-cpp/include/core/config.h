@@ -135,6 +135,10 @@ struct DaemonConfig {
     YieldTimeConfig yield_time;
     bool sandbox_configured = false;
     FilesystemSandbox sandbox;
+    // Decode and re-encode file tool and patch targets using a detected
+    // encoding instead of requiring UTF-8. Off by default, matching the Rust
+    // daemon's experimental_apply_patch_target_encoding_autodetect.
+    bool experimental_apply_patch_target_encoding_autodetect = false;
 };
 
 unsigned long resolve_yield_time_ms(

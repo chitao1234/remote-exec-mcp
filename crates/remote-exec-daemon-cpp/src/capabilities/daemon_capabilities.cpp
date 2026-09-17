@@ -8,7 +8,7 @@ DaemonCapabilities::DaemonCapabilities()
     : supports_exec(true), supports_apply_patch(true), supports_pty(false),
       supports_image_read(false), supports_transfer_compression(false),
       supports_port_forward(false), port_forward_protocol_version(0U),
-      transfer_stream_protocol_version(0U) {
+      transfer_stream_protocol_version(0U), file_tool_protocol_version(0U) {
 }
 
 DaemonCapabilities detect_daemon_capabilities(const DaemonConfig& config) {
@@ -22,5 +22,6 @@ DaemonCapabilities detect_daemon_capabilities(const DaemonConfig& config) {
     capabilities.port_forward_protocol_version = server_contract::PORT_TUNNEL_PROTOCOL_VERSION;
     capabilities.transfer_stream_protocol_version =
         server_contract::TRANSFER_STREAM_PROTOCOL_VERSION;
+    capabilities.file_tool_protocol_version = server_contract::FILE_TOOL_PROTOCOL_VERSION;
     return capabilities;
 }

@@ -16,6 +16,9 @@ const RouteEntry ROUTE_ENTRIES[] = {
     {server_contract::ROUTE_EXEC_START, "/v1/exec/start"},
     {server_contract::ROUTE_EXEC_WRITE, "/v1/exec/write"},
     {server_contract::ROUTE_PATCH_APPLY, "/v1/patch/apply"},
+    {server_contract::ROUTE_FILE_READ, "/v1/file/read"},
+    {server_contract::ROUTE_FILE_WRITE, "/v1/file/write"},
+    {server_contract::ROUTE_FILE_EDIT, "/v1/file/edit"},
     {server_contract::ROUTE_TRANSFER_EXPORT, "/v1/transfer/export"},
     {server_contract::ROUTE_TRANSFER_PATH_INFO, "/v1/transfer/path-info"},
     {server_contract::ROUTE_TRANSFER_IMPORT, "/v1/transfer/import"},
@@ -49,6 +52,8 @@ const char PORT_TUNNEL_UPGRADE_TOKEN[] = "remote-exec-port-tunnel";
 const char PORT_TUNNEL_VERSION_HEADER[] = "x-remote-exec-port-tunnel-version";
 const char PORT_TUNNEL_VERSION_VALUE[] = "4";
 const unsigned int PORT_TUNNEL_PROTOCOL_VERSION = 4U;
+
+const unsigned int FILE_TOOL_PROTOCOL_VERSION = 1U;
 
 RouteId route_id_for_path(const std::string& path) {
     for (std::size_t i = 0; i < ROUTE_ENTRY_COUNT; ++i) {

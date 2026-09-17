@@ -282,6 +282,170 @@ fn assert_tool_ok(result: &ToolResponse, tool: &str) {
     assert!(!result.is_error, "{tool} failed: {}", result.text_output);
 }
 
+const CPP_HIDDEN_FILE_TOOLS_BROKER_CONFIG: &str = "[tools.file]\n\
+read = true\n\
+write = true\n\
+edit = true\n\
+default_read_limit_lines = 20\n\
+max_read_limit_lines = 200\n\
+max_read_bytes = 1048576\n";
+
+/// The hidden file tools must work end to end against the real C++ daemon:
+/// broker routing, the daemon capability gate, and the daemon's own
+/// read/write/edit semantics.
+#[tokio::test]
+async fn hidden_file_tools_work_against_real_cpp_daemon() {
+    let Some(fixture) = CppDaemonBrokerFixture::spawn_with_daemon_and_broker_config(
+        "",
+        CPP_HIDDEN_FILE_TOOLS_BROKER_CONFIG,
+    )
+    .await
+    else {
+        return;
+    };
+
+    // The daemon now advertises file tool protocol version 1, which is what
+    // lets the broker route these tools to it at all.
+    let targets = fixture
+        .client
+        .call_tool("list_targets", &serde_json::json!({}))
+        .await
+        .unwrap();
+    assert_tool_ok(&targets, "list_targets");
+    let target = targets.structured_content["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|target| target["name"] == CPP_TARGET)
+        .expect("C++ daemon target should be listed");
+    assert_eq!(
+        target["daemon_info"]["file_tool_protocol_version"], 1,
+        "C++ daemon should advertise file tool protocol version 1"
+    );
+
+    let write = fixture
+        .client
+        .call_tool(
+            "write",
+            &serde_json::json!({
+                "target": CPP_TARGET,
+                "file_path": "cpp-file-tool.txt",
+                "content": "alpha\nbeta\nalpha\n"
+            }),
+        )
+        .await
+        .unwrap();
+    assert_tool_ok(&write, "write");
+    assert!(
+        write.text_output.contains("created"),
+        "unexpected write output: {}",
+        write.text_output
+    );
+
+    let read = fixture
+        .client
+        .call_tool(
+            "read",
+            &serde_json::json!({
+                "target": CPP_TARGET,
+                "file_path": "cpp-file-tool.txt",
+                "limit": 2
+            }),
+        )
+        .await
+        .unwrap();
+    assert_tool_ok(&read, "read");
+    assert!(
+        read.text_output.contains("1: alpha") && read.text_output.contains("2: beta"),
+        "unexpected read output: {}",
+        read.text_output
+    );
+
+    // A duplicated search string is ambiguous unless replace_all is set.
+    let ambiguous = fixture
+        .client
+        .call_tool(
+            "edit",
+            &serde_json::json!({
+                "target": CPP_TARGET,
+                "file_path": "cpp-file-tool.txt",
+                "old_string": "alpha",
+                "new_string": "gamma"
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(ambiguous.is_error, "expected an ambiguity error");
+    assert!(
+        ambiguous.text_output.contains("file_old_string_ambiguous")
+            || ambiguous.text_output.contains("matched 2 times"),
+        "unexpected ambiguity output: {}",
+        ambiguous.text_output
+    );
+
+    let edit = fixture
+        .client
+        .call_tool(
+            "edit",
+            &serde_json::json!({
+                "target": CPP_TARGET,
+                "file_path": "cpp-file-tool.txt",
+                "old_string": "alpha",
+                "new_string": "gamma",
+                "replace_all": true
+            }),
+        )
+        .await
+        .unwrap();
+    assert_tool_ok(&edit, "edit");
+    assert!(
+        edit.text_output.contains("2 replacements"),
+        "unexpected edit output: {}",
+        edit.text_output
+    );
+
+    let reread = fixture
+        .client
+        .call_tool(
+            "read",
+            &serde_json::json!({
+                "target": CPP_TARGET,
+                "file_path": "cpp-file-tool.txt",
+                "limit": 10
+            }),
+        )
+        .await
+        .unwrap();
+    assert_tool_ok(&reread, "read");
+    assert!(
+        reread.text_output.contains("1: gamma")
+            && reread.text_output.contains("3: gamma")
+            && !reread.text_output.contains("alpha"),
+        "unexpected read output after edit: {}",
+        reread.text_output
+    );
+
+    // A path outside the daemon workdir still resolves through the same
+    // sandbox-checked path rules as the other tools.
+    let missing = fixture
+        .client
+        .call_tool(
+            "read",
+            &serde_json::json!({
+                "target": CPP_TARGET,
+                "file_path": "does-not-exist.txt"
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(missing.is_error, "expected a missing-file error");
+    assert!(
+        missing.text_output.contains("file_missing"),
+        "unexpected missing-file output: {}",
+        missing.text_output
+    );
+}
+
 #[cfg(windows)]
 fn echo_command() -> &'static str {
     "echo cpp-smoke"
