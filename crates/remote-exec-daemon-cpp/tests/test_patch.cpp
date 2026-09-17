@@ -478,5 +478,65 @@ int main() {
     expect_patch_failure(root, blocked_add_patch);
     TEST_ASSERT(!fs::exists(root / "blocked.txt.tmp"));
 
+#ifdef REMOTE_EXEC_CPP_HAS_TEXT_ENCODING
+    // Encoding autodetection: a patch target in a legacy encoding is decoded,
+    // the hunks are applied to the decoded text, and the result is written back
+    // in the same encoding. Without the option the same patch must fail rather
+    // than corrupt the file.
+    const fs::path sjis_path = root / "legacy-sjis.txt";
+    // Shift_JIS bytes for the two-line text below.
+    fs::write_file_bytes(
+        sjis_path,
+        "\x89\xbf\x8a\x69\x82\xf0\x94\xbd\x89\x66\x82\xb5\x82\xdc\x82\xb7\x81\x42\x0a"
+        "\x8e\x9f\x82\xcc\x8d\x73\x82\xc5\x82\xb7\x81\x42\x0a"
+    );
+    const std::string legacy_patch = "*** Begin Patch\n"
+                                     "*** Update File: legacy-sjis.txt\n"
+                                     "@@\n"
+                                     "-価格を反映します。\n"
+                                     "+価格を更新します。\n"
+                                     "*** End Patch\n";
+
+    PatchApplyOptions autodetect_options;
+    autodetect_options.allow_encoding_autodetect = true;
+    PatchApplyResult legacy_result = apply_patch_with_options(
+        root.string(),
+        legacy_patch,
+        PatchPathAuthorizer(),
+        std::string(),
+        autodetect_options
+    );
+    TEST_ASSERT(legacy_result.output.find("M legacy-sjis.txt") != std::string::npos);
+    // The rewritten file keeps the Shift_JIS bytes for the new first line and
+    // the untouched second line, so it is still not valid UTF-8.
+    TEST_ASSERT(
+        fs::read_file_bytes(sjis_path)
+        == std::string("\x89\xbf\x8a\x69\x82\xf0\x8d\x58\x90\x56\x82\xb5\x82\xdc\x82\xb7"
+                       "\x81\x42\x0a"
+                       "\x8e\x9f\x82\xcc\x8d\x73\x82\xc5\x82\xb7\x81\x42\x0a")
+    );
+
+    // Without the option the same legacy target cannot be decoded.
+    const fs::path legacy_plain_path = root / "legacy-plain.txt";
+    fs::write_file_bytes(
+        legacy_plain_path,
+        "\x89\xbf\x8a\x69\x82\xf0\x94\xbd\x89\x66\x82\xb5\x82\xdc\x82\xb7\x81\x42\x0a"
+        "\x8e\x9f\x82\xcc\x8d\x73\x82\xc5\x82\xb7\x81\x42\x0a"
+    );
+    const std::string legacy_plain_patch = "*** Begin Patch\n"
+                                           "*** Update File: legacy-plain.txt\n"
+                                           "@@\n"
+                                           "-価格を反映します。\n"
+                                           "+価格を更新します。\n"
+                                           "*** End Patch\n";
+    expect_patch_failure(root, legacy_plain_patch);
+    TEST_ASSERT(
+        fs::read_file_bytes(legacy_plain_path)
+        == std::string("\x89\xbf\x8a\x69\x82\xf0\x94\xbd\x89\x66\x82\xb5\x82\xdc\x82\xb7"
+                       "\x81\x42\x0a"
+                       "\x8e\x9f\x82\xcc\x8d\x73\x82\xc5\x82\xb7\x81\x42\x0a")
+    );
+#endif
+
     return 0;
 }

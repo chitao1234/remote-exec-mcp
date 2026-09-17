@@ -7,6 +7,20 @@ include $(MAKEFILE_DIR)mk/openssl.mk
 ifeq ($(filter $(TLS),auto off openssl),)
 $(error unsupported TLS '$(TLS)'; use auto, off, or openssl)
 endif
+# Legacy text encoding autodetection and conversion. When on, the daemon links
+# the vendored Mozilla charset detector and the generated WHATWG conversion
+# tables, which is a few megabytes of data. Off keeps the historical UTF-8-only
+# behavior and leaves both data sets out of the binary entirely.
+TEXT_ENCODING ?= auto
+ifeq ($(filter $(TEXT_ENCODING),auto on off),)
+$(error unsupported TEXT_ENCODING '$(TEXT_ENCODING)'; use auto, on, or off)
+endif
+ifeq ($(TEXT_ENCODING),auto)
+TEXT_ENCODING_RESOLVED := on
+else
+TEXT_ENCODING_RESOLVED := $(TEXT_ENCODING)
+endif
+TEXT_ENCODING_BUILD_TAG := $(if $(filter on,$(TEXT_ENCODING_RESOLVED)),-textenc,)
 OPENSSL_CANDIDATE_CPPFLAGS := $(if $(OPENSSL_ROOT),-I$(OPENSSL_ROOT)/include) $(OPENSSL_CPPFLAGS)
 OPENSSL_CANDIDATE_LDLIBS := $(if $(OPENSSL_LDLIBS),$(OPENSSL_LDLIBS),$(if $(OPENSSL_ROOT),-L$(OPENSSL_ROOT)/lib) -lssl -lcrypto)
 OPENSSL_BUILD_TAG ?= $(if $(OPENSSL_ROOT),$(notdir $(patsubst %/,%,$(OPENSSL_ROOT))),system)

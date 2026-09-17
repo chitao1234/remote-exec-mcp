@@ -1,5 +1,8 @@
 #include "core/text_file.h"
 
+#include "core/encoding_detect.h"
+#include "core/legacy_encoding.h"
+
 namespace {
 
 // Encoding identifiers. utf-8 is the implicit encoding for the fast path;
@@ -7,6 +10,9 @@ namespace {
 const std::uint32_t ENCODING_UTF8 = 0U;
 const std::uint32_t ENCODING_UTF16LE = 1U;
 const std::uint32_t ENCODING_UTF16BE = 2U;
+// A legacy encoding detected statistically. The concrete encoding is carried
+// in DetectedTextEncoding::legacy.
+const std::uint32_t ENCODING_LEGACY = 3U;
 
 const char UTF8_BOM[] = "\xEF\xBB\xBF";
 const std::size_t UTF8_BOM_LEN = 3U;
@@ -289,6 +295,21 @@ bool detect_and_decode(const std::string& bytes, std::string* text, DetectedText
         return true;
     }
 
+    // Statistical detection for legacy encodings. The caller verifies the
+    // result re-encodes to exactly these bytes, so a wrong guess is rejected
+    // rather than silently applied.
+    LegacyEncoding legacy;
+    if (detect_legacy_encoding(bytes, &legacy)) {
+        if (!legacy_encoding_decode(legacy, bytes, text)) {
+            return false;
+        }
+        out->kind_id = ENCODING_LEGACY;
+        out->legacy = legacy;
+        out->bom.clear();
+        out->bom_length = 0U;
+        return true;
+    }
+
     return false;
 }
 
@@ -389,6 +410,15 @@ std::string TextFile::encode(const std::string& text) const {
         break;
     case ENCODING_UTF16BE:
         encoded = encode_utf16(text, false);
+        break;
+    case ENCODING_LEGACY:
+        if (!legacy_encoding_encode(encoding_.legacy, text, &encoded)) {
+            throw TextFileError(
+                TextFileError::ENCODE_FAILED,
+                std::string("updated text cannot be represented in detected ")
+                    + legacy_encoding_name(encoding_.legacy) + " encoding"
+            );
+        }
         break;
     default:
         throw TextFileError(TextFileError::ENCODE_FAILED, "detected encoding cannot be re-encoded");

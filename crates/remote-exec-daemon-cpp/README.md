@@ -19,12 +19,48 @@ workflow.
 | Images | PNG, JPEG, and WebP passthrough without resizing. `detail` is accepted for protocol compatibility and has no effect. |
 | Transfers | Regular files, directory trees, and broker-built multi-source bundles. Imports and exports stream tar bodies; transfer compression is not implemented. |
 | Port forwarding | v4 TCP/UDP upgrade tunnels, including reconnect handling and resource limits. |
-| Hidden file tools | `read`, `write`, and `edit` are not implemented by this daemon. |
+| Hidden file tools | `read`, `write`, and `edit`, matching the Rust daemon's semantics and wire error codes. |
+| Text encoding | Optional. When built in and enabled in config, text tools decode and re-encode legacy encodings instead of requiring UTF-8. |
 
 OpenSSL- or LibreSSL-backed builds and POSIX BoringSSL-backed builds support
 direct and reverse mutual TLS. Plain HTTP is available only when explicitly
 selected. Bearer authentication can authenticate plain HTTP requests, but it
 does not encrypt them.
+
+## Text encoding
+
+By default the file tools and `apply_patch` require UTF-8, exactly as before.
+Setting `experimental_apply_patch_target_encoding_autodetect = true` lets them
+decode a target file's existing encoding and write the result back in that same
+encoding, so a read/modify/write cycle leaves the surrounding bytes alone.
+
+Detection covers UTF-8 with or without a byte-order mark, UTF-16LE/BE with or
+without a byte-order mark, and Shift_JIS, EUC-JP, GB18030 (which also decodes
+GBK and GB2312), Big5, EUC-KR, and the single-byte code pages Windows-1250
+through Windows-1258, ISO-8859-2 through ISO-8859-16, KOI8-R, KOI8-U, Macintosh,
+and IBM866.
+
+Two properties are worth knowing before enabling it:
+
+- Detection is statistical, so a very short file may be identified incorrectly.
+  Every decoded file is re-encoded and compared against the original bytes
+  before it is accepted, so a wrong guess is reported as a decode failure rather
+  than silently rewriting the file. Files that are clearly binary are refused on
+  the same path.
+- An edit that introduces a character the detected encoding cannot represent
+  (for example an emoji in a Shift_JIS file) fails with `file_write_failed`
+  instead of substituting a replacement character.
+
+The feature can also be left out of the binary entirely. Build with
+`TEXT_ENCODING=off` to omit the detector and the conversion tables:
+
+```sh
+make check-posix TEXT_ENCODING=off
+```
+
+Without it, non-UTF-8 files report a decode failure and the setting has no
+effect. `TEXT_ENCODING` accepts `auto` (the default, feature enabled), `on`, and
+`off`, and applies to the GNU, BSD, and NMAKE build paths.
 
 ## Quick start
 

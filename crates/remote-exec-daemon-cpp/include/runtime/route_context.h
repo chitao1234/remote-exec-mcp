@@ -8,6 +8,7 @@
 #include "capabilities/daemon_capabilities.h"
 #include "core/config.h"
 #include "exec/session_store.h"
+#include "patch/patch_engine.h"
 #include "policy/file_ops.h"
 #include "policy/filesystem_sandbox.h"
 
@@ -103,14 +104,16 @@ struct PatchRouteContext {
     PatchRouteContext(
         const PathResolutionContext& paths_value,
         const std::string& daemon_instance_id_value,
-        bool allow_apply_patch_value
+        bool allow_apply_patch_value,
+        const PatchApplyOptions& options_value
     )
         : paths(paths_value), daemon_instance_id(daemon_instance_id_value),
-          allow_apply_patch(allow_apply_patch_value) {}
+          allow_apply_patch(allow_apply_patch_value), options(options_value) {}
 
     PathResolutionContext paths;
     const std::string& daemon_instance_id;
     bool allow_apply_patch;
+    PatchApplyOptions options;
 };
 
 struct ImageRouteContext {

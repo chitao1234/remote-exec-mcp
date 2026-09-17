@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "core/legacy_encoding.h"
+
 // Text decoding for the file tools and the patch engine.
 //
 // The FastPath is byte-identical to UTF-8, which is what legacy daemon
@@ -11,10 +13,6 @@
 // that is not valid UTF-8 is decoded with a detected encoding and rewritten
 // in that same encoding, so a read/modify/write cycle preserves the bytes
 // around the change.
-//
-// Detected encodings other than the UTF family are deliberately excluded from
-// the UnicodeDetector stage until the conversion tables land; see
-// detect_and_decode below.
 
 struct DetectedTextEncoding {
     DetectedTextEncoding() : kind_id(0U), bom_length(0U) {}
@@ -26,6 +24,8 @@ struct DetectedTextEncoding {
     std::string bom;
     // Length of the byte-order mark removed from the original content.
     std::size_t bom_length;
+    // Set when kind_id identifies a statistically detected legacy encoding.
+    LegacyEncoding legacy;
 };
 
 class TextFileError : public std::runtime_error {

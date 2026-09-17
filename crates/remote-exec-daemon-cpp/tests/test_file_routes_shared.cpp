@@ -110,6 +110,226 @@ void assert_bad_request_file_tool(TestRouteHarness& harness, const fs::path& roo
     TEST_ASSERT(wide_limit.status == 200);
 }
 
+#ifdef REMOTE_EXEC_CPP_HAS_TEXT_ENCODING
+
+// Realistic file-sized samples for each legacy encoding. Short snippets give
+// the statistical detector too little signal, which is a detector property
+// rather than a daemon one, so the fixtures carry enough text to identify.
+//
+// The byte sequences are written out literally rather than produced by the
+// daemon's own encoder, so the tests exercise the decoder against independent
+// data instead of validating the encoder against itself.
+struct LegacyFixture {
+    const char* path;
+    const char* old_line;
+    const char* new_line;
+    // The encoded form of `old_line` followed by a newline.
+    const char* encoded_old;
+    std::size_t encoded_old_length;
+    // The file after replacing the first line: the new line followed by the
+    // untouched remainder.
+    const char* encoded_after_edit;
+    std::size_t encoded_after_edit_length;
+    // The file after writing `new_line` plus a newline over the whole file.
+    const char* encoded_after_write;
+    std::size_t encoded_after_write_length;
+};
+
+// Each fixture is multi-line because the statistical detector needs more than
+// a short snippet to identify an encoding confidently. The first line is what
+// the edit tests replace.
+const char SJIS_OLD[] =
+    "\x89\xbf\x8a\x69\x82\xf0\x94\xbd\x89\x66\x82\xb5\x82\xdc\x82\xb7\x81\x42\x0a"
+    "\x8e\x9f\x82\xcc\x8d\x73\x82\xc5\x82\xb7\x81\x42\x0a"
+    "\x83\x54\x81\x5b\x83\x6f\x81\x5b\x82\xcc\x90\xdd\x92\xe8\x82\xcd\x82\xb1\x82\xbf"
+    "\x82\xe7\x82\xc5\x8a\xc7\x97\x9d\x82\xb5\x82\xc4\x82\xa2\x82\xdc\x82\xb7\x81\x42\x0a";
+const char SJIS_NEW[] = "\x89\xbf\x8a\x69\x82\xf0\x8d\x58\x90\x56\x82\xb5\x82\xdc\x82\xb7\x81\x42";
+const char GBK_OLD[] =
+    "\xbc\xf2\xcc\xe5\xd6\xd0\xce\xc4\xc5\xe4\xd6\xc3\xa1\xa3\x0a"
+    "\xb5\xda\xb6\xfe\xd0\xd0\xb5\xc4\xc4\xda\xc8\xdd\xd4\xda\xd5\xe2\xc0\xef\xa1\xa3\x0a"
+    "\xb7\xfe\xce\xf1\xc6\xf7\xb5\xc4\xc5\xe4\xd6\xc3\xd4\xda\xd5\xe2\xc0\xef\xb9\xdc\xc0\xed"
+    "\xa1\xa3\x0a";
+const char GBK_NEW[] = "\xbc\xf2\xcc\xe5\xd6\xd0\xce\xc4\xce\xc4\xbc\xfe\xa1\xa3";
+const char BIG5_OLD[] =
+    "\xc1\x63\xc5\xe9\xa4\xa4\xa4\xe5\xb3\x5d\xa9\x77\xa1\x43\x0a"
+    "\xb2\xc4\xa4\x47\xa6\xe6\xaa\xba\xa4\xba\xae\x65\xa6\x62\xb3\x6f\xb8\xcc\xa1\x43\x0a"
+    "\xa6\xf8\xaa\x41\xbe\xb9\xaa\xba\xb3\x5d\xa9\x77\xa6\x62\xb3\x6f\xb8\xcc\xba\xde\xb2\x7a"
+    "\xa1\x43\x0a";
+const char BIG5_NEW[] = "\xc1\x63\xc5\xe9\xa4\xa4\xa4\xe5\xc0\xc9\xae\xd7\xa1\x43";
+const char EUCKR_OLD[] =
+    "\xc7\xd1\xb1\xb9\xbe\xee\x20\xbc\xb3\xc1\xa4\xc0\xd4\xb4\xcf\xb4\xd9\x2e\x0a"
+    "\xb5\xd1\xc2\xb0\x20\xc1\xd9\xc0\xd4\xb4\xcf\xb4\xd9\x2e\x0a"
+    "\xbc\xad\xb9\xf6\x20\xbc\xb3\xc1\xa4\xc0\xbb\x20\xbf\xa9\xb1\xe2\xbf\xa1\xbc\xad\x20"
+    "\xb0\xfc\xb8\xae\xc7\xd5\xb4\xcf\xb4\xd9\x2e\x0a";
+const char EUCKR_NEW[] = "\xc7\xd1\xb1\xb9\xbe\xee\x20\xc6\xc4\xc0\xcf\xc0\xd4\xb4\xcf\xb4\xd9\x2e";
+
+// The rewritten forms, generated independently of the daemon's encoder.
+const char SJIS_AFTER_EDIT[] =
+    "\x89\xbf\x8a\x69\x82\xf0\x8d\x58\x90\x56\x82\xb5\x82\xdc\x82\xb7\x81\x42\x0a"
+    "\x8e\x9f\x82\xcc\x8d\x73\x82\xc5\x82\xb7\x81\x42\x0a"
+    "\x83\x54\x81\x5b\x83\x6f\x81\x5b\x82\xcc\x90\xdd\x92\xe8\x82\xcd\x82\xb1\x82\xbf"
+    "\x82\xe7\x82\xc5\x8a\xc7\x97\x9d\x82\xb5\x82\xc4\x82\xa2\x82\xdc\x82\xb7\x81\x42\x0a";
+const char SJIS_AFTER_WRITE[] =
+    "\x89\xbf\x8a\x69\x82\xf0\x8d\x58\x90\x56\x82\xb5\x82\xdc\x82\xb7\x81\x42\x0a";
+const char GBK_AFTER_EDIT[] =
+    "\xbc\xf2\xcc\xe5\xd6\xd0\xce\xc4\xce\xc4\xbc\xfe\xa1\xa3\x0a"
+    "\xb5\xda\xb6\xfe\xd0\xd0\xb5\xc4\xc4\xda\xc8\xdd\xd4\xda\xd5\xe2\xc0\xef\xa1\xa3\x0a"
+    "\xb7\xfe\xce\xf1\xc6\xf7\xb5\xc4\xc5\xe4\xd6\xc3\xd4\xda\xd5\xe2\xc0\xef\xb9\xdc\xc0\xed"
+    "\xa1\xa3\x0a";
+const char GBK_AFTER_WRITE[] = "\xbc\xf2\xcc\xe5\xd6\xd0\xce\xc4\xce\xc4\xbc\xfe\xa1\xa3\x0a";
+const char BIG5_AFTER_EDIT[] =
+    "\xc1\x63\xc5\xe9\xa4\xa4\xa4\xe5\xc0\xc9\xae\xd7\xa1\x43\x0a"
+    "\xb2\xc4\xa4\x47\xa6\xe6\xaa\xba\xa4\xba\xae\x65\xa6\x62\xb3\x6f\xb8\xcc\xa1\x43\x0a"
+    "\xa6\xf8\xaa\x41\xbe\xb9\xaa\xba\xb3\x5d\xa9\x77\xa6\x62\xb3\x6f\xb8\xcc\xba\xde\xb2\x7a"
+    "\xa1\x43\x0a";
+const char BIG5_AFTER_WRITE[] = "\xc1\x63\xc5\xe9\xa4\xa4\xa4\xe5\xc0\xc9\xae\xd7\xa1\x43\x0a";
+const char EUCKR_AFTER_EDIT[] =
+    "\xc7\xd1\xb1\xb9\xbe\xee\x20\xc6\xc4\xc0\xcf\xc0\xd4\xb4\xcf\xb4\xd9\x2e\x0a"
+    "\xb5\xd1\xc2\xb0\x20\xc1\xd9\xc0\xd4\xb4\xcf\xb4\xd9\x2e\x0a"
+    "\xbc\xad\xb9\xf6\x20\xbc\xb3\xc1\xa4\xc0\xbb\x20\xbf\xa9\xb1\xe2\xbf\xa1\xbc\xad\x20"
+    "\xb0\xfc\xb8\xae\xc7\xd5\xb4\xcf\xb4\xd9\x2e\x0a";
+const char EUCKR_AFTER_WRITE[] =
+    "\xc7\xd1\xb1\xb9\xbe\xee\x20\xc6\xc4\xc0\xcf\xc0\xd4\xb4\xcf\xb4\xd9\x2e\x0a";
+
+const LegacyFixture LEGACY_FIXTURES[] = {
+    {"sjis.txt",
+     "価格を反映します。",
+     "価格を更新します。",
+     SJIS_OLD,
+     sizeof(SJIS_OLD) - 1U,
+     SJIS_AFTER_EDIT,
+     sizeof(SJIS_AFTER_EDIT) - 1U,
+     SJIS_AFTER_WRITE,
+     sizeof(SJIS_AFTER_WRITE) - 1U},
+    {"gbk.txt",
+     "简体中文配置。",
+     "简体中文文件。",
+     GBK_OLD,
+     sizeof(GBK_OLD) - 1U,
+     GBK_AFTER_EDIT,
+     sizeof(GBK_AFTER_EDIT) - 1U,
+     GBK_AFTER_WRITE,
+     sizeof(GBK_AFTER_WRITE) - 1U},
+    {"big5.txt",
+     "繁體中文設定。",
+     "繁體中文檔案。",
+     BIG5_OLD,
+     sizeof(BIG5_OLD) - 1U,
+     BIG5_AFTER_EDIT,
+     sizeof(BIG5_AFTER_EDIT) - 1U,
+     BIG5_AFTER_WRITE,
+     sizeof(BIG5_AFTER_WRITE) - 1U},
+    {"euckr.txt",
+     "한국어 설정입니다.",
+     "한국어 파일입니다.",
+     EUCKR_OLD,
+     sizeof(EUCKR_OLD) - 1U,
+     EUCKR_AFTER_EDIT,
+     sizeof(EUCKR_AFTER_EDIT) - 1U,
+     EUCKR_AFTER_WRITE,
+     sizeof(EUCKR_AFTER_WRITE) - 1U},
+};
+
+void assert_legacy_encoding_routes(TestRouteHarness& harness, const fs::path& root) {
+    const std::size_t fixture_count = sizeof(LEGACY_FIXTURES) / sizeof(LEGACY_FIXTURES[0]);
+    for (std::size_t i = 0; i < fixture_count; ++i) {
+        const LegacyFixture& fixture = LEGACY_FIXTURES[i];
+        const fs::path path = root / fixture.path;
+        fs::write_file_bytes(path, std::string(fixture.encoded_old, fixture.encoded_old_length));
+
+        // The bytes are not valid UTF-8, so a read only succeeds through
+        // detection and conversion.
+        const HttpResponse read = post_file(
+            harness,
+            "/v1/file/read",
+            file_read_body(fixture.path, 10U, 4096U, false, 0U)
+        );
+
+        TEST_ASSERT(read.status == 200);
+        const std::string read_output = Json::parse(read.body).at("output").get<std::string>();
+        TEST_ASSERT(read_output.find(std::string("1: ") + fixture.old_line) != std::string::npos);
+
+        // An edit rewrites the file in the same encoding: not valid UTF-8,
+        // and byte-for-byte the expected encoding of the new text.
+        const HttpResponse edited = post_file(
+            harness,
+            "/v1/file/edit",
+            Json{
+                {"path", fixture.path},
+                {"old_string", fixture.old_line},
+                {"new_string", fixture.new_line},
+                {"replace_all", false},
+                {"max_bytes", 4096},
+            }
+        );
+        TEST_ASSERT(edited.status == 200);
+        TEST_ASSERT(
+            fs::read_file_bytes(path)
+            == std::string(fixture.encoded_after_edit, fixture.encoded_after_edit_length)
+        );
+
+        // Writing new content to a file with a detected encoding keeps that
+        // encoding rather than switching the file to UTF-8.
+        const HttpResponse rewritten = post_file(
+            harness,
+            "/v1/file/write",
+            Json{
+                {"path", fixture.path},
+                {"content", std::string(fixture.new_line) + "\n"},
+                {"max_bytes", 4096}
+            }
+        );
+        TEST_ASSERT(rewritten.status == 200);
+        TEST_ASSERT(
+            fs::read_file_bytes(path)
+            == std::string(fixture.encoded_after_write, fixture.encoded_after_write_length)
+        );
+    }
+
+    // Text the detected encoding cannot represent is refused instead of being
+    // silently substituted, and the refused edit leaves the file alone.
+    const fs::path sjis_path = root / LEGACY_FIXTURES[0].path;
+    const std::string before = fs::read_file_bytes(sjis_path);
+    const HttpResponse unrepresentable = post_file(
+        harness,
+        "/v1/file/edit",
+        Json{
+            {"path", LEGACY_FIXTURES[0].path},
+            {"old_string", LEGACY_FIXTURES[0].new_line},
+            {"new_string", "\xF0\x9F\x98\x80"},
+            {"replace_all", false},
+            {"max_bytes", 4096},
+        }
+    );
+    TEST_ASSERT(unrepresentable.status == 400);
+    TEST_ASSERT(error_code(unrepresentable) == "file_write_failed");
+    TEST_ASSERT(
+        error_message(unrepresentable).find("unable to encode updated text") != std::string::npos
+    );
+    TEST_ASSERT(fs::read_file_bytes(sjis_path) == before);
+}
+
+#else
+
+// Without the text encoding feature the daemon has no conversion, so legacy
+// bytes must be reported as a decode failure rather than half-decoded.
+void assert_legacy_encoding_routes(TestRouteHarness& harness, const fs::path& root) {
+    const fs::path unsupported_path = root / "no-feature-sjis.txt";
+    fs::write_file_bytes(
+        unsupported_path,
+        std::string("\x89\xbf\x8a\x69\x82\xf0\x94\xbd\x89\x66\x82\xb5\x82\xdc\x82\xb7\x81\x42", 18U)
+    );
+    const HttpResponse unsupported = post_file(
+        harness,
+        "/v1/file/read",
+        file_read_body("no-feature-sjis.txt", 10U, 1024U, false, 0U)
+    );
+    TEST_ASSERT(unsupported.status == 400);
+    TEST_ASSERT(error_code(unsupported) == "file_decode_failed");
+}
+
+#endif
+
 void assert_read_route(TestRouteHarness& harness, const fs::path& root) {
     write_text_file(root / "lines.txt", "one\ntwo\nthree\n");
 
@@ -337,13 +557,16 @@ void assert_encoding_autodetect_routes(TestRouteHarness& harness, const fs::path
     TEST_ASSERT(write.status == 200);
     TEST_ASSERT(fs::read_file_bytes(utf16_path) == utf16le_bom_bytes("done\n"));
 
-    // Binary content is refused rather than silently decoded.
+    // Binary content is refused rather than silently decoded. The byte string
+    // needs an explicit length: a string literal would stop at the embedded NUL.
     const fs::path binary_path = root / "binary.bin";
-    fs::write_file_bytes(binary_path, std::string("\xFF\x00\xFE\x01\xFD\x02"));
+    fs::write_file_bytes(binary_path, std::string("\xFF\x00\xFE\x01\xFD\x02", 6U));
     const HttpResponse binary =
         post_file(harness, "/v1/file/read", file_read_body("binary.bin", 10U, 1024U, false, 0U));
     TEST_ASSERT(binary.status == 400);
     TEST_ASSERT(error_code(binary) == "file_decode_failed");
+
+    assert_legacy_encoding_routes(harness, root);
 
     harness.state.config.experimental_apply_patch_target_encoding_autodetect = false;
     harness.refresh_context();

@@ -369,6 +369,19 @@ port forwards require a long-running broker, so prefer `--broker-url` for
   file
 - can use experimental target encoding autodetection when enabled in config
 
+Target encoding autodetection covers UTF-8 with or without a byte-order mark,
+UTF-16LE/BE with or without a byte-order mark, and Shift_JIS, EUC-JP, GB18030
+(which also decodes GBK and GB2312), Big5, EUC-KR, and the single-byte code
+pages Windows-1250 through Windows-1258, ISO-8859-2 through ISO-8859-16,
+KOI8-R, KOI8-U, Macintosh, and IBM866. Both daemons verify a detected encoding
+by re-encoding the decoded text and comparing it against the original bytes, so
+a wrong guess is reported as a decode failure rather than silently rewriting the
+file. An edit that introduces a character the detected encoding cannot represent
+fails instead of substituting a replacement character.
+
+The C++ daemon can also be built without this feature (`TEXT_ENCODING=off`), in
+which case the file tools and `apply_patch` require UTF-8.
+
 Standalone `apply_patch` executables print the action and underlying filesystem
 or patch-engine error to stderr. If a runtime write/remove error occurs after
 earlier actions complete, stdout reports `Partial success` and lists those
@@ -531,7 +544,8 @@ The C++ daemon intentionally supports a smaller surface than the Rust daemon:
 | Transport | Optional OpenSSL or LibreSSL direct/reverse mTLS, BoringSSL direct/reverse mTLS on POSIX, or explicit plain HTTP. TLS builds use `https://...`; plain targets use `http://...` and `allow_insecure_http = true`. |
 | Security | Mutual TLS with OpenSSL 1.0.2 or newer, LibreSSL 2.7.1 or newer, or BoringSSL on POSIX, optional bearer auth, certificate pinning, and static path sandboxing. |
 | Exec | C++11 implementation for POSIX and legacy Windows hosts. POSIX PTY is supported when the host can allocate one. GNU/MSVC Windows PTY support depends on vendored `winpty`. |
-| Files | `remote_apply_patch`, `remote_view_image` passthrough for PNG/JPEG/WebP, and transfer import/export. Default-hidden `remote_read` / `remote_write` / `remote_edit` are not implemented yet. |
+| Files | `remote_apply_patch`, `remote_view_image` passthrough for PNG/JPEG/WebP, transfer import/export, and the default-hidden `remote_read` / `remote_write` / `remote_edit` with the same semantics and wire error codes as the Rust daemon. |
+| Text encoding | Optional. With `experimental_apply_patch_target_encoding_autodetect`, the file tools and `apply_patch` decode and rewrite a target file's detected encoding instead of requiring UTF-8. Can be omitted from the binary with `TEXT_ENCODING=off`. |
 | Transfers | File, directory, and broker-built multi-source transfers. No transfer compression. |
 | Forwarding | v4 TCP/UDP port-forward tunnel support with daemon-local worker and queue limits. |
 | Legacy Windows | GNU paths cover NT 3.x Winsock 1.1, NT 4.0 Winsock 1.1/2, Windows 2000, XP, XP x64, x64 NT-family, and ANSI Windows 9x/Me variants. MSVC covers native, x86 `v141_xp`, and x64 XP-compatible paths. |

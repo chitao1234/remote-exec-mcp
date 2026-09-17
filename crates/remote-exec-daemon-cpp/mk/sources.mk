@@ -2,6 +2,12 @@
 #
 # This file intentionally uses make syntax accepted by GNU make, BSD make, and
 # NMAKE. Rule logic stays in dialect-specific makefiles.
+#
+# TEXT_ENCODING_ACTIVE_SRCS is intentionally left empty here. Each dialect
+# makefile sets it after including this file, using its own conditional syntax,
+# because the feature can be compiled out.
+
+UCHARDET_SRC_DIR = $(SOURCE_PREFIX)third_party/uchardet/src
 
 TRANSFER_SRCS = \
 	$(SOURCE_PREFIX)src/transfer/transfer_archive_io.cpp \
@@ -34,6 +40,7 @@ APPLY_PATCH_CLI_SRCS = \
 	$(PATCH_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/policy/path_policy.cpp
 
@@ -49,7 +56,54 @@ LOGGING_SRCS = $(SOURCE_PREFIX)src/core/logging.cpp
 
 TEXT_UTILS_SRCS = \
 	$(SOURCE_PREFIX)src/core/text_utils.cpp \
-	$(SOURCE_PREFIX)src/core/text_file.cpp
+	$(SOURCE_PREFIX)src/core/text_file.cpp \
+	$(SOURCE_PREFIX)src/core/legacy_encoding_disabled.cpp
+
+# Legacy encoding autodetection and conversion. These are linked only when
+# TEXT_ENCODING is on, so a UTF-8-only build carries none of the detector or
+# conversion data. The always-present fallbacks above keep text_file.cpp
+# link-complete either way.
+TEXT_ENCODING_LIB_SRCS = \
+	$(SOURCE_PREFIX)src/core/legacy_encoding.cpp \
+	$(SOURCE_PREFIX)src/core/encoding_detect.cpp
+
+UCHARDET_SRCS = \
+	$(UCHARDET_SRC_DIR)/CharDistribution.cpp \
+	$(UCHARDET_SRC_DIR)/JpCntx.cpp \
+	$(UCHARDET_SRC_DIR)/nsBig5Prober.cpp \
+	$(UCHARDET_SRC_DIR)/nsCharSetProber.cpp \
+	$(UCHARDET_SRC_DIR)/nsEscCharsetProber.cpp \
+	$(UCHARDET_SRC_DIR)/nsEscSM.cpp \
+	$(UCHARDET_SRC_DIR)/nsEUCJPProber.cpp \
+	$(UCHARDET_SRC_DIR)/nsEUCKRProber.cpp \
+	$(UCHARDET_SRC_DIR)/nsEUCTWProber.cpp \
+	$(UCHARDET_SRC_DIR)/nsGB2312Prober.cpp \
+	$(UCHARDET_SRC_DIR)/nsHebrewProber.cpp \
+	$(UCHARDET_SRC_DIR)/nsLatin1Prober.cpp \
+	$(UCHARDET_SRC_DIR)/nsMBCSGroupProber.cpp \
+	$(UCHARDET_SRC_DIR)/nsMBCSSM.cpp \
+	$(UCHARDET_SRC_DIR)/nsSBCharSetProber.cpp \
+	$(UCHARDET_SRC_DIR)/nsSBCSGroupProber.cpp \
+	$(UCHARDET_SRC_DIR)/nsSJISProber.cpp \
+	$(UCHARDET_SRC_DIR)/nsUniversalDetector.cpp \
+	$(UCHARDET_SRC_DIR)/nsUTF8Prober.cpp \
+	$(UCHARDET_SRC_DIR)/uchardet.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangArabicModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangBulgarianModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangDanishModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangEsperantoModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangFrenchModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangGermanModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangGreekModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangHebrewModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangHungarianModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangRussianModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangSpanishModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangThaiModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangTurkishModel.cpp \
+	$(UCHARDET_SRC_DIR)/LangModels/LangVietnameseModel.cpp
+
+TEXT_ENCODING_SRCS = $(TEXT_ENCODING_LIB_SRCS) $(UCHARDET_SRCS)
 
 SHELL_POLICY_SRCS = $(SOURCE_PREFIX)src/core/shell_policy.cpp
 
@@ -185,6 +239,7 @@ BASE_COMMON_SRCS_NO_MAIN = \
 	$(HTTP_SRCS) \
 	$(LOGGING_SRCS) \
 	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(SHELL_POLICY_SRCS) \
@@ -222,6 +277,7 @@ HOST_PATCH_SRCS = \
 	$(PATCH_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/policy/path_policy.cpp
 
@@ -245,6 +301,7 @@ HOST_CONFIG_SRCS = \
 	$(CONFIG_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS) \
 	$(SOURCE_PREFIX)src/policy/path_policy.cpp
 
 WINDOWS_CONFIG_TEST_SRCS = \
@@ -254,7 +311,8 @@ WINDOWS_CONFIG_TEST_SRCS = \
 HOST_BASIC_MUTEX_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_basic_mutex.cpp \
 	$(PLATFORM_SRCS) \
-	$(TEXT_UTILS_SRCS)
+	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS)
 
 HOST_BASIC_MUTEX_SRCS = \
 	$(HOST_BASIC_MUTEX_TEST_COMMON_SRCS) \
@@ -270,7 +328,8 @@ WINDOWS_CONSOLE_OUTPUT_TEST_SRCS = \
 	$(PLATFORM_SRCS) \
 	$(WIN32_ERROR_SRCS) \
 	$(LOGGING_SRCS) \
-	$(TEXT_UTILS_SRCS)
+	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS)
 
 WINDOWS_WINSOCK1_SOCKET_BACKEND_TEST_SRCS = \
 	$(SOURCE_PREFIX)tests/test_winsock1_socket_backend.cpp \
@@ -279,6 +338,7 @@ WINDOWS_WINSOCK1_SOCKET_BACKEND_TEST_SRCS = \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_socket_ops.cpp \
 	$(SOCKET_WINDOWS_SRCS) \
 	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS) \
 	$(WIN32_ERROR_SRCS)
 
 HOST_HTTP_REQUEST_SRCS = \
@@ -286,7 +346,8 @@ HOST_HTTP_REQUEST_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
-	$(TEXT_UTILS_SRCS)
+	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS)
 
 HOST_SERVER_TRANSPORT_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_transport.cpp \
@@ -294,7 +355,8 @@ HOST_SERVER_TRANSPORT_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
 	$(PLATFORM_SRCS) \
-	$(TEXT_UTILS_SRCS)
+	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS)
 
 HOST_SERVER_TRANSPORT_SRCS = \
 	$(HOST_SERVER_TRANSPORT_TEST_COMMON_SRCS) \
@@ -344,7 +406,8 @@ HOST_SESSION_STORE_SRCS = \
 	$(BASIC_MUTEX_POSIX_SRCS) \
 	$(LOGGING_SRCS) \
 	$(CONFIG_SRCS) \
-	$(TEXT_UTILS_SRCS)
+	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS)
 
 HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_connection_manager.cpp \
@@ -353,6 +416,7 @@ HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
 	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(LOGGING_SRCS) \
 	$(DAEMON_THREAD_SRCS)
@@ -371,6 +435,7 @@ HOST_TLS_TRANSPORT_SRCS = \
 	$(DAEMON_THREAD_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS) \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_endpoint.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_error.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_socket_ops.cpp
@@ -384,6 +449,7 @@ WINDOWS_TLS_TRANSPORT_SRCS = \
 	$(DAEMON_THREAD_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS) \
 	$(WIN32_ERROR_SRCS) \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_endpoint.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_error.cpp \
@@ -426,6 +492,7 @@ SERVER_ROUTES_TEST_COMMON_SRCS = \
 	$(LOGGING_SRCS) \
 	$(CONFIG_SRCS) \
 	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS) \
 	$(DAEMON_THREAD_SRCS) \
 	$(TRANSFER_SRCS) \
 	$(POLICY_SRCS) \
@@ -555,6 +622,7 @@ WINDOWS_SESSION_STORE_TEST_SRCS = \
 	$(LOGGING_SRCS) \
 	$(CONFIG_SRCS) \
 	$(TEXT_UTILS_SRCS) \
+	$(TEXT_ENCODING_ACTIVE_SRCS) \
 	$(DAEMON_THREAD_SRCS)
 
 WINDOWS_SERVER_ROUTES_COMMON_TEST_SRCS = \

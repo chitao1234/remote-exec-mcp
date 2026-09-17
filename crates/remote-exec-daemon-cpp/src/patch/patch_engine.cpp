@@ -17,6 +17,7 @@
 #endif
 
 #include "core/stdio_retry.h"
+#include "core/text_file.h"
 #include "patch/patch_engine.h"
 #include "platform/path_utils.h"
 #include "platform/scoped_file.h"
@@ -54,6 +55,10 @@ struct ParsedPatch {
 
 struct PlannedFile {
     std::string text;
+    // Set when the file was decoded with a detected encoding, so a later write
+    // re-encodes into it. Unset means the text is byte-identical to UTF-8.
+    bool has_encoding;
+    TextFile encoding_source;
 };
 
 struct PlannedPathState {
@@ -73,6 +78,10 @@ struct PlannedAction {
     std::string summary_path;
     std::string content;
     bool remove_source;
+    // Set when the written content must be re-encoded into the target file's
+    // detected encoding.
+    bool has_encoding;
+    TextFile encoding_source;
 };
 
 struct PathOverlay {
@@ -719,6 +728,24 @@ PlannedPathState planned_file_state(const std::string& text) {
     PlannedPathState state;
     state.deleted = false;
     state.file.text = text;
+    state.file.has_encoding = false;
+    return state;
+}
+
+PlannedFile planned_file_from_text_file(const TextFile& file) {
+    PlannedFile planned;
+    planned.text = file.text();
+    planned.has_encoding = true;
+    planned.encoding_source = file;
+    return planned;
+}
+
+PlannedPathState planned_file_state_from(const TextFile& file) {
+    PlannedPathState state;
+    state.deleted = false;
+    state.file.text = file.text();
+    state.file.has_encoding = true;
+    state.file.encoding_source = file;
     return state;
 }
 
@@ -849,7 +876,11 @@ void ensure_writable_file_target(const std::string& path, const PathOverlay& ove
     }
 }
 
-PlannedFile require_planned_file(const std::string& path, const PathOverlay& overlay) {
+PlannedFile require_planned_file(
+    const std::string& path,
+    const PathOverlay& overlay,
+    const PatchApplyOptions& options
+) {
     if (overlay_contains_directory(overlay, path)) {
         throw std::runtime_error("patch target is not a file: " + path);
     }
@@ -870,6 +901,15 @@ PlannedFile require_planned_file(const std::string& path, const PathOverlay& ove
     }
 
     PlannedFile file;
+    file.has_encoding = false;
+    if (options.allow_encoding_autodetect) {
+        try {
+            const TextFile decoded = TextFile::from_bytes(read_text_file(path), true);
+            return planned_file_from_text_file(decoded);
+        } catch (const TextFileError& error) {
+            throw std::runtime_error("unable to read " + path + ": " + error.what());
+        }
+    }
     file.text = read_text_file(path);
     return file;
 }
@@ -899,6 +939,7 @@ PlannedAction plan_add_action(
     const std::string& root,
     const PatchAction& action,
     const PatchPathAuthorizer& authorizer,
+    const PatchApplyOptions& options,
     PathOverlay* overlay
 ) {
     const std::string source_path = resolve_patch_path(root, action.path);
@@ -909,7 +950,6 @@ PlannedAction plan_add_action(
 
     const std::string content = render_added_content(action.lines);
     mark_overlay_parent_directories(overlay, source_path);
-    set_overlay_state(overlay, source_path, planned_file_state(content));
 
     PlannedAction planned;
     planned.kind = PatchKind::Add;
@@ -918,6 +958,28 @@ PlannedAction plan_add_action(
     planned.summary_path = action.path;
     planned.content = content;
     planned.remove_source = false;
+    planned.has_encoding = false;
+
+    // Overwriting an existing file keeps that file's detected encoding, the
+    // same way the Rust daemon does.
+    if (options.allow_encoding_autodetect) {
+        const PlannedPathEntry* planned_entry = find_overlay_entry(*overlay, source_path);
+        const bool exists =
+            planned_entry != nullptr ? !planned_entry->state.deleted : file_exists(source_path);
+        if (exists) {
+            try {
+                const TextFile existing = TextFile::from_bytes(read_text_file(source_path), true);
+                planned.has_encoding = true;
+                planned.encoding_source = existing;
+                set_overlay_state(overlay, source_path, planned_file_state_from(existing));
+                return planned;
+            } catch (const TextFileError& error) {
+                throw std::runtime_error("unable to read " + source_path + ": " + error.what());
+            }
+        }
+    }
+
+    set_overlay_state(overlay, source_path, planned_file_state(content));
     return planned;
 }
 
@@ -947,13 +1009,14 @@ PlannedAction plan_update_action(
     const std::string& root,
     const PatchAction& action,
     const PatchPathAuthorizer& authorizer,
+    const PatchApplyOptions& options,
     PathOverlay* overlay
 ) {
     const std::string source_path = resolve_patch_path(root, action.path);
     if (authorizer) {
         authorizer(source_path);
     }
-    const PlannedFile current = require_planned_file(source_path, *overlay);
+    const PlannedFile current = require_planned_file(source_path, *overlay, options);
     const std::string destination_path =
         action.move_to.empty() ? source_path : resolve_patch_path(root, action.move_to);
     const bool remove_source =
@@ -970,7 +1033,15 @@ PlannedAction plan_update_action(
     if (remove_source) {
         set_overlay_state(overlay, source_path, planned_deleted_state());
     }
-    set_overlay_state(overlay, destination_path, planned_file_state(content));
+    if (current.has_encoding) {
+        set_overlay_state(
+            overlay,
+            destination_path,
+            planned_file_state_from(current.encoding_source)
+        );
+    } else {
+        set_overlay_state(overlay, destination_path, planned_file_state(content));
+    }
 
     PlannedAction planned;
     planned.kind = PatchKind::Update;
@@ -979,23 +1050,26 @@ PlannedAction plan_update_action(
     planned.summary_path = action.move_to.empty() ? action.path : action.move_to;
     planned.content = content;
     planned.remove_source = remove_source;
+    planned.has_encoding = current.has_encoding;
+    planned.encoding_source = current.encoding_source;
     return planned;
 }
 
 std::vector<PlannedAction> plan_patch_action(
     const std::string& root,
     const PatchAction& action,
-    const PatchPathAuthorizer& authorizer
+    const PatchPathAuthorizer& authorizer,
+    const PatchApplyOptions& options
 ) {
     PathOverlay overlay;
     std::vector<PlannedAction> planned;
     try {
         if (action.kind == PatchKind::Add) {
-            planned.push_back(plan_add_action(root, action, authorizer, &overlay));
+            planned.push_back(plan_add_action(root, action, authorizer, options, &overlay));
         } else if (action.kind == PatchKind::Delete) {
             planned.push_back(plan_delete_action(root, action, authorizer, &overlay));
         } else {
-            planned.push_back(plan_update_action(root, action, authorizer, &overlay));
+            planned.push_back(plan_update_action(root, action, authorizer, options, &overlay));
         }
     } catch (const SandboxError& error) {
         throw SandboxError(action_failure_message(action, error.what()));
@@ -1003,6 +1077,18 @@ std::vector<PlannedAction> plan_patch_action(
         throw std::runtime_error(action_failure_message(action, error.what()));
     }
     return planned;
+}
+
+void write_planned_content(const PlannedAction& action, const std::string& path) {
+    if (!action.has_encoding) {
+        write_text_file(path, action.content);
+        return;
+    }
+    try {
+        write_text_file(path, action.encoding_source.encode(action.content));
+    } catch (const TextFileError& error) {
+        throw std::runtime_error("unable to encode updated text for " + path + ": " + error.what());
+    }
 }
 
 std::vector<std::string> execute_planned_actions(const std::vector<PlannedAction>& actions) {
@@ -1013,7 +1099,7 @@ std::vector<std::string> execute_planned_actions(const std::vector<PlannedAction
         const PlannedAction& action = actions[i];
         try {
             if (action.kind == PatchKind::Add) {
-                write_text_file(action.source_path, action.content);
+                write_planned_content(action, action.source_path);
                 summary.push_back("A " + action.summary_path);
                 continue;
             }
@@ -1023,7 +1109,7 @@ std::vector<std::string> execute_planned_actions(const std::vector<PlannedAction
                 continue;
             }
 
-            write_text_file(action.destination_path, action.content);
+            write_planned_content(action, action.destination_path);
             if (action.remove_source && file_exists(action.source_path)) {
                 remove_file_required(action.source_path);
             }
@@ -1048,6 +1134,22 @@ PatchApplyResult apply_patch(
     const PatchPathAuthorizer& authorizer,
     const std::string& windows_posix_root
 ) {
+    return apply_patch_with_options(
+        root,
+        patch_text,
+        authorizer,
+        windows_posix_root,
+        PatchApplyOptions()
+    );
+}
+
+PatchApplyResult apply_patch_with_options(
+    const std::string& root,
+    const std::string& patch_text,
+    const PatchPathAuthorizer& authorizer,
+    const std::string& windows_posix_root,
+    const PatchApplyOptions& options
+) {
     const ParsedPatch parsed = parse_patch(patch_text, windows_posix_root);
     std::vector<std::string> summary;
     summary.reserve(parsed.actions.size());
@@ -1055,7 +1157,7 @@ PatchApplyResult apply_patch(
     for (std::size_t i = 0; i < parsed.actions.size(); ++i) {
         try {
             const std::vector<PlannedAction> planned =
-                plan_patch_action(root, parsed.actions[i], authorizer);
+                plan_patch_action(root, parsed.actions[i], authorizer, options);
             const std::vector<std::string> updated = execute_planned_actions(planned);
             summary.insert(summary.end(), updated.begin(), updated.end());
         } catch (const std::exception& error) {

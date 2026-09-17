@@ -27,9 +27,27 @@ private:
     std::vector<std::string> updated_paths_;
 };
 
+// Options that change how patch targets are read and written.
+struct PatchApplyOptions {
+    PatchApplyOptions() : allow_encoding_autodetect(false) {}
+
+    // Decode an existing target with its detected encoding and write the
+    // result back in that encoding. Requires a build with the text encoding
+    // feature; without it this flag has no effect.
+    bool allow_encoding_autodetect;
+};
+
 PatchApplyResult apply_patch(
     const std::string& root,
     const std::string& patch_text,
     const PatchPathAuthorizer& authorizer = PatchPathAuthorizer(),
     const std::string& windows_posix_root = std::string()
+);
+
+PatchApplyResult apply_patch_with_options(
+    const std::string& root,
+    const std::string& patch_text,
+    const PatchPathAuthorizer& authorizer,
+    const std::string& windows_posix_root,
+    const PatchApplyOptions& options
 );

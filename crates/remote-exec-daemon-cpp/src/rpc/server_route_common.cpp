@@ -247,11 +247,12 @@ HttpResponse handle_patch_apply(const PatchRouteContext& context, const HttpRequ
         const Json body = parse_json_body(request);
         const std::string workdir = resolve_workdir(context.paths, body);
         const std::string patch_text = body.at("patch").get<std::string>();
-        const PatchApplyResult result = apply_patch(
+        const PatchApplyResult result = apply_patch_with_options(
             workdir,
             patch_text,
             make_patch_path_authorizer(context.paths),
-            context.paths.windows_posix_root
+            context.paths.windows_posix_root,
+            context.options
         );
         LogMessageBuilder summary("patch/apply");
         summary.field("patch_len", patch_text.size());

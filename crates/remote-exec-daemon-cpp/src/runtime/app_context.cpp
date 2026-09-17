@@ -35,11 +35,14 @@ ServerRouteContext make_server_route_context(
         metadata.daemon_instance_id,
         config.allow_exec
     );
-    const PatchRouteContext patch(paths, metadata.daemon_instance_id, config.allow_apply_patch);
-    const ImageRouteContext image(paths);
     TextDecodeSettings text_decode;
     text_decode.allow_encoding_autodetect =
         config.experimental_apply_patch_target_encoding_autodetect;
+    PatchApplyOptions patch_options;
+    patch_options.allow_encoding_autodetect = text_decode.allow_encoding_autodetect;
+    const PatchRouteContext
+        patch(paths, metadata.daemon_instance_id, config.allow_apply_patch, patch_options);
+    const ImageRouteContext image(paths);
     const FileRouteContext file(paths, text_decode);
     const TransferRouteContext transfer(gate, paths, config.transfer_limits);
     return ServerRouteContext(gate, health, target_info, exec, patch, image, file, transfer);
