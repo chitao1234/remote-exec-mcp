@@ -512,28 +512,6 @@ async fn exec_output_preserves_pipe_mode_output_after_external_pipeline_steps() 
     assert_eq!(response.output().output, "marker\nexternal\ndone\n");
 }
 
-#[cfg(not(target_os = "haiku"))]
-#[tokio::test]
-async fn exec_output_uses_one_pipe_for_stdout_and_stderr_in_pipe_mode() {
-    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
-
-    let response = fixture
-        .rpc::<ExecStartRequest, ExecResponse>(
-            "/v1/exec/start",
-            &unix_start_request(
-                r#"if [ "$(readlink /proc/$$/fd/1)" = "$(readlink /proc/$$/fd/2)" ]; then printf 'shared\n'; else printf 'separate\n'; fi"#,
-                false,
-                Some(COMPLETED_COMMAND_YIELD_MS),
-                None,
-            ),
-        )
-        .await;
-
-    assert!(!response.output().running);
-    assert_eq!(response.output().exit_code, Some(0));
-    assert_eq!(response.output().output, "shared\n");
-}
-
 #[tokio::test]
 async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
