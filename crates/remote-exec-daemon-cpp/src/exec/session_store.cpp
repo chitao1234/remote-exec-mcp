@@ -176,30 +176,34 @@ PollResult wait_for_session_activity(
     platform::MonotonicDeadline deadline(timeout_ms);
     BasicLockGuard session_lock(session->mutex_);
     std::string output;
-    std::uint64_t seen_generation = session->output_.generation;
+    SessionOutputDrainStopReason drain_stop_reason = SessionOutputDrainStopReason::None;
 
     for (;;) {
         mark_session_exit_locked(session.get());
         const SessionSnapshot snapshot = session_snapshot_locked(*session);
         if (!snapshot.buffered_output.empty()) {
             output += take_session_output_locked(session.get());
-            seen_generation = session->output_.generation;
         }
         if (snapshot.exited) {
             const SessionOutputDrainPolicy drain_policy = default_session_output_drain_policy();
             const SessionOutputDrainResult drain_result =
                 drain_exited_session_output_locked(session.get(), &output, drain_policy);
-            if (!drain_result.completed) {
-                return PollResult{output, false, 0, drain_result.reason};
+            drain_stop_reason = drain_result.reason;
+            if (drain_result.completed) {
+                const SessionSnapshot completed = session_snapshot_locked(*session);
+                return PollResult{output, true, completed.exit_code, drain_result.reason};
             }
-            const SessionSnapshot completed = session_snapshot_locked(*session);
-            return PollResult{output, true, completed.exit_code, drain_result.reason};
+            // Cleanup can finish before the pump publishes EOF. Use the
+            // remaining call budget without restarting the drain milestones.
         }
 
         if (timeout_ms == 0UL || deadline.expired()) {
-            return PollResult{output, false, 0, SessionOutputDrainStopReason::None};
+            return PollResult{output, false, 0, drain_stop_reason};
         }
 
+        // EOF can advance the generation without adding output bytes. Take a
+        // fresh baseline so the wait releases the mutex after every notification.
+        const std::uint64_t seen_generation = session->output_.generation;
         wait_for_generation_change_locked(
             session.get(),
             seen_generation,
@@ -316,6 +320,13 @@ LiveSession::~LiveSession() {
 
 SessionStore::SessionStore() : pending_starts_(0UL) {
 }
+
+#ifdef REMOTE_EXEC_CPP_TESTING
+void SessionStore::insert_session_for_test(const std::shared_ptr<LiveSession>& session) {
+    BasicLockGuard lock(mutex_);
+    sessions_[session->id] = session;
+}
+#endif
 
 SessionStore::~SessionStore() {
     std::vector<std::shared_ptr<LiveSession>> sessions;

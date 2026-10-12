@@ -87,6 +87,181 @@ private:
     int terminate_descendants_calls_;
 };
 
+class CoordinationMockProcessSession : public DrainMockProcessSession {
+public:
+    CoordinationMockProcessSession(bool initially_exited, bool cleanup_supported)
+        : DrainMockProcessSession(cleanup_supported), exited(initially_exited), exit_checked(false),
+          cleanup_started(false), empty_eof_published(false), empty_eof_observed(false),
+          exit_checks(0UL) {}
+
+    bool has_exited(int* exit_code) override {
+        ++exit_checks;
+        exit_checked.store(true);
+        if (empty_eof_published.load()) {
+            empty_eof_observed.store(true);
+        }
+        *exit_code = 7;
+        return exited.load();
+    }
+
+    bool terminate_descendants() override {
+        const bool supported = DrainMockProcessSession::terminate_descendants();
+        cleanup_started.store(true);
+        return supported;
+    }
+
+    std::atomic<bool> exited;
+    std::atomic<bool> exit_checked;
+    std::atomic<bool> cleanup_started;
+    std::atomic<bool> empty_eof_published;
+    std::atomic<bool> empty_eof_observed;
+    std::atomic<unsigned long> exit_checks;
+};
+
+static std::shared_ptr<LiveSession> make_coordination_session(
+    CoordinationMockProcessSession* process
+) {
+    const std::shared_ptr<LiveSession> session(new LiveSession());
+    session->id = "coordination-test";
+    session->started_at_ms = platform::monotonic_ms();
+    session->process.reset(process);
+    return session;
+}
+
+static ExecSessionResult poll_coordination_session(
+    SessionStore* store,
+    const std::shared_ptr<LiveSession>& session,
+    unsigned long timeout_ms
+) {
+    YieldTimeConfig yield_time;
+    yield_time.write_stdin_poll.min_ms = 0UL;
+    return store->write_stdin(
+        session->id,
+        "",
+        true,
+        timeout_ms,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time,
+        false,
+        0,
+        0
+    );
+}
+
+static void assert_poll_waits_for_delayed_eof() {
+    SessionStore store;
+    CoordinationMockProcessSession* process = new CoordinationMockProcessSession(true, true);
+    const std::shared_ptr<LiveSession> session = make_coordination_session(process);
+    session->output_.buffered_output = "before-cleanup\n";
+    store.insert_session_for_test(session);
+
+    std::thread publisher([&]() {
+        TEST_ASSERT(test_assert::wait_until_true(process->cleanup_started, 5000UL));
+        // EOF arrives after the existing 25 ms cleanup wait, but within the
+        // caller's budget. Include final bytes to check output survives retries.
+        platform::sleep_ms(100UL);
+        BasicLockGuard lock(session->mutex_);
+        session->output_.buffered_output += "after-cleanup\n";
+        finish_session_output_locked(session.get(), SessionOutputDrainStopReason::OutputEof);
+    });
+    const ExecSessionResult result = poll_coordination_session(&store, session, 3000UL);
+    publisher.join();
+
+    TEST_ASSERT(!result.running);
+    TEST_ASSERT(!result.has_daemon_session_id);
+    TEST_ASSERT(result.has_exit_code && result.exit_code == 7);
+    TEST_ASSERT(result.output == "before-cleanup\nafter-cleanup\n");
+    TEST_ASSERT(process->terminate_descendants_calls() == 1);
+    TEST_ASSERT(session->retired);
+}
+
+static void assert_empty_eof_releases_poll_mutex() {
+    SessionStore store;
+    CoordinationMockProcessSession* process = new CoordinationMockProcessSession(false, true);
+    const std::shared_ptr<LiveSession> session = make_coordination_session(process);
+    store.insert_session_for_test(session);
+
+    std::thread publisher([&]() {
+        TEST_ASSERT(test_assert::wait_until_true(process->exit_checked, 5000UL));
+        BasicLockGuard lock(session->mutex_);
+        finish_session_output_locked(session.get(), SessionOutputDrainStopReason::OutputEof);
+        process->empty_eof_published.store(true);
+    });
+    std::thread contender([&]() {
+        // Wait until polling has consumed the empty EOF notification. Process
+        // exit then depends on that loop releasing the mutex again.
+        TEST_ASSERT(test_assert::wait_until_true(process->empty_eof_observed, 5000UL));
+        BasicLockGuard lock(session->mutex_);
+        process->exited.store(true);
+    });
+    const ExecSessionResult result = poll_coordination_session(&store, session, 3000UL);
+    publisher.join();
+    contender.join();
+
+    TEST_ASSERT(!result.running);
+    TEST_ASSERT(!result.has_daemon_session_id);
+    TEST_ASSERT(result.has_exit_code && result.exit_code == 7);
+    TEST_ASSERT(result.output.empty());
+    // A spinning wait performs millions of checks; normal 25 ms exit polling
+    // stays below this generous bound even if it uses the entire call budget.
+    TEST_ASSERT(process->exit_checks.load() < 1000UL);
+    TEST_ASSERT(process->terminate_descendants_calls() == 0);
+}
+
+static void assert_missing_eof_uses_each_poll_budget(bool cleanup_supported) {
+    SessionStore store;
+    CoordinationMockProcessSession* process =
+        new CoordinationMockProcessSession(true, cleanup_supported);
+    const std::shared_ptr<LiveSession> session = make_coordination_session(process);
+    session->output_.buffered_output = "initial-output\n";
+    store.insert_session_for_test(session);
+
+    const std::uint64_t first_started = platform::monotonic_ms();
+    const ExecSessionResult first = poll_coordination_session(&store, session, 500UL);
+    TEST_ASSERT(platform::monotonic_ms() - first_started >= 500ULL);
+    TEST_ASSERT(first.running && first.has_daemon_session_id && !first.has_exit_code);
+    TEST_ASSERT(first.output == "initial-output\n");
+    TEST_ASSERT(process->terminate_descendants_calls() == 1);
+    const std::uint64_t cleanup_started_at_ms = session->output_.descendant_cleanup_started_at_ms;
+
+    const std::uint64_t second_started = platform::monotonic_ms();
+    const ExecSessionResult second = poll_coordination_session(&store, session, 100UL);
+    TEST_ASSERT(platform::monotonic_ms() - second_started >= 100ULL);
+    TEST_ASSERT(second.running && second.has_daemon_session_id && !second.has_exit_code);
+    TEST_ASSERT(second.output.empty());
+    TEST_ASSERT(process->terminate_descendants_calls() == 1);
+    TEST_ASSERT(session->output_.descendant_cleanup_started_at_ms == cleanup_started_at_ms);
+    const SessionOutputDrainStopReason expected =
+        cleanup_supported ? SessionOutputDrainStopReason::DescendantTerminateTimeout
+                          : SessionOutputDrainStopReason::DescendantTerminateUnsupported;
+    TEST_ASSERT(session->output_.last_drain_stop_reason == expected);
+
+    const std::uint64_t zero_started = platform::monotonic_ms();
+    const ExecSessionResult zero = poll_coordination_session(&store, session, 0UL);
+    TEST_ASSERT(platform::monotonic_ms() - zero_started < 1000ULL);
+    TEST_ASSERT(zero.running && zero.has_daemon_session_id && !zero.has_exit_code);
+    TEST_ASSERT(process->terminate_descendants_calls() == 1);
+    TEST_ASSERT(session->output_.descendant_cleanup_started_at_ms == cleanup_started_at_ms);
+
+    {
+        BasicLockGuard lock(session->mutex_);
+        session->output_.buffered_output = "final-output\n";
+        finish_session_output_locked(session.get(), SessionOutputDrainStopReason::OutputEof);
+    }
+    const ExecSessionResult completed = poll_coordination_session(&store, session, 100UL);
+    TEST_ASSERT(!completed.running && !completed.has_daemon_session_id);
+    TEST_ASSERT(completed.has_exit_code && completed.exit_code == 7);
+    TEST_ASSERT(completed.output == "final-output\n");
+    TEST_ASSERT(process->terminate_descendants_calls() == 1);
+}
+
+static void assert_completion_coordination() {
+    assert_poll_waits_for_delayed_eof();
+    assert_empty_eof_releases_poll_mutex();
+    assert_missing_eof_uses_each_poll_budget(true);
+    assert_missing_eof_uses_each_poll_budget(false);
+}
+
 class BlockingCarryProcessSession : public ProcessSession {
 public:
     BlockingCarryProcessSession() : read_started_(false), released_(false) {}
@@ -2460,10 +2635,12 @@ int main(int argc, char** argv) {
     if (argc >= 2 && std::strcmp(argv[1], "--session-store-helper") == 0) {
         return test_exec_pty::run_windows_stdin_helper(argc, argv, 2);
     }
-#else
-    (void)argc;
-    (void)argv;
 #endif
+    if (argc >= 2 && std::strcmp(argv[argc - 1], "--coordination-regression-only") == 0) {
+        assert_completion_coordination();
+        std::puts("Session completion coordination regressions passed");
+        return 0;
+    }
 #ifndef _WIN32
     install_posix_child_reaper();
     assert_posix_locale_strategy_selection();
@@ -2490,6 +2667,7 @@ int main(int argc, char** argv) {
     assert_windows_stdin_write_timeout_retires_session(root, shell);
 #endif
     assert_explicit_drain_stop_reasons();
+    assert_completion_coordination();
     assert_output_pump_restores_decode_carry_when_closing();
     assert_completed_command_output(store, root, shell, yield_time);
     assert_token_limiting(store, root, shell, yield_time);

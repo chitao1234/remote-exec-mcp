@@ -87,6 +87,33 @@ async fn assert_exec_command_smoke(fixture: &CppDaemonBrokerFixture) {
     );
 }
 
+#[cfg(not(windows))]
+#[tokio::test]
+async fn exec_completes_when_output_closes_before_process_exit() {
+    let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
+        return;
+    };
+    let result = fixture
+        .client
+        .call_tool(
+            "exec_command",
+            &serde_json::json!({
+                "target": CPP_TARGET,
+                "cmd": "printf 'final-output\\n'; exec 1>&- 2>&-; sleep 0.2; exit 7",
+                "shell": test_shell(),
+                "login": false,
+                "tty": false,
+                "yield_time_ms": 5000
+            }),
+        )
+        .await
+        .unwrap();
+    assert_tool_ok(&result, "exec_command with output closed before exit");
+    assert!(result.structured_content["session_id"].is_null());
+    assert_eq!(result.structured_content["exit_code"], 7);
+    assert_eq!(result.structured_content["output"], "final-output\n");
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_accepts_a_custom_windows_shell_executable_name() {

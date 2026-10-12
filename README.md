@@ -538,6 +538,8 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
   receive `/C` followed by the command as one argument.
   Windows 9x/Me commands report completion after process exit and a bounded
   drain of final output, including when redirected pipes do not report EOF.
+  If output completion arrives later than descendant cleanup, exec calls and
+  stdin polls continue waiting within their remaining `yield_time_ms` budget.
   Windows stdin writes are bounded by `stdin_write_timeout_ms`; a timeout
   terminates and retires the affected session.
 

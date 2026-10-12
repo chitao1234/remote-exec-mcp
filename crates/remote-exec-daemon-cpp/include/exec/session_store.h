@@ -87,6 +87,11 @@ public:
         unsigned short pty_cols
     );
 
+#ifdef REMOTE_EXEC_CPP_TESTING
+    // Exercise store polling and retirement with a controlled process backend.
+    void insert_session_for_test(const std::shared_ptr<LiveSession>& session);
+#endif
+
 private:
     bool reserve_pending_start(unsigned long max_open_sessions);
     bool prune_one_session_for_start(unsigned long max_open_sessions);

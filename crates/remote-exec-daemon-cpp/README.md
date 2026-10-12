@@ -27,6 +27,10 @@ for console input does not block the daemon. On Windows 9x/Me, exited commands
 finish after a bounded drain of final output even when their redirected pipes
 do not report EOF.
 
+Exec calls and stdin polls keep waiting within their remaining `yield_time_ms`
+budget when a process has exited but final output has not finished draining.
+They report completion once both process exit and output completion are observed.
+
 OpenSSL- or LibreSSL-backed builds and POSIX BoringSSL-backed builds support
 direct and reverse mutual TLS. Plain HTTP is available only when explicitly
 selected. Bearer authentication can authenticate plain HTTP requests, but it
