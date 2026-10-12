@@ -265,6 +265,11 @@ OpenSSL 1.0.x remains available when a legacy compatibility path requires it.
 
 ## Runtime notes
 
+- Windows `default_shell`, `COMSPEC`, and per-command `shell` accept arbitrary
+  executable names and paths. The operating system resolves or rejects the
+  executable at launch. Cmd, COMMAND.COM, PowerShell, and Bash retain their
+  argument conventions; other executables receive `/C` and the command as one
+  argument.
 - POSIX non-PTY command output merges stdout and stderr in emitted order. Use
   `tty=true` for interactive commands that need later stdin writes.
 - Windows non-PTY commands run detached from the daemon's console while their

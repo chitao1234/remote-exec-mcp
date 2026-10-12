@@ -771,7 +771,9 @@ static void assert_windows_powershell_selection_and_argument_passing() {
         "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
     };
     for (std::size_t i = 0; i < powershell_names.size(); ++i) {
-        TEST_ASSERT(platform::shell_supported(powershell_names[i]));
+        TEST_ASSERT(
+            platform::selected_shell(powershell_names[i], "cmd.exe") == powershell_names[i]
+        );
     }
     TEST_ASSERT(platform::resolve_default_shell("pwsh.exe") == "pwsh.exe");
     TEST_ASSERT(platform::selected_shell("powershell", "cmd.exe") == "powershell");
@@ -816,7 +818,7 @@ static void assert_windows_git_bash_selection_and_argument_passing() {
         "C:\\Program Files\\Git\\bin\\bash.exe",
     };
     for (std::size_t i = 0; i < bash_names.size(); ++i) {
-        TEST_ASSERT(platform::shell_supported(bash_names[i]));
+        TEST_ASSERT(platform::selected_shell(bash_names[i], "cmd.exe") == bash_names[i]);
     }
     TEST_ASSERT(platform::selected_shell("git-bash.exe", "cmd.exe") == "git-bash.exe");
     TEST_ASSERT(
@@ -953,6 +955,27 @@ static void assert_windows_default_shell_fallback_tracks_runtime_family() {
     );
     TEST_ASSERT(
         platform::windows_default_shell_for_version_for_test(0x8000000AUL) == "command.com"
+    );
+}
+
+static void assert_windows_custom_shell_selection() {
+    const std::string shell = "C:\\Custom Shells\\renamed.exe";
+    TEST_ASSERT(platform::resolve_default_shell(shell) == shell);
+    TEST_ASSERT(platform::selected_shell(shell, "cmd.exe") == shell);
+    TEST_ASSERT(platform::selected_shell("", shell) == shell);
+    TEST_ASSERT(
+        platform::selected_shell("/bin/renamed.exe", "cmd.exe", "C:\\tools")
+        == "C:\\tools\\bin\\renamed.exe"
+    );
+    const std::vector<std::string> argv = platform::shell_argv(shell, false, "echo \"A & B\"");
+    TEST_ASSERT(argv.size() == 3U);
+    TEST_ASSERT(argv[0] == shell);
+    TEST_ASSERT(argv[1] == "/C");
+    TEST_ASSERT(argv[2] == "echo \"A & B\"");
+    TEST_ASSERT(platform::shell_argv(shell, true, argv[2]) == argv);
+    TEST_ASSERT(
+        windows_process_command_line_for_test(argv[2], shell, false)
+        == "\"C:\\Custom Shells\\renamed.exe\" /C \"echo \\\"A & B\\\"\""
     );
 }
 
@@ -2462,6 +2485,7 @@ int main(int argc, char** argv) {
     assert_windows_git_bash_selection_and_argument_passing();
     assert_windows_command_com_command_line_omits_cmd_only_flags();
     assert_windows_default_shell_fallback_tracks_runtime_family();
+    assert_windows_custom_shell_selection();
     assert_win32_process_tree_terminates_descendants(root);
     assert_windows_stdin_write_timeout_retires_session(root, shell);
 #endif

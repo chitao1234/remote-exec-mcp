@@ -64,7 +64,6 @@ bool is_windows();
 bool is_absolute_path(const std::string& path);
 std::string normalize_path_separators(std::string path);
 
-bool shell_supported(const std::string& shell);
 std::string resolve_default_shell(
     const std::string& configured_default_shell,
     const std::string& windows_posix_root = std::string()

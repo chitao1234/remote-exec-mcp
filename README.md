@@ -532,6 +532,10 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 - C++ daemon forwarding bounds worker count, tunnel I/O, queued bytes, UDP
   binds, active TCP streams, retained sessions/listeners, and TCP connect time.
 - C++ daemon Windows non-PTY commands are detached from the daemon console.
+  Its configured default shell, `COMSPEC`, and per-command `shell` may name any
+  executable; shell names are not restricted to a built-in list. Recognized
+  shell families keep their argument conventions, and other Windows executables
+  receive `/C` followed by the command as one argument.
   Windows 9x/Me commands report completion after process exit and a bounded
   drain of final output, including when redirected pipes do not report EOF.
   Windows stdin writes are bounded by `stdin_write_timeout_ms`; a timeout

@@ -91,13 +91,6 @@ ExecStartRequestSpec prepare_exec_start_request(
         }
 
         const std::string shell_override = body.value("shell", std::string());
-        if (!shell_override.empty() && !platform::shell_supported(shell_override)) {
-            throw ExecRequestFailure(
-                400,
-                "unsupported_shell",
-                "requested shell is not supported on this target"
-            );
-        }
         parsed.shell = platform::selected_shell(
             shell_override,
             context.default_shell,

@@ -18,6 +18,7 @@ namespace {
 #ifdef _WIN32
 const unsigned long WINDOWS_LIVE_SESSION_SLEEP_SECONDS = 8UL;
 const unsigned long WINDOWS_RESIZE_HELPER_SLEEP_SECONDS = 2UL;
+const char* CUSTOM_SHELL_COMMAND = "custom-shell-test \"A & B\"";
 #endif
 
 } // namespace
@@ -220,6 +221,38 @@ static std::string tty_resize_command() {
     return "stty -a; printf ready; IFS= read line; stty -a; sleep 30";
 #endif
 }
+
+#ifdef _WIN32
+static void assert_custom_shell_routes(TestRouteHarness& harness, const fs::path& root) {
+    const fs::path shell_path = root / "custom shell.exe";
+    fs::write_file_bytes(shell_path, fs::read_file_bytes(test_exec_pty::test_executable_path()));
+    const std::string original_shell = harness.state.metadata.default_shell;
+    harness.state.metadata.default_shell = platform::resolve_default_shell(shell_path.string());
+    harness.refresh_context();
+    for (unsigned int i = 0U; i < 2U; ++i) {
+        Json body{
+            {"cmd", CUSTOM_SHELL_COMMAND},
+            {"workdir", root.string()},
+            {"login", false},
+            {"yield_time_ms", 5000}
+        };
+        if (i == 0U) {
+            body["shell"] = shell_path.string();
+        }
+        const HttpResponse response =
+            route_request(harness, make_json_http_request("/v1/exec/start", body));
+        TEST_ASSERT(response.status == 200);
+        const Json result = Json::parse(response.body);
+        TEST_ASSERT(!result.at("running").get<bool>());
+        TEST_ASSERT(result.at("daemon_session_id").is_null());
+        TEST_ASSERT(result.at("exit_code").get<int>() == 23);
+        const Json argv = Json::parse(fs::read_file_bytes(root / "custom-shell-result.txt"));
+        TEST_ASSERT(argv == Json::array({"/C", CUSTOM_SHELL_COMMAND}));
+    }
+    harness.state.metadata.default_shell = original_shell;
+    harness.refresh_context();
+}
+#endif
 
 static void assert_exec_routes(TestRouteHarness& harness, const fs::path& root) {
     const HttpResponse missing_cmd_response = route_request(
@@ -527,6 +560,10 @@ static void assert_exec_routes(TestRouteHarness& harness, const fs::path& root) 
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
+    if (argc == 3 && std::string(argv[1]) == "/C" && std::string(argv[2]) == CUSTOM_SHELL_COMMAND) {
+        fs::write_file_bytes("custom-shell-result.txt", Json::array({argv[1], argv[2]}).dump());
+        return 23;
+    }
     if (argc >= 2 && std::string(argv[1]) == "--server-routes-helper") {
         return test_exec_pty::run_windows_stdin_helper(argc, argv, 2);
     }
@@ -539,6 +576,7 @@ int main(int argc, char** argv) {
     run_platform_neutral_server_route_tests(harness, root);
     assert_exec_routes(harness, root);
 #ifdef _WIN32
+    assert_custom_shell_routes(harness, root);
     const fs::path timeout_root =
         make_daemon_test_root("remote-exec-cpp-server-routes-stdin-timeout-test");
     TestRouteHarness timeout_harness(timeout_root);

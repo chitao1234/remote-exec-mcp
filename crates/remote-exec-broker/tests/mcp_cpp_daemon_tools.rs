@@ -87,6 +87,40 @@ async fn assert_exec_command_smoke(fixture: &CppDaemonBrokerFixture) {
     );
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_accepts_a_custom_windows_shell_executable_name() {
+    let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
+        return;
+    };
+    let source = std::env::var_os("COMSPEC").expect("Windows test host should provide COMSPEC");
+    let shell = fixture.daemon_workdir().join("custom shell.exe");
+    std::fs::copy(source, &shell).unwrap();
+    let result = fixture
+        .client
+        .call_tool(
+            "exec_command",
+            &serde_json::json!({
+                "target": CPP_TARGET,
+                "cmd": "echo custom-shell-ok",
+                "shell": shell.display().to_string(),
+                "login": false,
+                "yield_time_ms": 5000
+            }),
+        )
+        .await
+        .unwrap();
+    assert_tool_ok(&result, "exec_command with custom shell");
+    assert!(result.structured_content["session_id"].is_null());
+    assert_eq!(result.structured_content["exit_code"], 0);
+    assert!(
+        result.structured_content["output"]
+            .as_str()
+            .unwrap()
+            .contains("custom-shell-ok")
+    );
+}
+
 async fn assert_write_stdin_smoke(fixture: &CppDaemonBrokerFixture) {
     let started = fixture
         .client

@@ -165,34 +165,16 @@ std::string passwd_shell() {
 
 namespace platform {
 
-bool shell_supported(const std::string& shell) {
-#ifdef _WIN32
-    const std::string lower = shell_basename_lower(shell);
-    return is_windows_cmd_family(lower) || is_windows_command_family(lower)
-           || is_windows_powershell_family(lower) || is_windows_bash_family(lower);
-#else
-    (void)shell;
-    return true;
-#endif
-}
-
 std::string resolve_default_shell(
     const std::string& configured_default_shell,
     const std::string& windows_posix_root
 ) {
 #ifdef _WIN32
     if (!configured_default_shell.empty()) {
-        if (!shell_supported(configured_default_shell)) {
-            throw std::runtime_error(
-                "supported Windows shells are cmd.exe/cmd, command.com/command, and the "
-                "PowerShell family (powershell.exe, powershell, pwsh.exe, pwsh), or "
-                "Git Bash (bash.exe, bash, sh.exe, sh, git-bash.exe, git-bash)"
-            );
-        }
         return resolve_windows_shell_path(configured_default_shell, windows_posix_root);
     }
     const char* comspec = std::getenv("COMSPEC");
-    if (comspec != nullptr && comspec[0] != '\0' && shell_supported(comspec)) {
+    if (comspec != nullptr && comspec[0] != '\0') {
         return comspec;
     }
     return windows_default_shell_fallback();
@@ -262,9 +244,6 @@ std::string selected_shell(
     const std::string& windows_posix_root
 ) {
     const std::string shell = shell_override.empty() ? default_shell : shell_override;
-    if (!shell_supported(shell)) {
-        throw std::runtime_error("unsupported shell `" + shell + "`");
-    }
 #ifdef _WIN32
     return resolve_windows_shell_path(shell, windows_posix_root);
 #else
