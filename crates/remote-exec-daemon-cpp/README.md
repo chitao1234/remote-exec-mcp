@@ -22,6 +22,11 @@ workflow.
 | Hidden file tools | `read`, `write`, and `edit`, matching the Rust daemon's semantics and wire error codes. |
 | Text encoding | Optional. When built in and enabled in config, text tools decode and re-encode legacy encodings instead of requiring UTF-8. |
 
+Windows commands are detached from the daemon console so a command waiting
+for console input does not block the daemon. On Windows 9x/Me, exited commands
+finish after a bounded drain of final output even when their redirected pipes
+do not report EOF.
+
 OpenSSL- or LibreSSL-backed builds and POSIX BoringSSL-backed builds support
 direct and reverse mutual TLS. Plain HTTP is available only when explicitly
 selected. Bearer authentication can authenticate plain HTTP requests, but it

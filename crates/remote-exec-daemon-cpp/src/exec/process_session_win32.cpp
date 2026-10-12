@@ -1,6 +1,7 @@
 #ifdef _WIN32
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <exception>
 #include <memory>
@@ -431,6 +432,19 @@ bool process_has_exited(const UniqueHandle& process_handle, int* exit_code) {
     return true;
 }
 
+#ifdef REMOTE_EXEC_CPP_TESTING
+bool simulate_missing_pipe_eof = false;
+#endif
+
+bool needs_pipe_eof_fallback() {
+#ifdef REMOTE_EXEC_CPP_TESTING
+    if (simulate_missing_pipe_eof) {
+        return true;
+    }
+#endif
+    return (GetVersion() & 0x80000000UL) != 0U;
+}
+
 class Win32ProcessSession : public ProcessSession {
 public:
     Win32ProcessSession(
@@ -442,7 +456,17 @@ public:
     )
         : process_handle_(std::move(process_handle)), process_id_(process_id),
           stdin_write_(std::move(stdin_write)), stdout_read_(std::move(stdout_read)),
-          stdin_write_timeout_ms_(stdin_write_timeout_ms) {}
+          stdin_write_timeout_ms_(stdin_write_timeout_ms),
+          needs_pipe_eof_fallback_(needs_pipe_eof_fallback()), output_drain_finished_(false),
+          output_drain_event_(
+              needs_pipe_eof_fallback_ ? CreateEvent(nullptr, TRUE, FALSE, nullptr) : nullptr
+          )
+#ifdef REMOTE_EXEC_CPP_TESTING
+          ,
+          simulate_missing_pipe_eof_(simulate_missing_pipe_eof)
+#endif
+    {
+    }
 
     ~Win32ProcessSession() override { terminate(); }
 
@@ -457,9 +481,28 @@ public:
     }
 
     std::string read_output(bool block, bool* eof, std::string* carry) override {
-        const std::string output = read_console_output(stdout_read_.get(), false, eof, carry);
+        std::string output = read_console_output(stdout_read_.get(), false, eof, carry);
+#ifdef REMOTE_EXEC_CPP_TESTING
+        if (simulate_missing_pipe_eof_) {
+            *eof = false;
+        }
+#endif
+        // Windows 9x can leave detached COMMAND.COM pipes open after exit.
+        // The store allows late output before requesting descendant cleanup.
+        // After that cleanup, drain the remaining bytes and end the stream
+        // even when PeekNamedPipe never reports that its writer has closed.
         if (block && output.empty() && !*eof) {
-            platform::sleep_ms(WINDOWS_PIPE_READ_POLL_MS);
+            if (output_drain_event_.valid()) {
+                WaitForSingleObject(output_drain_event_.get(), WINDOWS_PIPE_READ_POLL_MS);
+            } else {
+                platform::sleep_ms(WINDOWS_PIPE_READ_POLL_MS);
+            }
+        }
+        if (needs_pipe_eof_fallback_ && output.empty() && output_drain_finished_.load()) {
+            // Cleanup can wake a reader whose last peek preceded the final
+            // write. Consume those bytes before synthesizing EOF.
+            output = read_console_output(stdout_read_.get(), false, eof, carry);
+            *eof = output.empty();
         }
         return output;
     }
@@ -516,11 +559,18 @@ public:
 
     bool terminate_descendants() override {
         stdin_write_.reset();
-        if (process_id_ == 0U || !win32_process_tree::process_tree_snapshot_supported()) {
-            return false;
+        const bool supported =
+            process_id_ != 0U && win32_process_tree::process_tree_snapshot_supported();
+        if (supported) {
+            (void)win32_process_tree::terminate_process_descendants(process_id_);
         }
-        (void)win32_process_tree::terminate_process_descendants(process_id_);
-        return true;
+        if (needs_pipe_eof_fallback_) {
+            output_drain_finished_.store(true);
+            if (output_drain_event_.valid()) {
+                SetEvent(output_drain_event_.get());
+            }
+        }
+        return supported || needs_pipe_eof_fallback_;
     }
 
 private:
@@ -529,6 +579,12 @@ private:
     UniqueHandle stdin_write_;
     UniqueHandle stdout_read_;
     unsigned long stdin_write_timeout_ms_;
+    bool needs_pipe_eof_fallback_;
+    std::atomic<bool> output_drain_finished_;
+    UniqueHandle output_drain_event_;
+#ifdef REMOTE_EXEC_CPP_TESTING
+    bool simulate_missing_pipe_eof_;
+#endif
 };
 
 #ifdef REMOTE_EXEC_CPP_HAS_WINPTY
@@ -1051,6 +1107,10 @@ bool process_session_supports_pty() {
 }
 
 #ifdef REMOTE_EXEC_CPP_TESTING
+void set_windows_missing_pipe_eof_for_test(bool enabled) {
+    simulate_missing_pipe_eof = enabled;
+}
+
 unsigned long windows_pipe_creation_flags_for_test(unsigned long environment_flags) {
     return static_cast<unsigned long>(
         windows_pipe_creation_flags(static_cast<DWORD>(environment_flags))

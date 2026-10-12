@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #ifndef _WIN32
@@ -1172,6 +1173,95 @@ static void assert_completed_command_output(
     );
 }
 
+#ifdef _WIN32
+static void assert_windows_pipe_completion(
+    const fs::path& root,
+    const std::string& shell,
+    const YieldTimeConfig& yield_time
+) {
+    set_windows_missing_pipe_eof_for_test(true);
+    SessionStore store;
+    const std::string helper =
+        test_exec_pty::quoted_test_executable_path() + " --completion-helper";
+    const Json silent =
+        start_command_session(store, root, helper, shell, false, 5000UL, yield_time);
+    TEST_ASSERT(silent.at("daemon_session_id").is_null());
+    TEST_ASSERT(!silent.at("running").get<bool>());
+    TEST_ASSERT(silent.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(silent.at("output").get<std::string>().empty());
+
+    YieldTimeConfig fast_yield;
+    fast_yield.exec_command = YieldTimeOperationConfig{1UL, 5000UL, 1UL};
+    fast_yield.write_stdin_poll = YieldTimeOperationConfig{1UL, 5000UL, 1UL};
+    const Json started = start_command_session(store, root, helper, shell, false, 1UL, fast_yield);
+    TEST_ASSERT(started.at("running").get<bool>());
+    const std::string session_id = started.at("daemon_session_id").get<std::string>();
+    const Json completed =
+        poll_session_until_done(store, session_id, started, fast_yield, nullptr, 5000UL);
+    TEST_ASSERT(!completed.at("running").get<bool>());
+    TEST_ASSERT(completed.at("daemon_session_id").is_null());
+    TEST_ASSERT(completed.at("exit_code").get<int>() == 0);
+    assert_unknown_session(store, session_id, fast_yield);
+
+    // Use shell output: Wine can discard stdout from a detached helper exe.
+    const fs::path script = root / "cmpl.bat";
+    std::string script_text = "@echo off\r\n";
+    std::string expected;
+    for (unsigned int i = 0U; i < 100U; ++i) {
+        script_text += "echo " + std::string(60U, 'a') + "\r\n";
+        expected += std::string(60U, 'a') + "\n";
+    }
+    script_text += "echo tail\r\n";
+    expected += "tail\n";
+    write_text_file(script, script_text);
+    const Json full_output =
+        start_command_session(store, root, "cmpl.bat", shell, false, 5000UL, yield_time);
+    TEST_ASSERT(!full_output.at("running").get<bool>());
+    TEST_ASSERT(full_output.at("daemon_session_id").is_null());
+    TEST_ASSERT(full_output.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(normalize_output(full_output.at("output").get<std::string>()) == expected);
+    const Json failed = start_command_session(
+        store,
+        root,
+        "--completion-exit-7",
+        test_exec_pty::test_executable_path(),
+        false,
+        5000UL,
+        yield_time
+    );
+    TEST_ASSERT(!failed.at("running").get<bool>());
+    TEST_ASSERT(failed.at("daemon_session_id").is_null());
+    TEST_ASSERT(failed.at("exit_code").get<int>() == 7);
+
+    const std::uint64_t time_started = platform::monotonic_ms();
+    const Json time = start_command_session(store, root, "time", shell, false, 250UL, yield_time);
+    TEST_ASSERT(platform::monotonic_ms() - time_started < 2000UL);
+    const Json concurrent = start_command_session(
+        store,
+        root,
+        "echo still-responsive",
+        shell,
+        false,
+        5000UL,
+        yield_time
+    );
+    TEST_ASSERT(!concurrent.at("running").get<bool>());
+    TEST_ASSERT(concurrent.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(
+        normalize_output(concurrent.at("output").get<std::string>()) == "still-responsive\n"
+    );
+    if (time.at("running").get<bool>()) {
+        const std::string time_session_id = time.at("daemon_session_id").get<std::string>();
+        const Json resumed = poll_session(store, time_session_id, yield_time, "\r\n", 250UL);
+        const Json finished =
+            poll_session_until_done(store, time_session_id, resumed, yield_time, nullptr, 5000UL);
+        TEST_ASSERT(!finished.at("running").get<bool>());
+        TEST_ASSERT(finished.at("exit_code").get<int>() == 0);
+    }
+    set_windows_missing_pipe_eof_for_test(false);
+}
+#endif
+
 static void assert_token_limiting(
     SessionStore& store,
     const fs::path& root,
@@ -2337,6 +2427,13 @@ static void assert_threshold_warnings_follow_configured_limit(
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
+    if (argc >= 2 && std::strcmp(argv[argc - 1], "--completion-exit-7") == 0) {
+        return 7;
+    }
+    if (argc >= 2 && std::strcmp(argv[argc - 1], "--completion-helper") == 0) {
+        platform::sleep_ms(150UL);
+        return 0;
+    }
     if (argc >= 2 && std::strcmp(argv[1], "--session-store-helper") == 0) {
         return test_exec_pty::run_windows_stdin_helper(argc, argv, 2);
     }
@@ -2354,6 +2451,11 @@ int main(int argc, char** argv) {
     const std::string shell = ::stable_test_shell();
 
 #ifdef _WIN32
+    assert_windows_pipe_completion(root, shell, yield_time);
+    if (argc >= 2 && std::strcmp(argv[argc - 1], "--completion-regression-only") == 0) {
+        std::puts("Windows pipe completion regression passed");
+        return 0;
+    }
     assert_windows_pipe_launch_is_detached();
     assert_windows_cmd_command_line_preserves_command_quotes(shell);
     assert_windows_powershell_selection_and_argument_passing();

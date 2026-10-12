@@ -76,6 +76,7 @@ async fn assert_exec_command_smoke(fixture: &CppDaemonBrokerFixture) {
     assert_tool_ok(&result, "exec_command");
     assert_eq!(result.structured_content["target"], CPP_TARGET);
     assert_eq!(result.structured_content["exit_code"], 0);
+    assert!(result.structured_content["session_id"].is_null());
     assert!(
         result.structured_content["output"]
             .as_str()

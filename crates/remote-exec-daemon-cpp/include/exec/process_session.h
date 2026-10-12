@@ -66,4 +66,5 @@ std::string windows_process_command_line_for_test(
     bool login
 );
 unsigned long windows_pipe_creation_flags_for_test(unsigned long environment_flags);
+void set_windows_missing_pipe_eof_for_test(bool enabled);
 #endif

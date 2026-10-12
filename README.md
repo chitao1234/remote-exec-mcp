@@ -532,6 +532,8 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 - C++ daemon forwarding bounds worker count, tunnel I/O, queued bytes, UDP
   binds, active TCP streams, retained sessions/listeners, and TCP connect time.
 - C++ daemon Windows non-PTY commands are detached from the daemon console.
+  Windows 9x/Me commands report completion after process exit and a bounded
+  drain of final output, including when redirected pipes do not report EOF.
   Windows stdin writes are bounded by `stdin_write_timeout_ms`; a timeout
   terminates and retires the affected session.
 
