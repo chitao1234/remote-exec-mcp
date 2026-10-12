@@ -715,6 +715,52 @@ static void assert_transfer_import_rejects_file_merge_into_directory(
     );
 }
 
+static void assert_transfer_complete_byte_count_validation(
+    TestRouteHarness& harness,
+    const fs::path& root,
+    const std::string& archive
+) {
+    const char* const invalid_values[] = {
+        "1e300",
+        "1.5",
+        "-1",
+        "18446744073709551616",
+        "\"12\"",
+        "true",
+        "null",
+        "[]",
+        "{}",
+    };
+    const fs::path destination = root / "transfer-complete-byte-count.txt";
+    for (std::size_t index = 0; index < sizeof(invalid_values) / sizeof(invalid_values[0]);
+         ++index) {
+        HttpRequest request = transfer_import_request(destination, archive);
+        request.body = tar::framed_transfer_body(
+            archive,
+            std::string("{\"archive_bytes\":") + invalid_values[index] + "}"
+        );
+        const HttpResponse response = route_request(harness, request);
+        TEST_ASSERT(response.status == 400);
+        const Json error = Json::parse(response.body);
+        TEST_ASSERT(error.at("code").get<std::string>() == "bad_request");
+        TEST_ASSERT(
+            error.at("message").get<std::string>().find("archive_bytes") != std::string::npos
+        );
+    }
+
+    const char* const valid_values[] = {"0", "9223372036854775807", "18446744073709551615"};
+    for (std::size_t index = 0; index < sizeof(valid_values) / sizeof(valid_values[0]); ++index) {
+        HttpRequest request = transfer_import_request(destination, archive);
+        request.body = tar::framed_transfer_body(
+            archive,
+            std::string("{\"archive_bytes\":") + valid_values[index] + "}"
+        );
+        const HttpResponse response = route_request(harness, request);
+        TEST_ASSERT(response.status == 200);
+        TEST_ASSERT(fs::read_file_bytes(destination) == "route transfer payload");
+    }
+}
+
 static void assert_transfer_import_routes(
     TestRouteHarness& harness,
     const fs::path& root,
@@ -723,6 +769,7 @@ static void assert_transfer_import_routes(
     assert_transfer_import_success(harness, root, export_body);
     assert_transfer_import_optional_defaults(harness, root, export_body);
     assert_transfer_import_header_validation(harness, root, export_body);
+    assert_transfer_complete_byte_count_validation(harness, root, export_body);
     assert_transfer_import_rejects_file_merge_into_directory(harness, root, export_body);
 }
 

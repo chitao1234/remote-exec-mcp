@@ -176,14 +176,21 @@ inline std::string transfer_frame(unsigned char frame_type, const std::string& p
     return output;
 }
 
-inline std::string framed_transfer_body(const std::string& archive) {
+inline std::string framed_transfer_body(
+    const std::string& archive,
+    const std::string& complete_payload
+) {
     std::string output(
         server_contract::TRANSFER_STREAM_PREFACE,
         server_contract::TRANSFER_STREAM_PREFACE_LEN
     );
     output += transfer_frame(0x01, archive);
-    output += transfer_frame(0x02, Json{{"archive_bytes", archive.size()}}.dump());
+    output += transfer_frame(0x02, complete_payload);
     return output;
+}
+
+inline std::string framed_transfer_body(const std::string& archive) {
+    return framed_transfer_body(archive, Json{{"archive_bytes", archive.size()}}.dump());
 }
 
 inline std::string decode_framed_transfer_archive(const std::string& body) {

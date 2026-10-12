@@ -1,5 +1,7 @@
 #include "rpc/transfer_stream_codec.h"
 
+#include <stdexcept>
+
 #include "http/http_helpers.h"
 #include "rpc/server_contract.h"
 
@@ -104,7 +106,12 @@ std::string error_payload(const std::exception& ex) {
 void parse_complete_payload(const std::string& payload) {
     try {
         const Json body = Json::parse(payload);
-        (void)body.at("archive_bytes").get<std::uint64_t>();
+        const Json& archive_bytes = body.at("archive_bytes");
+        if (!archive_bytes.is_number_unsigned()
+            && (!archive_bytes.is_number_integer() || archive_bytes.get<std::int64_t>() < 0)) {
+            throw std::runtime_error("archive_bytes must be a non-negative integer");
+        }
+        (void)archive_bytes.get<std::uint64_t>();
     } catch (const TransferFailure&) {
         throw;
     } catch (const std::exception& ex) {
