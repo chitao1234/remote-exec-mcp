@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #endif
 
+#include "core/encoding_detect.h"
 #include "patch/patch_engine.h"
 #include "test_filesystem.h"
 
@@ -87,6 +88,17 @@ static fs::path make_test_root() {
     fs::create_directories(root);
     return root;
 }
+
+#ifdef REMOTE_EXEC_CPP_HAS_TEXT_ENCODING
+static void assert_multibyte_utf8_detection() {
+    std::string sample;
+    for (unsigned int index = 0; index < 32U; ++index) {
+        sample += "\xC2\xA9 \xE2\x82\xAC \xF0\x9F\x98\x80\n";
+    }
+    // Two-, three-, and four-byte characters traverse unnamed detector states.
+    TEST_ASSERT(detect_encoding_label(sample) == "UTF-8");
+}
+#endif
 
 int main() {
     const fs::path root = make_test_root();
@@ -479,6 +491,8 @@ int main() {
     TEST_ASSERT(!fs::exists(root / "blocked.txt.tmp"));
 
 #ifdef REMOTE_EXEC_CPP_HAS_TEXT_ENCODING
+    assert_multibyte_utf8_detection();
+
     // Encoding autodetection: a patch target in a legacy encoding is decoded,
     // the hunks are applied to the decoded text, and the result is written back
     // in the same encoding. Without the option the same patch must fail rather

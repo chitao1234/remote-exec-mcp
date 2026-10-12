@@ -39,7 +39,9 @@
 
 #include "nsPkgInt.h"
 
-typedef enum {
+// The packed tables also store intermediate states without named enumerators.
+// A fixed underlying type keeps every table state representable.
+typedef enum : PRUint32 {
    eStart = 0,
    eError = 1,
    eItsMe = 2 
