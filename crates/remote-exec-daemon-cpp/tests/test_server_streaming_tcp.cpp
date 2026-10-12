@@ -1,4 +1,57 @@
+#include "../src/port_forward/port_tunnel_connection.h"
+#include "../src/port_forward/port_tunnel_service.h"
 #include "test_server_streaming_shared.h"
+#include "test_socket_pair.h"
+
+static void assert_tcp_close_retains_socket_until_io_workers_finish() {
+    ConnectedSocketPair pair = make_connected_socket_pair();
+    const SOCKET socket = pair.first.get();
+    std::shared_ptr<TunnelTcpStream> stream(
+        new TunnelTcpStream(pair.first.release(), PortTunnelBudgetLease())
+    );
+    int send_buffer = 4096;
+    TEST_ASSERT(
+        setsockopt(
+            socket,
+            SOL_SOCKET,
+            SO_SNDBUF,
+            reinterpret_cast<const char*>(&send_buffer),
+            sizeof(send_buffer)
+        )
+        == 0
+    );
+    std::shared_ptr<PortTunnelService> service =
+        create_port_tunnel_service(PortForwardLimitConfig());
+    std::shared_ptr<PortTunnelConnection> tunnel(new PortTunnelConnection(INVALID_SOCKET, service));
+    {
+        BasicLockGuard lock(stream->mutex);
+        stream->write_queue.push_back(std::vector<unsigned char>(1024U * 1024U, 'x'));
+    }
+    std::atomic<bool> read_finished(false), write_finished(false);
+    std::thread reader([tunnel, stream, &read_finished]() {
+        tunnel->tcp_read_loop(1U, stream);
+        read_finished.store(true);
+    });
+    std::thread writer([tunnel, stream, &write_finished]() {
+        tunnel->tcp_write_loop(1U, stream);
+        write_finished.store(true);
+    });
+    TEST_ASSERT(wait_socket_readable(pair.second.get(), 1000UL) > 0);
+    stream->close();
+    int error = 0;
+    TEST_ASSERT(stream->socket.get() == socket);
+    TEST_ASSERT(socket_error_option(socket, &error) == 0);
+    ConnectedSocketPair unrelated = make_connected_socket_pair();
+    TEST_ASSERT(unrelated.first.get() != socket);
+    TEST_ASSERT(unrelated.second.get() != socket);
+    TEST_ASSERT(test_assert::wait_until_true(read_finished, 1000UL));
+    TEST_ASSERT(test_assert::wait_until_true(write_finished, 1000UL));
+    reader.join();
+    writer.join();
+    stream.reset();
+    TEST_ASSERT(socket_error_option(socket, &error) != 0);
+    service->shutdown();
+}
 
 static void assert_tunnel_close_releases_tcp_listener(TestDaemonState& state) {
     UniqueSocket client_socket;
@@ -109,6 +162,7 @@ static void assert_tunnel_tcp_connect_echoes_binary_data(TestDaemonState& state)
 }
 
 void assert_tunnel_tcp_listener_and_connect_paths(TestDaemonState& state) {
+    assert_tcp_close_retains_socket_until_io_workers_finish();
     assert_tunnel_close_releases_tcp_listener(state);
     assert_terminal_tunnel_error_releases_tcp_listener_immediately(state);
     assert_tunnel_close_releases_retained_listener_immediately(state);

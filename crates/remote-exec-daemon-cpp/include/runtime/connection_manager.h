@@ -19,7 +19,8 @@ public:
     // Owns one worker thread per accepted HTTP connection. begin_shutdown()
     // prevents new workers and asks active workers to stop; reap_finished() and
     // wait_for_all() are the only join paths. Worker code owns request handling,
-    // while this manager supervises thread lifetime.
+    // while this manager supervises thread and socket lifetime. try_start()
+    // passes a borrowed socket; the worker must not close or adopt it.
     bool try_start(UniqueSocket client, std::function<void(SOCKET)> worker_main);
     bool try_start_transport(
         const std::shared_ptr<ConnectionTransport>& client,
@@ -29,6 +30,10 @@ public:
     void reap_finished();
     void wait_for_all();
     unsigned long active_count() const;
+#ifdef REMOTE_EXEC_CPP_TESTING
+    void set_before_wait_hook_for_testing(const std::function<void()>& hook);
+    unsigned long finished_count_for_testing() const;
+#endif
 
     ConnectionManager(const ConnectionManager&) = delete;
     ConnectionManager& operator=(const ConnectionManager&) = delete;
@@ -55,4 +60,7 @@ private:
     std::map<unsigned long, std::shared_ptr<WorkerRecord>> workers_;
     bool shutting_down_;
     unsigned long next_worker_id_;
+#ifdef REMOTE_EXEC_CPP_TESTING
+    std::function<void()> before_wait_hook_;
+#endif
 };

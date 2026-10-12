@@ -32,6 +32,7 @@ WakeupPipe::~WakeupPipe() {
 }
 
 void WakeupPipe::signal() {
+    BasicLockGuard lock(signal_mutex_);
     if (signaled_) {
         return;
     }

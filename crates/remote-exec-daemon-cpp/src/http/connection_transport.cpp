@@ -1,17 +1,15 @@
 #include "http/connection_transport.h"
 
+#include <utility>
+
 namespace {
 
 class PlainConnectionTransport : public ConnectionTransport {
 public:
-    PlainConnectionTransport(SOCKET socket, bool owns_socket)
-        : socket_(socket), owns_socket_(owns_socket) {}
+    explicit PlainConnectionTransport(UniqueSocket socket)
+        : owned_socket_(std::move(socket)), socket_(owned_socket_.get()) {}
 
-    ~PlainConnectionTransport() {
-        if (owns_socket_ && socket_ != INVALID_SOCKET) {
-            close_socket(socket_);
-        }
-    }
+    explicit PlainConnectionTransport(SOCKET socket) : owned_socket_(), socket_(socket) {}
 
     SOCKET native_socket() const override { return socket_; }
 
@@ -32,17 +30,16 @@ public:
     void shutdown() override { shutdown_socket(socket_); }
 
 private:
-    SOCKET socket_;
-    bool owns_socket_;
+    UniqueSocket owned_socket_;
+    const SOCKET socket_;
 };
 
 } // namespace
 
 std::shared_ptr<ConnectionTransport> make_plain_connection_transport(UniqueSocket socket) {
-    const SOCKET raw_socket = socket.release();
-    return std::shared_ptr<ConnectionTransport>(new PlainConnectionTransport(raw_socket, true));
+    return std::shared_ptr<ConnectionTransport>(new PlainConnectionTransport(std::move(socket)));
 }
 
 std::shared_ptr<ConnectionTransport> make_borrowed_connection_transport(SOCKET socket) {
-    return std::shared_ptr<ConnectionTransport>(new PlainConnectionTransport(socket, false));
+    return std::shared_ptr<ConnectionTransport>(new PlainConnectionTransport(socket));
 }

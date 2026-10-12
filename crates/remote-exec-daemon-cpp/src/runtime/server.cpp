@@ -77,20 +77,84 @@ void wait_for_shutdown_signal() {
 
 #ifdef _WIN32
 namespace {
-ServerRuntime* g_runtime_for_shutdown = nullptr;
+
+struct ConsoleShutdownState {
+    ConsoleShutdownState()
+        : requested(CreateEvent(nullptr, TRUE, FALSE, nullptr)),
+          completed(CreateEvent(nullptr, TRUE, FALSE, nullptr)) {
+        if (requested == nullptr || completed == nullptr) {
+            if (requested != nullptr) {
+                CloseHandle(requested);
+            }
+            if (completed != nullptr) {
+                CloseHandle(completed);
+            }
+            throw std::runtime_error("failed to create console shutdown events");
+        }
+    }
+
+    const HANDLE requested;
+    const HANDLE completed;
+};
+
+ConsoleShutdownState& console_shutdown_state() {
+    // Console callbacks may still be running after the handler is unregistered.
+    // Keep only these events for process lifetime; callbacks never own or touch
+    // the runtime. Windows reclaims the handles when the process exits.
+    static ConsoleShutdownState* const state = new ConsoleShutdownState();
+    return *state;
+}
+
+#ifdef REMOTE_EXEC_CPP_TESTING
+std::atomic<bool> g_console_shutdown_registered(false);
+#endif
 
 BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
     if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT
         || ctrl_type == CTRL_CLOSE_EVENT) {
-        ServerRuntime* runtime = g_runtime_for_shutdown;
-        if (runtime != nullptr) {
-            runtime->request_shutdown();
-        }
+        ConsoleShutdownState& state = console_shutdown_state();
+        SetEvent(state.requested);
+        // CTRL_CLOSE_EVENT terminates the process after this callback returns.
+        // Allow the main thread to finish shutting down before acknowledging it.
+        WaitForSingleObject(state.completed, INFINITE);
         return TRUE;
     }
     return FALSE;
 }
+
+class ConsoleShutdownRegistration {
+public:
+    ConsoleShutdownRegistration() {
+        ConsoleShutdownState& state = console_shutdown_state();
+        ResetEvent(state.requested);
+        ResetEvent(state.completed);
+        if (!SetConsoleCtrlHandler(console_ctrl_handler, TRUE)) {
+            throw std::runtime_error("failed to register console shutdown handler");
+        }
+#ifdef REMOTE_EXEC_CPP_TESTING
+        g_console_shutdown_registered.store(true);
+#endif
+    }
+
+    ~ConsoleShutdownRegistration() {
+        SetEvent(console_shutdown_state().completed);
+        SetConsoleCtrlHandler(console_ctrl_handler, FALSE);
+#ifdef REMOTE_EXEC_CPP_TESTING
+        g_console_shutdown_registered.store(false);
+#endif
+    }
+};
 } // namespace
+
+#ifdef REMOTE_EXEC_CPP_TESTING
+bool console_shutdown_registered_for_testing() {
+    return g_console_shutdown_registered.load();
+}
+
+bool invoke_console_shutdown_handler_for_testing(unsigned long ctrl_type) {
+    return console_ctrl_handler(ctrl_type) != FALSE;
+}
+#endif
 #endif
 
 static void write_test_bound_addr_file(const DaemonConfig& config, unsigned short bound_port) {
@@ -109,14 +173,14 @@ static void write_test_bound_addr_file(const DaemonConfig& config, unsigned shor
 
 int run_server(const DaemonConfig& config) {
     NetworkSession network;
+#ifdef _WIN32
+    ConsoleShutdownRegistration shutdown_registration;
+#endif
     {
         ServerRuntime runtime(config);
 #ifndef _WIN32
         install_posix_child_reaper();
         install_shutdown_signal_handlers();
-#else
-        g_runtime_for_shutdown = &runtime;
-        SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
 #endif
         if (config.connection_mode == ConnectionMode::Reverse) {
             runtime.start_reverse_loop();
@@ -146,13 +210,12 @@ int run_server(const DaemonConfig& config) {
 
 #ifndef _WIN32
         wait_for_shutdown_signal();
+#else
+        WaitForSingleObject(console_shutdown_state().requested, INFINITE);
+#endif
         log_message(LOG_INFO, "server", "shutdown signal received");
         runtime.request_shutdown();
-#endif
         runtime.join();
-#ifdef _WIN32
-        g_runtime_for_shutdown = nullptr;
-#endif
     }
 #ifndef _WIN32
     shutdown_posix_child_reaper();

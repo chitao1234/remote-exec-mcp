@@ -62,7 +62,6 @@ void TunnelTcpStream::close() {
     write_queue.clear();
     writer_cond.broadcast();
     shutdown_socket(socket.get());
-    socket.reset();
     active_stream_budget.reset();
     finish_resource_close_locked(&resource_state);
 }

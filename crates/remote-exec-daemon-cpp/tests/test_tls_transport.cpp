@@ -71,18 +71,26 @@ struct TransportPair {
     std::shared_ptr<ConnectionTransport> client;
 };
 
-TransportPair connect_tls_pair(const DaemonConfig& server_config) {
+TransportPair connect_tls_pair(
+    const DaemonConfig& server_config,
+    std::shared_ptr<ConnectionTransport>* retained_server_socket = nullptr
+) {
     ConnectedSocketPair sockets = make_connected_socket_pair();
     const std::shared_ptr<TlsContext> server_context = make_tls_server_context(server_config);
     const DaemonConfig client_config = make_client_config();
     const std::shared_ptr<TlsContext> client_context = make_tls_client_context(client_config);
+    const std::shared_ptr<ConnectionTransport> server_socket =
+        make_plain_connection_transport(std::move(sockets.first));
+    if (retained_server_socket != nullptr) {
+        *retained_server_socket = server_socket;
+    }
 
     std::shared_ptr<ConnectionTransport> server;
     std::exception_ptr server_error;
     std::thread server_thread([&]() {
         try {
             server = make_tls_server_connection_transport(
-                std::move(sockets.first),
+                server_socket,
                 server_context,
                 TLS_TEST_TIMEOUT_MS
             );
@@ -105,6 +113,18 @@ TransportPair connect_tls_pair(const DaemonConfig& server_config) {
     pair.server = server;
     pair.client = client;
     return pair;
+}
+
+void test_tls_teardown_preserves_shared_socket_owner() {
+    std::shared_ptr<ConnectionTransport> owner;
+    TransportPair pair = connect_tls_pair(make_server_config(""), &owner);
+    const SOCKET socket = owner->native_socket();
+    pair.server.reset();
+    int error = 0;
+    TEST_ASSERT(socket_error_option(socket, &error) == 0);
+    owner.reset();
+    TEST_ASSERT(socket_error_option(socket, &error) != 0);
+    pair.client->shutdown();
 }
 
 void test_mutual_tls_full_duplex() {
@@ -167,6 +187,7 @@ int main() {
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
     test_tls_library_compatibility();
     test_mutual_tls_full_duplex();
+    test_tls_teardown_preserves_shared_socket_owner();
     test_pinned_client_mismatch();
 #else
     test_tls_disabled_error();

@@ -87,11 +87,16 @@ private:
 struct TunnelTcpStream : PortTunnelResourceStateOwner {
     TunnelTcpStream(SOCKET socket_value, PortTunnelBudgetLease active_stream_budget_value)
         : socket(socket_value), active_stream_budget(std::move(active_stream_budget_value)),
-          writer_closed(false), writer_shutdown_requested(false) {}
+          writer_closed(false), writer_shutdown_requested(false) {
+        set_socket_nonblocking(socket.get(), true);
+    }
 
     void close();
 
-    UniqueSocket socket;
+    // The socket value stays fixed until the final worker releases this stream.
+    // close() requests shutdown without allowing the descriptor to be reused
+    // underneath an in-flight read or write.
+    const UniqueSocket socket;
     PortTunnelBudgetLease active_stream_budget;
     BasicCondVar writer_cond;
     std::vector<std::vector<unsigned char>> write_queue;

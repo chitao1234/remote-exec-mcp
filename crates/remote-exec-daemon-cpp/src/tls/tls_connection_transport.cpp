@@ -111,17 +111,18 @@ void run_handshake(SSL* ssl, SOCKET socket, bool server, unsigned long timeout_m
 class OpenSslConnectionTransport : public ConnectionTransport {
 public:
     OpenSslConnectionTransport(
-        UniqueSocket socket,
+        const std::shared_ptr<ConnectionTransport>& socket_owner,
         SSL* ssl,
         const std::vector<unsigned char>& pinned_peer,
         bool server,
         unsigned long handshake_timeout_ms
     )
-        : socket_(std::move(socket)), ssl_(ssl), incoming_(), incoming_offset_(0U), outgoing_(),
-          outgoing_offset_(0U), enqueued_bytes_(0ULL), written_bytes_(0ULL), stop_(false),
-          eof_(false), failed_(false), error_(), pump_thread_() {
+        : socket_owner_(socket_owner), socket_(socket_owner->native_socket()), ssl_(ssl),
+          incoming_(), incoming_offset_(0U), outgoing_(), outgoing_offset_(0U),
+          enqueued_bytes_(0ULL), written_bytes_(0ULL), stop_(false), eof_(false), failed_(false),
+          error_(), pump_thread_() {
         try {
-            run_handshake(ssl_, socket_.get(), server, handshake_timeout_ms);
+            run_handshake(ssl_, socket_, server, handshake_timeout_ms);
             verify_peer(ssl_, pinned_peer);
             pump_thread_.reset(new std::thread(&OpenSslConnectionTransport::pump, this));
         } catch (...) {
@@ -139,7 +140,7 @@ public:
         }
     }
 
-    SOCKET native_socket() const override { return socket_.get(); }
+    SOCKET native_socket() const override { return socket_; }
 
     int wait_readable(unsigned long timeout_ms) override {
         BasicLockGuard lock(mutex_);
@@ -220,7 +221,7 @@ public:
             stop_ = true;
             condition_.broadcast();
         }
-        shutdown_socket(socket_.get());
+        shutdown_socket(socket_);
     }
 
 private:
@@ -325,7 +326,7 @@ private:
             if (write_progress || read_progress) {
                 continue;
             }
-            const int read_ready = wait_socket_readable(socket_.get(), TLS_PUMP_WAIT_MS);
+            const int read_ready = wait_socket_readable(socket_, TLS_PUMP_WAIT_MS);
             if (read_ready < 0 && !stopped()) {
                 BasicLockGuard lock(mutex_);
                 eof_ = true;
@@ -340,11 +341,12 @@ private:
                     continue;
                 }
             }
-            (void)wait_socket_writable(socket_.get(), 1UL);
+            (void)wait_socket_writable(socket_, 1UL);
         }
     }
 
-    UniqueSocket socket_;
+    std::shared_ptr<ConnectionTransport> socket_owner_;
+    const SOCKET socket_;
     SSL* ssl_;
     BasicMutex mutex_;
     BasicCondVar condition_;
@@ -436,15 +438,27 @@ std::shared_ptr<ConnectionTransport> make_tls_server_connection_transport(
     const std::shared_ptr<TlsContext>& context,
     unsigned long handshake_timeout_ms
 ) {
+    return make_tls_server_connection_transport(
+        make_plain_connection_transport(std::move(socket)),
+        context,
+        handshake_timeout_ms
+    );
+}
+
+std::shared_ptr<ConnectionTransport> make_tls_server_connection_transport(
+    const std::shared_ptr<ConnectionTransport>& socket_owner,
+    const std::shared_ptr<TlsContext>& context,
+    unsigned long handshake_timeout_ms
+) {
     SSL* ssl = SSL_new(context->context());
-    if (ssl == nullptr || SSL_set_fd(ssl, static_cast<int>(socket.get())) != 1) {
+    if (ssl == nullptr || SSL_set_fd(ssl, static_cast<int>(socket_owner->native_socket())) != 1) {
         if (ssl != nullptr) {
             SSL_free(ssl);
         }
         throw std::runtime_error(openssl_compat::error_string("creating TLS server connection"));
     }
     return std::shared_ptr<ConnectionTransport>(new OpenSslConnectionTransport(
-        std::move(socket),
+        socket_owner,
         ssl,
         context->pinned_peer(),
         true,
@@ -458,8 +472,10 @@ std::shared_ptr<ConnectionTransport> make_tls_client_connection_transport(
     const std::string& server_name,
     unsigned long handshake_timeout_ms
 ) {
+    const std::shared_ptr<ConnectionTransport> socket_owner =
+        make_plain_connection_transport(std::move(socket));
     SSL* ssl = SSL_new(context->context());
-    if (ssl == nullptr || SSL_set_fd(ssl, static_cast<int>(socket.get())) != 1
+    if (ssl == nullptr || SSL_set_fd(ssl, static_cast<int>(socket_owner->native_socket())) != 1
         || SSL_set_tlsext_host_name(ssl, server_name.c_str()) != 1
         || !openssl_compat::set_expected_host(ssl, server_name)) {
         if (ssl != nullptr) {
@@ -468,7 +484,7 @@ std::shared_ptr<ConnectionTransport> make_tls_client_connection_transport(
         throw std::runtime_error(openssl_compat::error_string("creating TLS client connection"));
     }
     return std::shared_ptr<ConnectionTransport>(new OpenSslConnectionTransport(
-        std::move(socket),
+        socket_owner,
         ssl,
         context->pinned_peer(),
         false,
@@ -496,6 +512,14 @@ std::shared_ptr<TlsContext> make_tls_client_context(const DaemonConfig&) {
 
 std::shared_ptr<ConnectionTransport> make_tls_server_connection_transport(
     UniqueSocket,
+    const std::shared_ptr<TlsContext>&,
+    unsigned long
+) {
+    throw tls_disabled_error();
+}
+
+std::shared_ptr<ConnectionTransport> make_tls_server_connection_transport(
+    const std::shared_ptr<ConnectionTransport>&,
     const std::shared_ptr<TlsContext>&,
     unsigned long
 ) {

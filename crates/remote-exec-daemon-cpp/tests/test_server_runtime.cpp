@@ -1,6 +1,7 @@
 #include "test_assert.h"
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -14,6 +15,8 @@
 
 #include "http/server_transport.h"
 #include "platform/platform.h"
+#include "port_forward/port_forward_socket_ops.h"
+#include "runtime/server.h"
 #include "runtime/server_runtime.h"
 #include "test_daemon_fixtures.h"
 #include "test_filesystem.h"
@@ -201,6 +204,75 @@ static void assert_runtime_shutdown_with_idle_connection(const DaemonConfig& con
     TEST_ASSERT(runtime->connection_manager().active_count() == 0UL);
 }
 
+static void assert_concurrent_shutdown_requests_are_safe(const DaemonConfig& config) {
+    unsigned short port = 0;
+    std::unique_ptr<ServerRuntime> runtime = start_runtime(config, &port);
+    std::atomic<bool> start(false);
+    std::vector<std::thread> requesters;
+    for (unsigned int i = 0; i < 8U; ++i) {
+        requesters.push_back(std::thread([&]() {
+            while (!start.load()) {
+                std::this_thread::yield();
+            }
+            runtime->request_shutdown();
+        }));
+    }
+    start.store(true);
+    for (std::size_t i = 0; i < requesters.size(); ++i) {
+        requesters[i].join();
+    }
+    runtime->join();
+    TEST_ASSERT(runtime->connection_manager().active_count() == 0UL);
+}
+
+#ifdef _WIN32
+static void assert_console_callbacks_outlive_runtime_safely(const DaemonConfig& config) {
+    std::exception_ptr error;
+    std::atomic<bool> finished(false);
+    std::thread server([&]() {
+        try {
+            TEST_ASSERT(run_server(config) == 0);
+        } catch (...) {
+            error = std::current_exception();
+        }
+        finished.store(true);
+    });
+    const std::uint64_t deadline = platform::monotonic_ms() + 1000UL;
+    while (!console_shutdown_registered_for_testing() && platform::monotonic_ms() < deadline) {
+        platform::sleep_ms(1UL);
+    }
+    TEST_ASSERT(console_shutdown_registered_for_testing());
+    std::thread ctrl_c([]() {
+        TEST_ASSERT(invoke_console_shutdown_handler_for_testing(CTRL_C_EVENT));
+    });
+    std::thread ctrl_close([]() {
+        TEST_ASSERT(invoke_console_shutdown_handler_for_testing(CTRL_CLOSE_EVENT));
+    });
+    TEST_ASSERT(test_assert::wait_until_true(finished, 2000UL));
+    server.join();
+    ctrl_c.join();
+    ctrl_close.join();
+    TEST_ASSERT(!error);
+    TEST_ASSERT(!console_shutdown_registered_for_testing());
+    // A callback already dispatched before unregistration only sees persistent
+    // events after the runtime has been destroyed.
+    TEST_ASSERT(invoke_console_shutdown_handler_for_testing(CTRL_CLOSE_EVENT));
+
+    UniqueSocket occupied(bind_port_forward_socket("127.0.0.1:0", "tcp"));
+    DaemonConfig failing = config;
+    failing.listen_port = socket_bound_port_or_zero(occupied.get());
+    bool rejected = false;
+    try {
+        (void)run_server(failing);
+    } catch (const std::exception&) {
+        rejected = true;
+    }
+    TEST_ASSERT(rejected);
+    TEST_ASSERT(!console_shutdown_registered_for_testing());
+    TEST_ASSERT(invoke_console_shutdown_handler_for_testing(CTRL_CLOSE_EVENT));
+}
+#endif
+
 static void assert_runtime_shutdown_with_blocked_request_body(const DaemonConfig& config) {
     unsigned short port = 0;
     std::unique_ptr<ServerRuntime> runtime = start_runtime(config, &port);
@@ -262,8 +334,12 @@ int main() {
     }
 
     assert_runtime_shutdown_with_idle_connection(config);
+    assert_concurrent_shutdown_requests_are_safe(config);
     assert_runtime_shutdown_with_blocked_request_body(config);
     assert_runtime_shutdown_with_upgraded_tunnel_connection(config);
+#ifdef _WIN32
+    assert_console_callbacks_outlive_runtime_safely(config);
+#endif
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
     assert_tls_health_request(config);
 #endif

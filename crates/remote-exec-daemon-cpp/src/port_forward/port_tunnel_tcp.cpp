@@ -10,6 +10,38 @@
 
 using Json = nlohmann::json;
 
+namespace {
+
+bool send_tcp_stream_data(
+    const std::shared_ptr<TunnelTcpStream>& stream,
+    const std::vector<unsigned char>& data
+) {
+    std::size_t offset = 0U;
+    while (offset < data.size()) {
+        if (stream->is_closed()) {
+            return false;
+        }
+        const int sent = send_bounded(
+            stream->socket.get(),
+            reinterpret_cast<const char*>(data.data() + offset),
+            data.size() - offset,
+            0
+        );
+        if (sent > 0) {
+            offset += static_cast<std::size_t>(sent);
+            continue;
+        }
+        if (sent < 0 && receive_timeout_error(last_socket_error())) {
+            (void)wait_socket_writable(stream->socket.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
+            continue;
+        }
+        throw PortForwardError(400, "port_write_failed", socket_error_message("send"));
+    }
+    return true;
+}
+
+} // namespace
+
 bool PortTunnelService::spawn_tcp_listener_loop(
     const std::shared_ptr<PortTunnelSession>& session,
     const std::shared_ptr<RetainedTcpListener>& listener,
@@ -259,6 +291,20 @@ void PortTunnelConnection::tcp_read_loop(
 ) {
     std::vector<unsigned char> buffer(READ_BUFFER_SIZE);
     for (;;) {
+        if (stream->is_closed()) {
+            return;
+        }
+        const int ready =
+            wait_socket_readable(stream->socket.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
+        if (ready == 0) {
+            continue;
+        }
+        if (ready < 0) {
+            if (!stream->is_closed()) {
+                send_error(stream_id, "port_read_failed", socket_error_message("poll"));
+            }
+            return;
+        }
         const int received = recv_bounded(
             stream->socket.get(),
             reinterpret_cast<char*>(buffer.data()),
@@ -273,6 +319,9 @@ void PortTunnelConnection::tcp_read_loop(
             return;
         }
         if (received < 0) {
+            if (receive_timeout_error(last_socket_error())) {
+                continue;
+            }
             if (!stream->is_closed()) {
                 send_error(stream_id, "port_read_failed", socket_error_message("recv"));
             }
@@ -314,11 +363,9 @@ void PortTunnelConnection::tcp_write_loop(
             stream->writer_cond.signal();
         }
         try {
-            send_all_socket(
-                stream->socket.get(),
-                reinterpret_cast<const char*>(data.data()),
-                data.size()
-            );
+            if (!send_tcp_stream_data(stream, data)) {
+                return;
+            }
         } catch (const std::exception& ex) {
             log_tunnel_exception("write tcp stream", ex);
             if (!stream->is_closed()) {

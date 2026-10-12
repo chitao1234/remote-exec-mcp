@@ -331,34 +331,37 @@ void ServerRuntime::accept_loop() {
                 continue;
             }
 
-            if (!connections_.try_start(std::move(client), [this](SOCKET socket) {
-                    try {
-                        std::shared_ptr<ConnectionTransport> client =
-                            this->config_.transport == Transport::Tls
-                                ? make_tls_server_connection_transport(
-                                      UniqueSocket(socket),
-                                      this->tls_server_context_,
-                                      this->config_.tls_handshake_timeout_ms
-                                  )
-                                : make_plain_connection_transport(UniqueSocket(socket));
-                        handle_client(
-                            make_http_connection_context(
-                                this->config_,
-                                this->metadata_,
-                                this->sandbox_,
-                                this->services_,
-                                this->shutdown_
-                            ),
-                            client
-                        );
-                    } catch (const std::exception& ex) {
-                        log_message(
-                            LOG_WARN,
-                            "server",
-                            std::string("client connection failed: ") + ex.what()
-                        );
+            if (!connections_.try_start_transport(
+                    make_plain_connection_transport(std::move(client)),
+                    [this](const std::shared_ptr<ConnectionTransport>& socket_owner) {
+                        try {
+                            std::shared_ptr<ConnectionTransport> client =
+                                this->config_.transport == Transport::Tls
+                                    ? make_tls_server_connection_transport(
+                                          socket_owner,
+                                          this->tls_server_context_,
+                                          this->config_.tls_handshake_timeout_ms
+                                      )
+                                    : socket_owner;
+                            handle_client(
+                                make_http_connection_context(
+                                    this->config_,
+                                    this->metadata_,
+                                    this->sandbox_,
+                                    this->services_,
+                                    this->shutdown_
+                                ),
+                                client
+                            );
+                        } catch (const std::exception& ex) {
+                            log_message(
+                                LOG_WARN,
+                                "server",
+                                std::string("client connection failed: ") + ex.what()
+                            );
+                        }
                     }
-                })) {
+                )) {
                 log_message(LOG_WARN, "server", "dropping client connection during shutdown");
             }
         }

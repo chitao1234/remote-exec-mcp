@@ -16,6 +16,12 @@ std::shared_ptr<ConnectionTransport> make_tls_server_connection_transport(
     const std::shared_ptr<TlsContext>& context,
     unsigned long handshake_timeout_ms
 );
+// Retain a shared socket owner while the TLS handshake and pump use its socket.
+std::shared_ptr<ConnectionTransport> make_tls_server_connection_transport(
+    const std::shared_ptr<ConnectionTransport>& socket_owner,
+    const std::shared_ptr<TlsContext>& context,
+    unsigned long handshake_timeout_ms
+);
 std::shared_ptr<ConnectionTransport> make_tls_client_connection_transport(
     UniqueSocket socket,
     const std::shared_ptr<TlsContext>& context,
