@@ -57,12 +57,12 @@ struct PlannedFile {
     std::string text;
     // Set when the file was decoded with a detected encoding, so a later write
     // re-encodes into it. Unset means the text is byte-identical to UTF-8.
-    bool has_encoding;
+    bool has_encoding = false;
     TextFile encoding_source;
 };
 
 struct PlannedPathState {
-    bool deleted;
+    bool deleted = false;
     PlannedFile file;
 };
 
@@ -72,15 +72,15 @@ struct PlannedPathEntry {
 };
 
 struct PlannedAction {
-    PatchKind kind;
+    PatchKind kind = PatchKind::Add;
     std::string source_path;
     std::string destination_path;
     std::string summary_path;
     std::string content;
-    bool remove_source;
+    bool remove_source = false;
     // Set when the written content must be re-encoded into the target file's
     // detected encoding.
-    bool has_encoding;
+    bool has_encoding = false;
     TextFile encoding_source;
 };
 
