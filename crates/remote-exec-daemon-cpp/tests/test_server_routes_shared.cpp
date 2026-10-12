@@ -6,6 +6,7 @@
 #include <string>
 
 #include "codec/base64_codec.h"
+#include "core/common.h"
 #include "core/config.h"
 #include "http/http_helpers.h"
 #include "image/image_ops.h"
@@ -103,6 +104,9 @@ static void assert_target_info_and_basic_helpers(TestRouteHarness& harness) {
     TEST_ASSERT(info_response.headers.at(request_id_header_name()) == "client-req-123");
     const Json info = Json::parse(info_response.body);
     TEST_ASSERT(info.at("target").get<std::string>() == "cpp-test");
+    const std::string version = info.at("daemon_version").get<std::string>();
+    TEST_ASSERT(version.find('+') != std::string::npos);
+    TEST_ASSERT(version == REMOTE_EXEC_CPP_VERSION);
     TEST_ASSERT(info.at("supports_exec").get<bool>());
     TEST_ASSERT(info.at("supports_apply_patch").get<bool>());
     TEST_ASSERT(
@@ -126,6 +130,9 @@ static void assert_target_info_and_basic_helpers(TestRouteHarness& harness) {
     const HttpResponse generated_response = route_request(harness, generated_request);
     TEST_ASSERT(generated_response.status == 200);
     TEST_ASSERT(generated_response.headers.at(request_id_header_name()).find("req_cpp_") == 0);
+    TEST_ASSERT(
+        Json::parse(generated_response.body).at("daemon_version").get<std::string>() == version
+    );
 
     TEST_ASSERT(normalize_port_forward_endpoint("8080") == "127.0.0.1:8080");
     TEST_ASSERT(

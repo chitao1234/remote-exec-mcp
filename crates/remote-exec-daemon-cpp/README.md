@@ -93,6 +93,14 @@ crates/remote-exec-daemon-cpp/build/remote-exec-daemon-cpp \
   crates/remote-exec-daemon-cpp/config/daemon-cpp.example.ini
 ```
 
+GNU make, BSD make, and NMAKE embed the Git revision and UTC build date in
+`daemon_version`, reported by health, target-info, and the broker's target
+metadata. The format matches Rust: `0.2.0+g<short-commit>.<YYYYMMDD>`. Git uses
+at least 12 hexadecimal characters for the commit. Builds without Git metadata
+use `0.2.0+<YYYYMMDD>`. Incremental C++ builds refresh this metadata when HEAD
+or the UTC date changes; uncommitted changes do not add a `dirty` marker.
+NMAKE uses Windows PowerShell to generate the build metadata.
+
 ## Configuration
 
 The daemon accepts an INI-style file. The minimum direct-listener shape is:

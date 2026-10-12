@@ -107,6 +107,22 @@ async fn list_targets_reports_version_checked_port_forward_support_for_real_cpp_
         result.text_output
     );
     assert_eq!(result.structured_content["targets"][0]["healthy"], true);
+    let version = result.structured_content["targets"][0]["daemon_info"]["daemon_version"]
+        .as_str()
+        .expect("C++ daemon version should be reported through MCP");
+    let (_, metadata) = version
+        .split_once('+')
+        .expect("C++ daemon version should include build metadata");
+    let date = if let Some(revision_and_date) = metadata.strip_prefix('g') {
+        let (revision, date) = revision_and_date
+            .split_once('.')
+            .expect("Git build metadata should include the UTC build date");
+        assert!(revision.len() >= 12 && revision.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        date
+    } else {
+        metadata
+    };
+    assert!(date.len() == 8 && date.bytes().all(|byte| byte.is_ascii_digit()));
     assert_eq!(
         result.structured_content["targets"][0]["daemon_info"]["supports_port_forward"],
         true

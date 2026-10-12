@@ -118,7 +118,14 @@ MSVC_XP_WINPTY_AGENT=$(MSVC_XP_BIN_DIR)\winpty-agent.exe
 MSVC_XP_WINSDK_DIR=C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1A
 !ENDIF
 
-MSVC_COMMON_CPPFLAGS=/I"$(DAEMON_CPP_DIR)\include" /I"$(DAEMON_CPP_DIR)\third_party" \
+MSVC_BUILD_VERSION_HEADER=$(BUILD_DIR)\generated\remote_exec_cpp_build_version.h
+MSVC_BUILD_VERSION_SCRIPT=$(DAEMON_CPP_DIR)\scripts\write_build_version_header.ps1
+# Refresh metadata before NMAKE compares timestamps. The generator preserves
+# the header timestamp when unchanged, so repeated builds do not relink.
+!IF [powershell -NoProfile -ExecutionPolicy Bypass -File "$(MSVC_BUILD_VERSION_SCRIPT)" -OutputHeader "$(MSVC_BUILD_VERSION_HEADER)"] != 0
+!ERROR Unable to generate the C++ daemon build version header.
+!ENDIF
+MSVC_COMMON_CPPFLAGS=/I"$(BUILD_DIR)\generated" /I"$(DAEMON_CPP_DIR)\include" /I"$(DAEMON_CPP_DIR)\third_party" \
     /DWIN32 /D_WINDOWS \
     /DWIN32_LEAN_AND_MEAN /DUNICODE /D_UNICODE /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_DEPRECATE
 !IFNDEF OPENSSL_ROOT
@@ -697,6 +704,8 @@ test-msvc-xp-sandbox:
 
 test-msvc-xp-port-tunnel-frame:
 	@$(MSVC_REENTER_XP) test-msvc-port-tunnel-frame
+
+$(MSVC_SELECTED_TARGET) $(MSVC_TEST_BINS): $(MSVC_BUILD_VERSION_HEADER)
 
 $(MSVC_SELECTED_WINPTY_VERSION_HEADER): $(MSVC_WINPTY_VERSION_TXT)
 	@if not exist "$(MSVC_SELECTED_WINPTY_GEN_DIR)" mkdir "$(MSVC_SELECTED_WINPTY_GEN_DIR)"

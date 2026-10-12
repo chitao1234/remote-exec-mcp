@@ -1,7 +1,17 @@
 BUILD_DIR ?= $(MAKEFILE_DIR)build
 OBJ_DIR := $(BUILD_DIR)/obj
 
-COMMON_CPPFLAGS := -I$(MAKEFILE_DIR)include -I$(MAKEFILE_DIR)third_party
+COMMON_CPPFLAGS := -I$(BUILD_DIR)/generated -I$(MAKEFILE_DIR)include -I$(MAKEFILE_DIR)third_party
+BUILD_VERSION_HEADER := $(BUILD_DIR)/generated/remote_exec_cpp_build_version.h
+BUILD_VERSION_SCRIPT := $(MAKEFILE_DIR)scripts/write_build_version_header.sh
+
+$(BUILD_VERSION_HEADER): $(BUILD_VERSION_SCRIPT) force-build-version
+	sh $< $@
+
+force-build-version:
+
+.PHONY: force-build-version
+
 TLS ?= auto
 include $(MAKEFILE_DIR)mk/openssl.mk
 ifeq ($(filter $(TLS),auto off openssl),)

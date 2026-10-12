@@ -13,7 +13,9 @@ HOST_CXX ?= c++
 STRESS_RUNS ?= 10
 STRESS_JOBS ?= 8
 
-COMMON_CPPFLAGS = -I${MAKEFILE_DIR}include -I${MAKEFILE_DIR}third_party
+COMMON_CPPFLAGS = -I${BUILD_DIR}/generated -I${MAKEFILE_DIR}include -I${MAKEFILE_DIR}third_party
+BUILD_VERSION_HEADER = ${BUILD_DIR}/generated/remote_exec_cpp_build_version.h
+BUILD_VERSION_SCRIPT = ${MAKEFILE_DIR}scripts/write_build_version_header.sh
 TLS ?= auto
 .include "${MAKEFILE_DIR}mk/openssl.bsd.mk"
 .if "${TLS}" != "auto" && "${TLS}" != "off" && "${TLS}" != "openssl"
@@ -89,9 +91,9 @@ POSIX_TEXT_ENCODING_CPPFLAGS =
 .if !defined(POSIX_FEATURE_CPPFLAGS)
 POSIX_FEATURE_CPPFLAGS != HOST_CXX="${HOST_CXX}" PROBE_CPPFLAGS="${COMMON_CPPFLAGS} ${POSIX_OPENSSL_CPPFLAGS}" PROBE_CXXFLAGS="${PROD_CXXFLAGS} ${POSIX_PTHREAD_FLAGS}" sh "${POSIX_FEATURE_CPPFLAGS_SCRIPT}"
 .endif
-HOST_PROD_CPPFLAGS = -I${BUILD_DIR}/generated ${COMMON_CPPFLAGS} ${POSIX_OPENSSL_CPPFLAGS} ${POSIX_TEXT_ENCODING_CPPFLAGS} ${POSIX_FEATURE_CPPFLAGS}
+HOST_PROD_CPPFLAGS = ${COMMON_CPPFLAGS} ${POSIX_OPENSSL_CPPFLAGS} ${POSIX_TEXT_ENCODING_CPPFLAGS} ${POSIX_FEATURE_CPPFLAGS}
 HOST_PROD_CXXFLAGS = ${PROD_CXXFLAGS} ${POSIX_PTHREAD_FLAGS}
-HOST_TEST_CPPFLAGS = -I${BUILD_DIR}/generated ${COMMON_CPPFLAGS} ${POSIX_OPENSSL_CPPFLAGS} ${POSIX_TEXT_ENCODING_CPPFLAGS} ${POSIX_FEATURE_CPPFLAGS} -DREMOTE_EXEC_CPP_TESTING
+HOST_TEST_CPPFLAGS = ${COMMON_CPPFLAGS} ${POSIX_OPENSSL_CPPFLAGS} ${POSIX_TEXT_ENCODING_CPPFLAGS} ${POSIX_FEATURE_CPPFLAGS} -DREMOTE_EXEC_CPP_TESTING
 HOST_TEST_CXXFLAGS = ${TEST_CXXFLAGS} ${POSIX_PTHREAD_FLAGS}
 .if !defined(POSIX_SOCKET_LDLIBS)
 POSIX_SOCKET_LDLIBS != HOST_CXX="${HOST_CXX}" PROBE_CPPFLAGS="${COMMON_CPPFLAGS} ${POSIX_OPENSSL_CPPFLAGS} ${POSIX_FEATURE_CPPFLAGS}" PROBE_CXXFLAGS="${PROD_CXXFLAGS} ${POSIX_PTHREAD_FLAGS}" PROBE_LDFLAGS="${HOST_PROD_LDFLAGS}" PROBE_LDLIBS="${POSIX_BASE_LDLIBS} ${POSIX_OPENSSL_LDLIBS}" sh "${POSIX_SOCKET_LDLIBS_SCRIPT}"
@@ -156,10 +158,12 @@ apply-patch-posix: ${POSIX_APPLY_PATCH_TARGET}
 
 check: check-posix
 
-check-posix: ${HOST_TEST_PHONY_TARGETS} test-host-apply-patch-cli test-bundle-posix
+check-posix: ${HOST_TEST_PHONY_TARGETS} test-host-build-version test-host-apply-patch-cli test-bundle-posix
 	REMOTE_EXEC_LOG=${TEST_LOG_LEVEL} ${POSIX_TEST_BUNDLE_RUNNER} --list >/dev/null
 
 force-posix-config:
+
+force-build-version:
 
 stress-posix:
 	@i=1; \
@@ -173,6 +177,9 @@ test-server-streaming: ${HOST_SERVER_STREAMING_TEST_TARGET}
 
 test-host-apply-patch-cli: ${POSIX_APPLY_PATCH_TARGET} ${POSIX_APPLY_PATCH_TEST_SCRIPT}
 	sh ${POSIX_APPLY_PATCH_TEST_SCRIPT} ${POSIX_APPLY_PATCH_TARGET}
+
+test-host-build-version:
+	sh ${MAKEFILE_DIR}tests/test_build_version.sh
 
 test-bundle-posix: all-posix ${HOST_TEST_BINS} ${POSIX_TEST_BUNDLE_RUNNER}
 	mkdir -p ${POSIX_TEST_BUNDLE_DIR}/config ${POSIX_TEST_BUNDLE_DIR}/tests
@@ -232,6 +239,13 @@ ${HOST_TEST_OBJ_DIR}/${src:S|.cpp|.o|}: ${src} ${POSIX_CONFIG_HEADER}
 	${HOST_CXX} ${HOST_TEST_CPPFLAGS} ${HOST_TEST_CXXFLAGS} ${DEPFLAGS} -c -o ${.TARGET} ${src}
 .endfor
 
+${HOST_PROD_OBJ_DIR}/src/rpc/server_route_common.o \
+${HOST_TEST_OBJ_DIR}/src/rpc/server_route_common.o \
+${HOST_TEST_OBJ_DIR}/tests/test_server_routes_shared.o: ${BUILD_VERSION_HEADER}
+
+${BUILD_VERSION_HEADER}: ${BUILD_VERSION_SCRIPT} force-build-version
+	sh ${BUILD_VERSION_SCRIPT} ${.TARGET}
+
 .for dep in ${DEP_FILES}
 .sinclude "${dep}"
 .endfor
@@ -239,5 +253,5 @@ ${HOST_TEST_OBJ_DIR}/${src:S|.cpp|.o|}: ${src} ${POSIX_CONFIG_HEADER}
 clean:
 	rm -rf ${BUILD_DIR}
 
-.PHONY: all all-posix apply-patch-posix check check-posix clean force-posix-config stress-posix test-bundle-posix test-host-apply-patch-cli test-server-streaming \
-	${HOST_TEST_PHONY_TARGETS}
+.PHONY: all all-posix apply-patch-posix check check-posix clean force-posix-config force-build-version stress-posix test-bundle-posix test-host-apply-patch-cli test-server-streaming \
+	test-host-build-version ${HOST_TEST_PHONY_TARGETS}
