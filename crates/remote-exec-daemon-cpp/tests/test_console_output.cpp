@@ -448,6 +448,46 @@ void test_terminal_output_filter_does_not_finalize_partial_rows_on_flush_due() {
     TEST_ASSERT(actual == "prompt>echo hello\nhello\n");
 }
 
+void test_terminal_output_filter_bounds_cursor_arithmetic() {
+    const std::string sequences[] = {
+        "\x1b[2147483647C\x1b[C\x1b[1K\r",
+        "\x1b[2147483648A",
+        "\x1b[2147483647B\x1b[B\x1b[1J\x1b[H",
+        "\x1b[2147483647B\x1b[J\x1b[H",
+        "\x1b[999999999999999999999999999999999C\x1b[999999999999999999999999999999999D",
+        "\x1b[999999999999999999999999999999999B\x1b[999999999999999999999999999999999A",
+    };
+    for (std::size_t i = 0; i < sizeof(sequences) / sizeof(sequences[0]); ++i) {
+        TerminalOutputFilter filter;
+        TEST_ASSERT(filter_terminal_output_for_test(&filter, sequences[i] + "ok") == "ok");
+    }
+}
+
+void test_terminal_output_filter_rejects_unrepresentable_text_coordinates() {
+    const std::string sequences[] = {
+        "\x1b[2147483647CX",
+        "\x1b[2147483646C\xE4\xBD\xA0",
+        "\x1b[2147483647B\n",
+    };
+    for (std::size_t i = 0; i < sizeof(sequences) / sizeof(sequences[0]); ++i) {
+        TerminalOutputFilter filter;
+        bool rejected = false;
+        try {
+            (void)filter_terminal_output_for_test(&filter, sequences[i]);
+        } catch (const std::length_error&) {
+            rejected = true;
+        }
+        TEST_ASSERT(rejected);
+    }
+}
+
+void test_terminal_output_filter_erases_only_stored_cells() {
+    TerminalOutputFilter filter;
+    TEST_ASSERT(filter_terminal_output_for_test(&filter, "text") == "text");
+    TEST_ASSERT(filter_terminal_output_for_test(&filter, "\x1b[2147483647C\x1b[1K") == "\n");
+    TEST_ASSERT(filter_terminal_output_for_test(&filter, "\rreplacement") == "replacement");
+}
+
 } // namespace
 
 int main() {
@@ -474,5 +514,8 @@ int main() {
     test_terminal_output_filter_debounce_uses_latest_repaint();
     test_terminal_output_filter_debounce_drain_flushes_immediately();
     test_terminal_output_filter_does_not_finalize_partial_rows_on_flush_due();
+    test_terminal_output_filter_bounds_cursor_arithmetic();
+    test_terminal_output_filter_rejects_unrepresentable_text_coordinates();
+    test_terminal_output_filter_erases_only_stored_cells();
     return 0;
 }

@@ -15,11 +15,10 @@
 namespace remote_exec_win32 {
 
 template <typename Fn> Fn proc_address_as(FARPROC proc) {
-    union ProcAddressCast {
-        FARPROC proc;
-        Fn fn;
-    } cast = {proc};
-    return cast.fn;
+    // GetProcAddress supplies an untyped function address. The intermediate
+    // void() pointer avoids GCC's incompatible-signature warning; it is never
+    // called, and the final pointer must match the exported function's signature.
+    return reinterpret_cast<Fn>(reinterpret_cast<void (*)()>(proc));
 }
 
 } // namespace remote_exec_win32

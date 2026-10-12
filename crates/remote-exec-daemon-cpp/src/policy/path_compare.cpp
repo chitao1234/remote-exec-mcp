@@ -72,17 +72,15 @@ std::wstring wide_from_utf8(const std::string& value) {
 }
 
 CompareStringOrdinalFn compare_string_ordinal_fn() {
-    static CompareStringOrdinalFn fn = nullptr;
-    static bool initialized = false;
-    if (!initialized) {
+    static const CompareStringOrdinalFn fn = []() -> CompareStringOrdinalFn {
         HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
-        if (kernel32 != nullptr) {
-            fn = remote_exec_win32::proc_address_as<CompareStringOrdinalFn>(
-                GetProcAddress(kernel32, "CompareStringOrdinal")
-            );
+        if (kernel32 == nullptr) {
+            return nullptr;
         }
-        initialized = true;
-    }
+        return remote_exec_win32::proc_address_as<CompareStringOrdinalFn>(
+            GetProcAddress(kernel32, "CompareStringOrdinal")
+        );
+    }();
     return fn;
 }
 #endif

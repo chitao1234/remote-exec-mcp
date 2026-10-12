@@ -2,7 +2,6 @@
 #include <atomic>
 #include <cctype>
 #include <cstdint>
-#include <cstdlib>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -285,7 +284,22 @@ std::vector<unsigned int> parse_csi_params(const std::string& raw) {
         if (token.empty()) {
             params.push_back(0U);
         } else {
-            params.push_back(static_cast<unsigned int>(std::strtoul(token.c_str(), nullptr, 10)));
+            // Cursor coordinates use int. Saturate decimal input before any
+            // conversion or arithmetic, including parameters larger than ULONG_MAX.
+            const unsigned int maximum = static_cast<unsigned int>(std::numeric_limits<int>::max());
+            unsigned int value = 0U;
+            for (std::size_t i = 0; i < token.size(); ++i) {
+                if (token[i] < '0' || token[i] > '9') {
+                    break;
+                }
+                const unsigned int digit = static_cast<unsigned int>(token[i] - '0');
+                if (value > (maximum - digit) / 10U) {
+                    value = maximum;
+                    break;
+                }
+                value = value * 10U + digit;
+            }
+            params.push_back(value);
         }
         if (end == std::string::npos) {
             break;
@@ -293,6 +307,12 @@ std::vector<unsigned int> parse_csi_params(const std::string& raw) {
         start = end + 1U;
     }
     return params;
+}
+
+int add_cursor_distance(int position, unsigned int distance) {
+    const int maximum = std::numeric_limits<int>::max();
+    const int bounded_distance = static_cast<int>(distance);
+    return position > maximum - bounded_distance ? maximum : position + bounded_distance;
 }
 
 bool line_has_nonspace_char(const std::string& text) {
@@ -502,6 +522,9 @@ void TerminalOutputFilter::emit_control(unsigned char byte) {
         current_col_ = 0;
         return;
     case '\n':
+        if (current_row_ == std::numeric_limits<int>::max()) {
+            throw std::length_error("terminal row exceeds representable range");
+        }
         if (has_open_row_ && open_row_ == static_cast<std::size_t>(current_row_)) {
             open_row_text_.clear();
         }
@@ -556,13 +579,17 @@ void TerminalOutputFilter::write_cell_text(
         current_col_ = 0;
     }
 
+    const unsigned int effective_width = width == 0U ? 1U : width;
+    if (current_col_ > std::numeric_limits<int>::max() - static_cast<int>(effective_width)) {
+        throw std::length_error("terminal column exceeds representable range");
+    }
+    const int next_col = current_col_ + static_cast<int>(effective_width);
     const std::size_t row = static_cast<std::size_t>(current_row_);
     Line& line = ensure_line(row);
-    const unsigned int effective_width = width == 0U ? 1U : width;
-    clear_cells_range(&line, current_col_, current_col_ + static_cast<int>(effective_width));
+    clear_cells_range(&line, current_col_, next_col);
 
-    if (line.cells.size() <= static_cast<std::size_t>(current_col_ + effective_width - 1U)) {
-        line.cells.resize(static_cast<std::size_t>(current_col_ + effective_width));
+    if (line.cells.size() < static_cast<std::size_t>(next_col)) {
+        line.cells.resize(static_cast<std::size_t>(next_col));
     }
 
     Cell& cell = line.cells[static_cast<std::size_t>(current_col_)];
@@ -582,7 +609,7 @@ void TerminalOutputFilter::write_cell_text(
     }
 
     touch_row(row);
-    current_col_ += static_cast<int>(effective_width);
+    current_col_ = next_col;
 }
 
 void TerminalOutputFilter::dispatch_csi(char action) {
@@ -598,10 +625,10 @@ void TerminalOutputFilter::dispatch_csi(char action) {
         current_row_ = std::max(0, current_row_ - static_cast<int>(first));
         return;
     case 'B':
-        current_row_ += static_cast<int>(first);
+        current_row_ = add_cursor_distance(current_row_, first);
         return;
     case 'C':
-        current_col_ += static_cast<int>(first);
+        current_col_ = add_cursor_distance(current_col_, first);
         return;
     case 'D':
         current_col_ = std::max(0, current_col_ - static_cast<int>(first));
@@ -641,11 +668,15 @@ void TerminalOutputFilter::clear_line_from_cursor(int mode) {
     if (current_row_ < 0) {
         current_row_ = 0;
     }
-    Line& line = ensure_line(static_cast<std::size_t>(current_row_));
+    const std::size_t row = static_cast<std::size_t>(current_row_);
+    if (row >= lines_.size()) {
+        return;
+    }
+    Line& line = lines_[row];
     if (mode == 2) {
         line.cells.clear();
     } else if (mode == 1) {
-        clear_cells_range(&line, 0, current_col_ + 1);
+        clear_cells_range(&line, 0, add_cursor_distance(current_col_, 1U));
     } else {
         clear_cells_range(&line, current_col_, static_cast<int>(line.cells.size()));
     }
@@ -670,13 +701,14 @@ void TerminalOutputFilter::clear_screen_from_cursor(int mode) {
     }
     clear_line_from_cursor(mode == 1 ? 1 : 0);
     if (mode == 0) {
-        for (std::size_t row = static_cast<std::size_t>(current_row_ + 1); row < lines_.size();
+        for (std::size_t row = static_cast<std::size_t>(current_row_) + 1U; row < lines_.size();
              ++row) {
             lines_[row].cells.clear();
             touch_row(row);
         }
     } else if (mode == 1) {
-        for (std::size_t row = 0U; row < static_cast<std::size_t>(current_row_); ++row) {
+        const std::size_t end = std::min(static_cast<std::size_t>(current_row_), lines_.size());
+        for (std::size_t row = 0U; row < end; ++row) {
             lines_[row].cells.clear();
             touch_row(row);
         }
@@ -707,6 +739,9 @@ void TerminalOutputFilter::clear_cells_range(Line* line, int start_col, int end_
     if (start_col < 0) {
         start_col = 0;
     }
+    // Erasing never creates cells. In particular, a cursor moved far past the
+    // stored text must not turn an erase request into an enormous allocation.
+    end_col = std::min(end_col, static_cast<int>(line->cells.size()));
     if (end_col <= start_col) {
         return;
     }
@@ -722,9 +757,6 @@ void TerminalOutputFilter::clear_cells_range(Line* line, int start_col, int end_
     bool expanded = true;
     while (expanded) {
         expanded = false;
-        if (line->cells.size() < static_cast<std::size_t>(clear_end)) {
-            line->cells.resize(static_cast<std::size_t>(clear_end));
-        }
         for (int col = clear_start; col < clear_end && col < static_cast<int>(line->cells.size());
              ++col) {
             const Cell& cell = line->cells[static_cast<std::size_t>(col)];

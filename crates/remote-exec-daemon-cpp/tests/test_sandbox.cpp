@@ -1,15 +1,38 @@
 #include "test_assert.h"
 #include <string>
+#include <thread>
 
 #include "policy/filesystem_sandbox.h"
 #include "policy/path_compare.h"
 #include "policy/path_policy.h"
+#include "runtime/start_gate.h"
 #include "test_contract_fixtures.h"
 #include "test_filesystem.h"
 
 namespace fs = test_fs;
 
 namespace {
+
+#ifdef _WIN32
+void test_concurrent_first_path_comparison() {
+    StartGate start;
+    std::vector<std::thread> workers;
+    for (unsigned int i = 0; i < 8U; ++i) {
+        workers.push_back(std::thread([&start]() {
+            TEST_ASSERT(start.wait());
+            for (unsigned int iteration = 0; iteration < 100U; ++iteration) {
+                TEST_ASSERT(host_path_equal("C:/Work/File.txt", "c:\\work\\FILE.TXT"));
+                TEST_ASSERT(!host_path_equal("C:/Work/File.txt", "c:\\work\\other.txt"));
+                TEST_ASSERT(host_path_has_prefix("C:/Work/File.txt", "c:\\WORK"));
+            }
+        }));
+    }
+    start.release();
+    for (std::size_t i = 0; i < workers.size(); ++i) {
+        workers[i].join();
+    }
+}
+#endif
 
 fs::path make_test_root() {
     const fs::path root = fs::unique_test_root("remote-exec-cpp-sandbox-test");
@@ -367,6 +390,9 @@ void run_windows_short_alias_sandbox_cases() {
 } // namespace
 
 int main() {
+#ifdef _WIN32
+    test_concurrent_first_path_comparison();
+#endif
     const fs::path root = make_test_root();
     const fs::path allowed = root / "allowed";
     const fs::path denied_root = allowed / "secret";

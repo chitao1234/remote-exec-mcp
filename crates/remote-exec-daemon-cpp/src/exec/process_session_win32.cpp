@@ -786,10 +786,10 @@ SpawnedWinptyProcess spawn_winpty_process(
     WinptyErrorHandle error;
     UniqueWinptySpawnConfig spawn_config(winpty_spawn_config_new(
         WINPTY_SPAWN_FLAG_AUTO_SHUTDOWN | WINPTY_SPAWN_FLAG_EXIT_AFTER_SHUTDOWN,
-        &environment[0],
+        nullptr,
         wide_command_line.c_str(),
         workdir.empty() ? nullptr : wide_workdir.c_str(),
-        nullptr,
+        &environment[0],
         error.out_ptr()
     ));
     if (!spawn_config.valid()) {
