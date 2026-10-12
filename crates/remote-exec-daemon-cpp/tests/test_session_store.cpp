@@ -264,7 +264,8 @@ static void assert_completion_coordination() {
 
 class BlockingCarryProcessSession : public ProcessSession {
 public:
-    BlockingCarryProcessSession() : read_started_(false), released_(false) {}
+    explicit BlockingCarryProcessSession(bool throw_on_release)
+        : throw_on_release_(throw_on_release), read_started_(false), released_(false) {}
 
     void write_stdin(const std::string& chars) override { (void)chars; }
 
@@ -279,6 +280,9 @@ public:
         read_started_.store(true);
         while (!released_.load()) {
             platform::sleep_ms(10UL);
+        }
+        if (throw_on_release_) {
+            throw std::runtime_error("controlled output read error during retirement");
         }
         *eof = false;
         return std::string();
@@ -300,6 +304,7 @@ public:
     bool read_started() const { return read_started_.load(); }
 
 private:
+    bool throw_on_release_;
     std::atomic<bool> read_started_;
     std::atomic<bool> released_;
 };
@@ -811,9 +816,9 @@ static YieldTimeConfig fast_yield_time_config() {
     return config;
 }
 
-static void assert_output_pump_restores_decode_carry_when_closing() {
+static void assert_output_pump_restores_decode_carry_when_closing(bool throw_on_release) {
     std::shared_ptr<LiveSession> session(new LiveSession());
-    BlockingCarryProcessSession* process = new BlockingCarryProcessSession();
+    BlockingCarryProcessSession* process = new BlockingCarryProcessSession(throw_on_release);
     session->process.reset(process);
     session->output_.decode_carry = "partial";
 
@@ -835,6 +840,7 @@ static void assert_output_pump_restores_decode_carry_when_closing() {
 
     BasicLockGuard lock(session->mutex_);
     TEST_ASSERT(session->output_.decode_carry == "partial");
+    TEST_ASSERT(!session->output_.eof);
 }
 
 static std::string append_running_session_output_until_pty_size(
@@ -1865,7 +1871,7 @@ static void assert_posix_sigchld_reaper_preserves_exit_status_during_pty_resume_
         Json waiting = start_test_command(
             race_store,
             "printf 'ready\\n'; printf 'ready\\n' > " + ready_file_name
-                + "; IFS= read line; printf 'echo:%s\\n' \"$line\"",
+                + "; IFS= read line; printf 'echo:%s\\n' \"$line\"; exit 7",
             root.string(),
             race_shell,
             true,
@@ -1882,7 +1888,7 @@ static void assert_posix_sigchld_reaper_preserves_exit_status_during_pty_resume_
         const Json resumed = poll_session(race_store, waiting_id, fast_yield, "ping\n", 1000UL);
         const std::string resumed_output = waiting_output + resumed.at("output").get<std::string>();
         TEST_ASSERT(!resumed.at("running").get<bool>());
-        TEST_ASSERT(resumed.at("exit_code").get<int>() == 0);
+        TEST_ASSERT(resumed.at("exit_code").get<int>() == 7);
         TEST_ASSERT(resumed_output.find("ready") != std::string::npos);
         TEST_ASSERT(resumed_output.find("echo:ping") != std::string::npos);
     }
@@ -1897,6 +1903,39 @@ static void assert_posix_sigchld_reaper_preserves_exit_status_during_pty_resume_
 #endif
 
 #ifndef _WIN32
+static void assert_posix_exit_status_is_shared_between_observers(
+    const fs::path& root,
+    const std::string& shell
+) {
+    set_process_session_test_exit_poll_delay_ms(100UL);
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        std::unique_ptr<ProcessSession> process =
+            ProcessSession::launch("exit 7", root.string(), shell, "", false, false, 1000UL);
+        bool eof = false;
+        std::string carry;
+        process->read_output(true, &eof, &carry);
+        TEST_ASSERT(eof);
+
+        std::atomic<bool> start(false);
+        int codes[2] = {-1, -1};
+        std::thread first([&]() {
+            TEST_ASSERT(test_assert::wait_until_true(start, 5000UL));
+            TEST_ASSERT(process->has_exited(&codes[0]));
+        });
+        std::thread second([&]() {
+            TEST_ASSERT(test_assert::wait_until_true(start, 5000UL));
+            TEST_ASSERT(process->has_exited(&codes[1]));
+        });
+        start.store(true);
+        first.join();
+        second.join();
+        TEST_ASSERT(codes[0] == 7 && codes[1] == 7);
+        int cached_code = 0;
+        TEST_ASSERT(process->has_exited(&cached_code) && cached_code == 7);
+    }
+    set_process_session_test_exit_poll_delay_ms(0UL);
+}
+
 static void assert_non_tty_stdin_closed_rejected(
     SessionStore& store,
     const fs::path& root,
@@ -2641,6 +2680,13 @@ int main(int argc, char** argv) {
         std::puts("Session completion coordination regressions passed");
         return 0;
     }
+    if (argc >= 2 && std::strcmp(argv[argc - 1], "--exec-lifetime-regression-only") == 0) {
+        assert_completion_coordination();
+        assert_output_pump_restores_decode_carry_when_closing(false);
+        assert_output_pump_restores_decode_carry_when_closing(true);
+        std::puts("Session execution lifetime regressions passed");
+        return 0;
+    }
 #ifndef _WIN32
     install_posix_child_reaper();
     assert_posix_locale_strategy_selection();
@@ -2668,7 +2714,8 @@ int main(int argc, char** argv) {
 #endif
     assert_explicit_drain_stop_reasons();
     assert_completion_coordination();
-    assert_output_pump_restores_decode_carry_when_closing();
+    assert_output_pump_restores_decode_carry_when_closing(false);
+    assert_output_pump_restores_decode_carry_when_closing(true);
     assert_completed_command_output(store, root, shell, yield_time);
     assert_token_limiting(store, root, shell, yield_time);
 #ifdef _WIN32
@@ -2681,6 +2728,7 @@ int main(int argc, char** argv) {
     assert_posix_exit_drain_boundaries(store, root, shell, yield_time);
     assert_posix_exec_uses_parent_built_environment_and_path(store, root, shell, yield_time);
 #ifndef _WIN32
+    assert_posix_exit_status_is_shared_between_observers(root, shell);
     assert_posix_sigchld_reaper_reaps_exited_session_children(root, shell);
     assert_posix_sigchld_reaper_preserves_exit_status_during_pty_resume_race(root, shell);
 #endif

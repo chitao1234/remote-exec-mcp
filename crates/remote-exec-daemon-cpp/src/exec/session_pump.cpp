@@ -160,6 +160,9 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
             );
             BasicLockGuard lock(session->mutex_);
             session->output_.decode_carry = std::move(carry);
+            if (session->closing) {
+                return;
+            }
             finish_session_output_locked(session.get(), SessionOutputDrainStopReason::PumpError);
             session->retired = true;
             return;

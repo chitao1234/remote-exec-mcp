@@ -114,6 +114,38 @@ async fn exec_completes_when_output_closes_before_process_exit() {
     assert_eq!(result.structured_content["output"], "final-output\n");
 }
 
+#[cfg(not(windows))]
+#[tokio::test]
+async fn cpp_pty_preserves_nonzero_exit_status() {
+    let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
+        return;
+    };
+    let result = fixture
+        .client
+        .call_tool(
+            "exec_command",
+            &serde_json::json!({
+                "target": CPP_TARGET,
+                "cmd": "printf 'pty-final\\n'; exit 7",
+                "shell": test_shell(),
+                "login": false,
+                "tty": true,
+                "yield_time_ms": 5000
+            }),
+        )
+        .await
+        .unwrap();
+    assert_tool_ok(&result, "exec_command with nonzero PTY exit");
+    assert!(result.structured_content["session_id"].is_null());
+    assert_eq!(result.structured_content["exit_code"], 7);
+    assert!(
+        result.structured_content["output"]
+            .as_str()
+            .unwrap()
+            .contains("pty-final")
+    );
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_accepts_a_custom_windows_shell_executable_name() {

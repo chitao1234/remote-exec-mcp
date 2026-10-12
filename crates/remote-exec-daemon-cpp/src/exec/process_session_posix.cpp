@@ -22,6 +22,7 @@
 #include "exec/process_environment.h"
 #include "exec/process_session.h"
 #include "exec/utf8_stream_decode.h"
+#include "platform/basic_mutex.h"
 #include "platform/platform.h"
 #include "platform/posix_fd.h"
 #include "platform/posix_process.h"
@@ -427,32 +428,21 @@ public:
     }
 
     bool has_exited(int* exit_code) override {
-        if (reaped_.load(std::memory_order_acquire)) {
-            *exit_code = exit_code_.load(std::memory_order_relaxed);
-            return true;
-        }
-
         maybe_apply_test_exit_poll_delay();
-        int status = 0;
-        if (poll_posix_child_exit(pid_, &status)) {
-            int code = 0;
-            record_exit_status(status, &code);
-            exit_code_.store(code, std::memory_order_relaxed);
-            reaped_.store(true, std::memory_order_release);
-            *exit_code = code;
-            return true;
-        }
-        return false;
+        BasicLockGuard lock(exit_status_mutex_);
+        return poll_exit_locked(exit_code);
     }
 
     void terminate() override {
-        if (pid_ <= 0 || reaped_.load(std::memory_order_acquire)) {
+        BasicLockGuard lock(exit_status_mutex_);
+        if (pid_ <= 0 || reaped_) {
             return;
         }
         kill_process_group(pid_);
-        int ignored_status = 0;
-        if (wait_posix_child_exit(pid_, &ignored_status)) {
-            reaped_.store(true, std::memory_order_release);
+        int status = 0;
+        if (wait_posix_child_exit(pid_, &status)) {
+            record_exit_status(status, &exit_code_);
+            reaped_ = true;
         }
         return;
     }
@@ -490,26 +480,36 @@ private:
     }
 
     bool output_may_resume() {
-        if (reaped_.load(std::memory_order_acquire)) {
-            return false;
+        BasicLockGuard lock(exit_status_mutex_);
+        int ignored_exit_code = 0;
+        return !poll_exit_locked(&ignored_exit_code);
+    }
+
+    bool poll_exit_locked(int* exit_code) {
+        // Consuming wait status and publishing the cache must be one operation.
+        // A competing PTY reader must not replace a real status with ECHILD's
+        // fallback after another observer has already reaped this process.
+        if (reaped_) {
+            *exit_code = exit_code_;
+            return true;
         }
         int status = 0;
         if (!poll_posix_child_exit(pid_, &status)) {
-            return true;
+            return false;
         }
-        int code = 0;
-        record_exit_status(status, &code);
-        exit_code_.store(code, std::memory_order_relaxed);
-        reaped_.store(true, std::memory_order_release);
-        return false;
+        record_exit_status(status, &exit_code_);
+        reaped_ = true;
+        *exit_code = exit_code_;
+        return true;
     }
 
     pid_t pid_;
     bool tty_;
     UniqueFd input_write_;
     UniqueFd output_read_;
-    std::atomic<bool> reaped_;
-    std::atomic<int> exit_code_;
+    BasicMutex exit_status_mutex_;
+    bool reaped_;
+    int exit_code_;
 };
 
 } // namespace
