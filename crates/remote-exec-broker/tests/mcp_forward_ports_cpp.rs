@@ -474,8 +474,10 @@ async fn real_cpp_daemon_releases_listener_after_broker_crash() {
 
     fixture.kill_broker().await;
 
+    // Production daemons retain detached listeners for a 10-second resume
+    // window. Allow expiry and cleanup to finish before requiring a rebind.
     let (reopened_client, reopened_forward_id) = fixture
-        .wait_for_public_forward_reopen(&listen_endpoint, Duration::from_secs(10))
+        .wait_for_public_forward_reopen(&listen_endpoint, Duration::from_secs(20))
         .await;
 
     let closed = reopened_client
