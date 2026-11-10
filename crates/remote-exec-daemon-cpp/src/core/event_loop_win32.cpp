@@ -286,7 +286,11 @@ void EventLoop::run() {
         const std::size_t group_count = select_group_count(active.size());
         std::vector<SelectGroup> groups(group_count);
         for (std::size_t i = 0; i < groups.size(); ++i) {
-            FD_SET(impl_->wake_read, &groups[i].read_fds);
+            if (i == 0U) {
+                // Only group 0 blocks; it carries the wake socket. The other
+                // groups are polled without waiting after it returns.
+                FD_SET(impl_->wake_read, &groups[0].read_fds);
+            }
             groups[i].watched.reserve(
                 i + 1U == groups.size() ? active.size() - i * per_group : per_group
             );
