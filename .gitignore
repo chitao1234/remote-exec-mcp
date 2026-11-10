@@ -5,3 +5,4 @@ daemon*.toml
 remote-exec-certs/
 .codex/
 .cache/
+opencode.json
