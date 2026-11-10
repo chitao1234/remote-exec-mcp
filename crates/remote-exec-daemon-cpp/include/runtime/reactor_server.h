@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/config.h"
+#include "core/stream.h"
 #include "platform/basic_mutex.h"
 #include "platform/socket.h"
 #include "runtime/app_state.h"
@@ -18,7 +19,9 @@ class BlockingPool;
 class ExecService;
 class ReactorRouter;
 class TunnelService;
+class TlsContext;
 class HttpConn;
+struct ReverseConn;
 
 // Reactor-based daemon core. The listener lives on shard 0 and hands accepted
 // connections to the shard that will own them. On Winsock 1.1 each shard is a
@@ -47,6 +50,11 @@ private:
     void finalize();
     void schedule_exec_tick();
     void exec_tick();
+    void reverse_tick();
+    void start_reverse_connect();
+    void begin_reverse_connect(const std::vector<SocketAddress>& addresses);
+    void serve_reverse_connection(const std::shared_ptr<Stream>& stream);
+    void reverse_attempt_finished(bool success);
     bool assign_shard(std::size_t* shard);
     std::size_t shard_capacity(std::size_t shard) const;
     void resume_listener();
@@ -57,6 +65,10 @@ private:
     std::vector<std::unique_ptr<EventLoop>> loops_;
     std::vector<std::thread> loop_threads_;
     std::unique_ptr<BlockingPool> pool_;
+    friend struct ReverseConn;
+
+    std::shared_ptr<TlsContext> tls_server_context_;
+    std::shared_ptr<TlsContext> tls_client_context_;
     std::unique_ptr<ExecService> exec_;
     std::unique_ptr<TunnelService> tunnel_;
     std::unique_ptr<ReactorRouter> router_;
@@ -70,4 +82,10 @@ private:
     bool listener_paused_;
     std::atomic<bool> shutting_down_;
     bool finalized_;
+    std::atomic<unsigned long> reverse_live_;
+    std::atomic<unsigned long> reverse_busy_;
+    unsigned long reverse_max_;
+    bool reverse_connect_in_progress_;
+    std::uint64_t reverse_next_attempt_ms_;
+    std::uint64_t next_reverse_id_;
 };

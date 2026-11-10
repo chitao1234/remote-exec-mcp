@@ -199,14 +199,22 @@ int run_server(const DaemonConfig& config) {
         return 1;
     }
 
-    write_test_bound_addr_file(config, server.bound_port());
+    if (config.connection_mode == ConnectionMode::Listen) {
+        write_test_bound_addr_file(config, server.bound_port());
+    }
 
     LogMessageBuilder message(
         config.connection_mode == ConnectionMode::Reverse ? "connecting" : "listening"
     );
+    const std::string log_host = config.connection_mode == ConnectionMode::Reverse
+                                     ? config.reverse_broker_host
+                                     : config.listen_host;
+    const int log_port = config.connection_mode == ConnectionMode::Reverse
+                             ? config.reverse_broker_port
+                             : static_cast<int>(server.bound_port());
     message.raw("on")
-        .raw(server.config().listen_host)
-        .field("port", server.bound_port())
+        .raw(log_host)
+        .field("port", log_port)
         .quoted_field("target", server.config().target)
         .bool_field("http_auth_enabled", !server.config().http_auth_bearer_token.empty())
         .quoted_field("platform", platform::platform_name())

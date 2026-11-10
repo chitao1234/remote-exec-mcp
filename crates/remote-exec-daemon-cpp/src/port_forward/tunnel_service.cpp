@@ -171,11 +171,13 @@ struct TunnelConn : public std::enable_shared_from_this<TunnelConn> {
         : service(nullptr), id(0U), input(TUNNEL_INPUT_LIMIT), output_offset(0U),
           protocol(TunnelProtocol::Tcp), role(TunnelRole::Connect), generation(0U),
           preface_read(false), mode_set(false), closed(false), read_timer(0U), timer_armed(false),
-          session(), dropped_datagrams(0U), next_stream_id(2U) {}
+          read_waiting(false), write_waiting(false), session(), dropped_datagrams(0U),
+          next_stream_id(2U) {}
 
     ~TunnelConn();
 
     void start();
+    void update_interest();
     void on_events(int bits);
     void on_readable();
     void on_writable();
@@ -207,6 +209,8 @@ struct TunnelConn : public std::enable_shared_from_this<TunnelConn> {
     bool closed;
     EventLoop::TimerId read_timer;
     bool timer_armed;
+    bool read_waiting;
+    bool write_waiting;
     std::shared_ptr<TunnelSession> session;
     std::map<std::uint32_t, std::shared_ptr<TunnelTcpStreamState>> streams;
     std::map<std::uint32_t, std::shared_ptr<TunnelUdpBind>> udp_binds;
@@ -934,17 +938,28 @@ void TunnelConn::start() {
     }
 }
 
+void TunnelConn::update_interest() {
+    if (closed) {
+        return;
+    }
+    int want = transport ? transport->wanted_events() : 0;
+    if (want == 0) {
+        want = output.empty() ? IO_READ : (IO_READ | IO_WRITE);
+    }
+    service->loop->set_interest(transport->native_fd(), want);
+}
+
 void TunnelConn::on_events(int bits) {
     if (closed) {
         return;
     }
-    if ((bits & IO_READ) != 0) {
+    if (read_waiting || (bits & IO_READ) != 0) {
         on_readable();
     }
     if (closed) {
         return;
     }
-    if ((bits & IO_WRITE) != 0) {
+    if (write_waiting || (bits & IO_WRITE) != 0 || !output.empty()) {
         on_writable();
     }
 }
@@ -960,13 +975,17 @@ void TunnelConn::on_readable() {
                 return;
             }
             arm_read_timer();
+            read_waiting = false;
             process_frames();
             if (closed) {
                 return;
             }
+            update_interest();
             continue;
         }
         if (result.status == IoStatus::WouldBlock) {
+            read_waiting = true;
+            update_interest();
             return;
         }
         close();
@@ -983,16 +1002,19 @@ void TunnelConn::on_writable() {
             continue;
         }
         if (result.status == IoStatus::WouldBlock) {
+            write_waiting = true;
+            update_interest();
             return;
         }
         close();
         return;
     }
+    write_waiting = false;
     output.clear();
     output_offset = 0U;
     flush_dropped_datagrams();
     if (!closed) {
-        service->loop->set_interest(transport->native_fd(), IO_READ);
+        update_interest();
     }
 }
 
@@ -1020,7 +1042,7 @@ bool TunnelConn::send_frame(const PortTunnelFrame& frame, bool droppable) {
     }
     output.append(reinterpret_cast<const char*>(bytes.data()), bytes.size());
     if (output_offset == 0U) {
-        service->loop->set_interest(transport->native_fd(), IO_READ | IO_WRITE);
+        update_interest();
         on_writable();
     }
     return true;

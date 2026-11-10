@@ -22,12 +22,14 @@
 #include "core/byte_buffer.h"
 #include "core/event_loop.h"
 #include "core/json_value.h"
+#include "core/stream.h"
 #include "platform/platform.h"
 #include "platform/socket.h"
 #include "port_forward/port_tunnel_frame.h"
 #include "rpc/server_contract.h"
 #include "runtime/reactor_server.h"
 #include "test_tar_helpers.h"
+#include "tls/tls_connection_transport.h"
 namespace {
 
 void test_byte_buffer() {
@@ -515,6 +517,200 @@ void test_tunnel(unsigned short port) {
     test_tunnel_udp(port);
 }
 
+void test_reverse() {
+    const int broker_listener = create_socket_cloexec(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    TEST_ASSERT(broker_listener != INVALID_SOCKET);
+    sockaddr_in broker_address;
+    std::memset(&broker_address, 0, sizeof(broker_address));
+    broker_address.sin_family = AF_INET;
+    broker_address.sin_port = 0;
+    broker_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    TEST_ASSERT(
+        bind_socket(
+            broker_listener,
+            reinterpret_cast<sockaddr*>(&broker_address),
+            sizeof(broker_address)
+        )
+        == 0
+    );
+    TEST_ASSERT(listen_socket(broker_listener, 1) == 0);
+    socklen_t broker_address_len = sizeof(broker_address);
+    TEST_ASSERT(
+        getsockname(
+            broker_listener,
+            reinterpret_cast<sockaddr*>(&broker_address),
+            &broker_address_len
+        )
+        == 0
+    );
+    const unsigned short broker_port = ntohs(broker_address.sin_port);
+
+    DaemonConfig config;
+    config.connection_mode = ConnectionMode::Reverse;
+    config.target = "reactor-reverse-test";
+    config.default_workdir = "/tmp";
+    config.max_connections = 8U;
+    config.blocking_workers = 2U;
+    config.reverse_broker_host = "127.0.0.1";
+    config.reverse_broker_port = static_cast<int>(broker_port);
+    config.reverse_bearer_token = "reverse-secret";
+    config.reverse_min_idle_connections = 1U;
+    config.reverse_max_connections = 1U;
+    config.reverse_reconnect_ms = 100U;
+
+    ReactorServer server(config);
+    std::string start_error;
+    TEST_ASSERT(server.start(&start_error));
+    std::thread server_thread([&]() { server.run(); });
+
+    std::atomic<bool> broker_ok(false);
+    std::thread broker_thread([&]() {
+        const int accepted = accept_socket_cloexec(broker_listener, nullptr, nullptr);
+        if (accepted == INVALID_SOCKET) {
+            return;
+        }
+        set_socket_timeout_ms(accepted, 5000);
+        char magic[8];
+        char length[4];
+        if (!read_exact(accepted, magic, sizeof(magic))
+            || std::string(magic, sizeof(magic)) != "REXREV1\n"
+            || !read_exact(accepted, length, sizeof(length))) {
+            close_socket(accepted);
+            return;
+        }
+        const std::uint32_t size =
+            (static_cast<std::uint32_t>(static_cast<unsigned char>(length[0])) << 24)
+            | (static_cast<std::uint32_t>(static_cast<unsigned char>(length[1])) << 16)
+            | (static_cast<std::uint32_t>(static_cast<unsigned char>(length[2])) << 8)
+            | static_cast<std::uint32_t>(static_cast<unsigned char>(length[3]));
+        std::string payload(size, '\0');
+        if (!read_exact(accepted, &payload[0], payload.size())) {
+            close_socket(accepted);
+            return;
+        }
+        if (payload.find("\"target\":\"reactor-reverse-test\"") == std::string::npos
+            || payload.find("\"bearer_token\":\"reverse-secret\"") == std::string::npos) {
+            close_socket(accepted);
+            return;
+        }
+        const std::string ack_payload = "{\"accepted\":true}";
+        std::string ack = "REXREV1\n";
+        ack.push_back('\0');
+        ack.push_back('\0');
+        ack.push_back('\0');
+        ack.push_back(static_cast<char>(ack_payload.size()));
+        ack += ack_payload;
+        send_bytes(accepted, ack.data(), ack.size());
+
+        const std::string request = "POST /v1/health HTTP/1.1\r\n"
+                                    "Host: 127.0.0.1\r\n"
+                                    "Connection: close\r\n"
+                                    "Content-Length: 2\r\n\r\n{}";
+        send_bytes(accepted, request.data(), request.size());
+        const Response response = read_response(accepted);
+        broker_ok.store(response.status == 200);
+        close_socket(accepted);
+    });
+
+    TEST_ASSERT(test_assert::wait_until_true(broker_ok, 8000U));
+    server.request_stop();
+    server_thread.join();
+    broker_thread.join();
+    close_socket(broker_listener);
+}
+
+#ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
+bool tls_fixtures_available() {
+    std::ifstream server("tests/fixtures/tls/server.pem");
+    return server.good();
+}
+
+void tls_write_all(Stream& stream, const std::string& data) {
+    std::size_t offset = 0U;
+    while (offset < data.size()) {
+        const WriteResult result = stream.write(data.data() + offset, data.size() - offset);
+        if (result.status == IoStatus::Ok) {
+            offset += result.bytes;
+            continue;
+        }
+        if (result.status == IoStatus::WouldBlock) {
+            platform::sleep_ms(1UL);
+            continue;
+        }
+        TEST_FAIL_MESSAGE("tls write failed");
+    }
+}
+
+std::string tls_read_all(Stream& stream) {
+    std::string output;
+    char buffer[4096];
+    for (;;) {
+        const ReadResult result = stream.read(buffer, sizeof(buffer));
+        if (result.status == IoStatus::Ok) {
+            output.append(buffer, result.bytes);
+            continue;
+        }
+        if (result.status == IoStatus::WouldBlock) {
+            platform::sleep_ms(1UL);
+            continue;
+        }
+        if (result.status == IoStatus::Eof) {
+            return output;
+        }
+        TEST_FAIL_MESSAGE("tls read failed");
+    }
+    return output;
+}
+
+void test_tls() {
+    if (!tls_fixtures_available()) {
+        return;
+    }
+
+    DaemonConfig server_config;
+    server_config.transport = Transport::Tls;
+    server_config.target = "reactor-tls-test";
+    server_config.listen_host = "127.0.0.1";
+    server_config.listen_port = 0;
+    server_config.default_workdir = "/tmp";
+    server_config.max_connections = 8U;
+    server_config.blocking_workers = 2U;
+    server_config.tls_cert_pem = "tests/fixtures/tls/server.pem";
+    server_config.tls_key_pem = "tests/fixtures/tls/server.key";
+    server_config.tls_ca_pem = "tests/fixtures/tls/ca.pem";
+    server_config.tls_pinned_client_cert_pem = "tests/fixtures/tls/client.pem";
+
+    DaemonConfig client_config;
+    client_config.reverse_transport = Transport::Tls;
+    client_config.reverse_tls_cert_pem = "tests/fixtures/tls/client.pem";
+    client_config.reverse_tls_key_pem = "tests/fixtures/tls/client.key";
+    client_config.reverse_tls_ca_pem = "tests/fixtures/tls/ca.pem";
+
+    ReactorServer server(server_config);
+    std::string start_error;
+    TEST_ASSERT(server.start(&start_error));
+    std::thread server_thread([&]() { server.run(); });
+
+    const std::shared_ptr<TlsContext> client_context = make_tls_client_context(client_config);
+    const int raw_client = connect_local(server.bound_port());
+    set_socket_timeout_ms(raw_client, 5000);
+    std::shared_ptr<Stream> client =
+        make_tls_client_stream(UniqueSocket(raw_client), client_context, "localhost");
+    const std::string request = "POST /v1/health HTTP/1.1\r\n"
+                                "Host: localhost\r\n"
+                                "Connection: close\r\n"
+                                "Content-Length: 2\r\n\r\n{}";
+    tls_write_all(*client, request);
+    const std::string response = tls_read_all(*client);
+    TEST_ASSERT(response.find("HTTP/1.1 200") == 0U);
+    TEST_ASSERT(response.find("\"status\":\"ok\"") != std::string::npos);
+    client->close();
+
+    server.request_stop();
+    server_thread.join();
+}
+#endif
+
 void test_transfer(unsigned short port) {
     const std::string source =
         "/tmp/reactor-export-" + std::to_string(static_cast<long>(getpid())) + ".txt";
@@ -753,6 +949,10 @@ int main() {
 #ifndef _WIN32
     test_event_loop();
     test_reactor_server();
+    test_reverse();
+#ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
+    test_tls();
+#endif
 #endif
     return 0;
 }

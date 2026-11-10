@@ -20,6 +20,7 @@
 #include "port_forward/tunnel_service.h"
 #include "rpc/reactor_router.h"
 #include "runtime/route_context.h"
+#include "tls/tls_connection_transport.h"
 
 #ifdef _WIN32
 #include "platform/win32_socket_compat.h"
@@ -30,6 +31,28 @@
 namespace {
 
 const int MAX_ACCEPTS_PER_EVENT = 64;
+const unsigned long REVERSE_REGISTRATION_TIMEOUT_MS = 15000UL;
+const char REVERSE_MAGIC[] = "REXREV1\n";
+
+bool connect_in_progress_error(int error) {
+#ifdef _WIN32
+    return error == WSAEWOULDBLOCK || error == WSAEINPROGRESS;
+#else
+    return error == EINPROGRESS || error == EWOULDBLOCK || error == EAGAIN;
+#endif
+}
+
+std::string json_escape(const std::string& value) {
+    std::string result;
+    for (std::size_t i = 0; i < value.size(); ++i) {
+        const char ch = value[i];
+        if (ch == '\\' || ch == '"') {
+            result.push_back('\\');
+        }
+        result.push_back(ch);
+    }
+    return result;
+}
 
 std::string make_instance_id() {
     std::ostringstream out;
@@ -110,12 +133,257 @@ std::size_t required_shards(const DaemonConfig& config) {
 
 } // namespace
 
+struct ReverseConn : public std::enable_shared_from_this<ReverseConn> {
+    enum State {
+        Connecting,
+        WritingRegistration,
+        ReadingAck,
+        Done,
+    };
+
+    ReverseConn(ReactorServer* server_value, std::uint64_t id_value)
+        : server(server_value), id(id_value), socket(), stream(), state(Connecting),
+          registration_offset(0U), timer(0U), timer_armed(false), finished(false) {}
+
+    ~ReverseConn() {
+        if (!finished) {
+            finished = true;
+            cancel_timer();
+            if (stream) {
+                server->loops_[0]->remove(stream->native_fd());
+                stream->close();
+            } else if (socket.valid()) {
+                server->loops_[0]->remove(socket.get());
+                socket.reset();
+            }
+        }
+    }
+
+    void start(const SocketAddress& address) {
+        socket.reset(create_socket_cloexec(address.family, address.socktype, address.protocol));
+        if (!socket.valid() || !socket_set_nonblocking(socket.get(), true)) {
+            fail();
+            return;
+        }
+        const int result =
+            connect_socket(socket.get(), address.sockaddr_ptr(), address.address_len);
+        if (result == 0) {
+            on_connected();
+            return;
+        }
+        if (!connect_in_progress_error(last_socket_error())) {
+            fail();
+            return;
+        }
+        std::shared_ptr<ReverseConn> self = shared_from_this();
+        if (!server->loops_[0]->add(socket.get(), IO_WRITE, [self](int) { self->on_events(); })) {
+            fail();
+            return;
+        }
+        arm_timer();
+    }
+
+    void on_events() {
+        if (finished) {
+            return;
+        }
+        if (state == Connecting) {
+            on_connected();
+            return;
+        }
+        if (state == WritingRegistration) {
+            on_write();
+            return;
+        }
+        if (state == ReadingAck) {
+            on_read();
+        }
+    }
+
+    void on_connected() {
+        int socket_error = 0;
+        if (socket_error_option(socket.get(), &socket_error) != 0 || socket_error != 0) {
+            fail();
+            return;
+        }
+        server->loops_[0]->remove(socket.get());
+        try {
+            if (server->config_.reverse_transport == Transport::Tls) {
+                stream = make_tls_client_stream(
+                    std::move(socket),
+                    server->tls_client_context_,
+                    server->config_.reverse_tls_server_name
+                );
+            } else {
+                stream = make_socket_stream(std::move(socket));
+            }
+        } catch (const std::exception&) {
+            fail();
+            return;
+        }
+        state = WritingRegistration;
+        std::shared_ptr<ReverseConn> self = shared_from_this();
+        if (!server->loops_[0]->add(stream->native_fd(), IO_WRITE, [self](int) {
+                self->on_events();
+            })) {
+            fail();
+            return;
+        }
+        arm_timer();
+        on_write();
+    }
+
+    void on_write() {
+        while (registration_offset < registration.size()) {
+            const WriteResult result = stream->write(
+                registration.data() + registration_offset,
+                registration.size() - registration_offset
+            );
+            if (result.status == IoStatus::Ok) {
+                registration_offset += result.bytes;
+                continue;
+            }
+            if (result.status == IoStatus::WouldBlock) {
+                update_interest(IO_WRITE);
+                return;
+            }
+            fail();
+            return;
+        }
+        state = ReadingAck;
+        update_interest(IO_READ);
+        on_read();
+    }
+
+    void on_read() {
+        for (;;) {
+            std::size_t wanted = 12U;
+            if (ack.size() >= 12U) {
+                const std::uint32_t length =
+                    (static_cast<std::uint32_t>(static_cast<unsigned char>(ack[8])) << 24)
+                    | (static_cast<std::uint32_t>(static_cast<unsigned char>(ack[9])) << 16)
+                    | (static_cast<std::uint32_t>(static_cast<unsigned char>(ack[10])) << 8)
+                    | static_cast<std::uint32_t>(static_cast<unsigned char>(ack[11]));
+                if (length > 16384U) {
+                    fail();
+                    return;
+                }
+                wanted = 12U + length;
+                if (ack.size() >= wanted) {
+                    if (ack.find("\"accepted\":true") == std::string::npos) {
+                        fail();
+                        return;
+                    }
+                    finish();
+                    return;
+                }
+            }
+
+            char buffer[4096];
+            const std::size_t ask = std::min<std::size_t>(sizeof(buffer), wanted - ack.size());
+            const ReadResult result = stream->read(buffer, ask);
+            if (result.status == IoStatus::Ok) {
+                ack.append(buffer, result.bytes);
+                continue;
+            }
+            if (result.status == IoStatus::WouldBlock) {
+                update_interest(IO_READ);
+                return;
+            }
+            fail();
+            return;
+        }
+    }
+
+    void update_interest(int fallback) {
+        const int want = stream ? stream->wanted_events() : 0;
+        const SOCKET fd = stream ? stream->native_fd() : socket.get();
+        server->loops_[0]->set_interest(fd, want != 0 ? want : fallback);
+    }
+
+    void finish() {
+        if (finished) {
+            return;
+        }
+        finished = true;
+        cancel_timer();
+        server->loops_[0]->remove(stream->native_fd());
+        std::shared_ptr<Stream> handed = stream;
+        stream.reset();
+        server->reverse_attempt_finished(true);
+        server->serve_reverse_connection(handed);
+    }
+
+    void fail() {
+        if (finished) {
+            return;
+        }
+        finished = true;
+        cancel_timer();
+        if (stream) {
+            server->loops_[0]->remove(stream->native_fd());
+            stream->close();
+        } else if (socket.valid()) {
+            server->loops_[0]->remove(socket.get());
+            socket.reset();
+        }
+        log_message(LOG_WARN, "server", "reverse connection attempt failed");
+        server->reverse_attempt_finished(false);
+    }
+
+    void arm_timer() {
+        cancel_timer();
+        std::weak_ptr<ReverseConn> weak = shared_from_this();
+        timer = server->loops_[0]->add_timer(
+            platform::monotonic_ms() + REVERSE_REGISTRATION_TIMEOUT_MS,
+            [weak]() {
+                std::shared_ptr<ReverseConn> conn = weak.lock();
+                if (conn) {
+                    conn->timer_armed = false;
+                    conn->fail();
+                }
+            }
+        );
+        timer_armed = true;
+    }
+
+    void cancel_timer() {
+        if (!timer_armed) {
+            return;
+        }
+        server->loops_[0]->cancel_timer(timer);
+        timer_armed = false;
+    }
+
+    ReactorServer* server;
+    std::uint64_t id;
+    UniqueSocket socket;
+    std::shared_ptr<Stream> stream;
+    State state;
+    std::string registration;
+    std::size_t registration_offset;
+    std::string ack;
+    EventLoop::TimerId timer;
+    bool timer_armed;
+    bool finished;
+};
+
 ReactorServer::ReactorServer(const DaemonConfig& config)
     : config_(config), metadata_(), sandbox_(), loops_(), loop_threads_(),
       pool_(new BlockingPool(config.blocking_workers, config.blocking_workers * 8U + 8U)), exec_(),
       router_(), listener_(), connections_mutex_(), connections_(), shard_connections_(),
       next_shard_(0U), next_connection_id_(1U), bound_port_(0U), listener_paused_(false),
-      shutting_down_(false), finalized_(false) {
+      shutting_down_(false), finalized_(false), reverse_live_(0UL), reverse_busy_(0UL),
+      reverse_max_(0UL), reverse_connect_in_progress_(false), reverse_next_attempt_ms_(0U),
+      next_reverse_id_(1U) {
+    if (config_.transport == Transport::Tls && config_.connection_mode == ConnectionMode::Listen) {
+        tls_server_context_ = make_tls_server_context(config_);
+    }
+    if (config_.connection_mode == ConnectionMode::Reverse
+        && config_.reverse_transport == Transport::Tls) {
+        tls_client_context_ = make_tls_client_context(config_);
+    }
+
     const std::size_t shards = required_shards(config_);
     loops_.reserve(shards);
     shard_connections_.reserve(shards);
@@ -207,18 +475,6 @@ void ReactorServer::resume_listener() {
 }
 
 bool ReactorServer::start(std::string* error) {
-    if (config_.connection_mode == ConnectionMode::Reverse) {
-        if (error != nullptr) {
-            *error = "reverse connection mode is not available on the reactor server yet";
-        }
-        return false;
-    }
-    if (config_.transport == Transport::Tls) {
-        if (error != nullptr) {
-            *error = "TLS transport is not available on the reactor server yet";
-        }
-        return false;
-    }
     if (loops_.empty()) {
         if (error != nullptr) {
             *error = "no event loop shards configured";
@@ -238,6 +494,22 @@ bool ReactorServer::start(std::string* error) {
     for (std::size_t i = 0; i < loops_.size(); ++i) {
         capacity += shard_capacity(i);
     }
+
+    if (config_.connection_mode == ConnectionMode::Reverse) {
+        reverse_max_ = std::min<unsigned long>(
+            config_.reverse_max_connections,
+            static_cast<unsigned long>(capacity)
+        );
+        if (reverse_max_ == 0UL) {
+            if (error != nullptr) {
+                *error = "reverse_max_connections exceeds the event loop shard capacity";
+            }
+            return false;
+        }
+        schedule_exec_tick();
+        return true;
+    }
+
     if (config_.max_connections > capacity) {
         if (error != nullptr) {
             *error = "max_connections exceeds the event loop shard capacity";
@@ -315,7 +587,136 @@ void ReactorServer::exec_tick() {
     if (tunnel_) {
         tunnel_->tick();
     }
+    reverse_tick();
     schedule_exec_tick();
+}
+
+void ReactorServer::reverse_tick() {
+    if (config_.connection_mode != ConnectionMode::Reverse || shutting_down_.load()) {
+        return;
+    }
+    const std::uint64_t now = platform::monotonic_ms();
+    if (reverse_connect_in_progress_ || now < reverse_next_attempt_ms_) {
+        return;
+    }
+    const unsigned long live = reverse_live_.load();
+    const unsigned long busy = reverse_busy_.load();
+    if (live >= reverse_max_) {
+        return;
+    }
+    if (live - std::min(live, busy) >= config_.reverse_min_idle_connections) {
+        return;
+    }
+    start_reverse_connect();
+}
+
+void ReactorServer::start_reverse_connect() {
+    reverse_connect_in_progress_ = true;
+    const std::string host = config_.reverse_broker_host;
+    const std::string service = std::to_string(config_.reverse_broker_port);
+    const bool posted = pool_->post([this, host, service]() {
+        SocketAddressQuery query;
+        query.family = AF_UNSPEC;
+        query.socktype = SOCK_STREAM;
+        query.protocol = IPPROTO_TCP;
+        query.passive = false;
+        std::vector<SocketAddress> addresses;
+        std::string resolve_error;
+        const bool resolved = resolve_socket_addresses(
+            host.c_str(),
+            service.c_str(),
+            query,
+            &addresses,
+            &resolve_error
+        );
+        loops_[0]->post([this, addresses, resolved, resolve_error]() {
+            if (!resolved || addresses.empty()) {
+                log_message(LOG_WARN, "server", "reverse broker resolve failed: " + resolve_error);
+                reverse_attempt_finished(false);
+                return;
+            }
+            begin_reverse_connect(addresses);
+        });
+    });
+    if (!posted) {
+        reverse_attempt_finished(false);
+    }
+}
+
+void ReactorServer::begin_reverse_connect(const std::vector<SocketAddress>& addresses) {
+    if (shutting_down_.load() || addresses.empty()) {
+        reverse_attempt_finished(false);
+        return;
+    }
+    std::shared_ptr<ReverseConn> conn(new ReverseConn(this, next_reverse_id_++));
+    const std::string payload =
+        "{\"protocol_version\":1,\"target\":\"" + json_escape(config_.target)
+        + "\",\"daemon_instance_id\":\"" + json_escape(metadata_.daemon_instance_id)
+        + "\",\"bearer_token\":\"" + json_escape(config_.reverse_bearer_token) + "\"}";
+    const std::uint32_t payload_size = static_cast<std::uint32_t>(payload.size());
+    conn->registration.assign(REVERSE_MAGIC, 8U);
+    conn->registration.push_back(static_cast<char>((payload_size >> 24U) & 0xffU));
+    conn->registration.push_back(static_cast<char>((payload_size >> 16U) & 0xffU));
+    conn->registration.push_back(static_cast<char>((payload_size >> 8U) & 0xffU));
+    conn->registration.push_back(static_cast<char>(payload_size & 0xffU));
+    conn->registration += payload;
+    conn->start(addresses[0]);
+}
+
+void ReactorServer::serve_reverse_connection(const std::shared_ptr<Stream>& stream) {
+    std::size_t shard = 0U;
+    if (!assign_shard(&shard)) {
+        stream->close();
+        return;
+    }
+    reverse_live_.fetch_add(1UL);
+
+    std::shared_ptr<std::atomic<bool>> busy(new std::atomic<bool>(false));
+    HttpConn::Options options;
+    options.loop = loops_[shard].get();
+    options.pool = pool_.get();
+    options.router = router_.get();
+    options.exec = exec_.get();
+    options.tunnel = tunnel_.get();
+    options.max_header_bytes = config_.max_request_header_bytes;
+    options.max_body_bytes = config_.max_request_body_bytes;
+    options.idle_timeout_ms = config_.http_connection_idle_timeout_ms;
+    options.shutting_down = &shutting_down_;
+    options.on_first_request = [this, busy]() {
+        if (!busy->exchange(true)) {
+            reverse_busy_.fetch_add(1UL);
+        }
+    };
+    const std::uint64_t id = next_connection_id_++;
+    options.on_closed = [this, busy](std::uint64_t closed_id) {
+        on_conn_closed(closed_id);
+        if (busy->load()) {
+            reverse_busy_.fetch_sub(1UL);
+        }
+        reverse_live_.fetch_sub(1UL);
+    };
+
+    std::shared_ptr<HttpConn> connection(new HttpConn(id, shard, stream, options));
+    {
+        BasicLockGuard lock(connections_mutex_);
+        connections_[id] = connection;
+        ++shard_connections_[shard];
+    }
+    if (shard == 0U) {
+        connection->start();
+    } else {
+        loops_[shard]->post([connection]() { connection->start(); });
+    }
+}
+
+void ReactorServer::reverse_attempt_finished(bool success) {
+    reverse_connect_in_progress_ = false;
+    if (!success) {
+        reverse_next_attempt_ms_ =
+            platform::monotonic_ms() + static_cast<std::uint64_t>(config_.reverse_reconnect_ms);
+    } else {
+        reverse_next_attempt_ms_ = 0U;
+    }
 }
 
 void ReactorServer::stop_loops() {
@@ -385,9 +786,24 @@ void ReactorServer::accept_ready() {
         const std::uint64_t id = next_connection_id_++;
         options.on_closed = [this](std::uint64_t closed_id) { on_conn_closed(closed_id); };
 
-        std::shared_ptr<HttpConn> connection(
-            new HttpConn(id, shard, UniqueSocket(accepted), options)
-        );
+        std::shared_ptr<Stream> stream;
+        try {
+            if (config_.transport == Transport::Tls) {
+                stream = make_tls_server_stream(UniqueSocket(accepted), tls_server_context_);
+            } else {
+                stream = make_socket_stream(UniqueSocket(accepted));
+            }
+        } catch (const std::exception& ex) {
+            close_socket(accepted);
+            log_message(
+                LOG_WARN,
+                "server",
+                std::string("client stream setup failed: ") + ex.what()
+            );
+            continue;
+        }
+
+        std::shared_ptr<HttpConn> connection(new HttpConn(id, shard, stream, options));
         {
             BasicLockGuard lock(connections_mutex_);
             connections_[id] = connection;

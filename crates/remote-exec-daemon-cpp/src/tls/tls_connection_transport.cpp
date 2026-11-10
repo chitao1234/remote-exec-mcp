@@ -492,6 +492,156 @@ std::shared_ptr<ConnectionTransport> make_tls_client_connection_transport(
     ));
 }
 
+class OpenSslStream : public Stream {
+public:
+    OpenSslStream(
+        UniqueSocket socket,
+        SSL* ssl,
+        const std::vector<unsigned char>& pinned_peer,
+        bool server
+    )
+        : socket_(std::move(socket)), ssl_(ssl), pinned_peer_(pinned_peer), server_(server),
+          handshake_done_(false), failed_(false), error_(), want_(0) {
+        SSL_set_mode(ssl_, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+    }
+
+    ~OpenSslStream() override { close(); }
+
+    SOCKET native_fd() const override { return socket_.get(); }
+
+    int wanted_events() const override { return want_; }
+
+    ReadResult read(char* data, std::size_t size) override {
+        const IoStatus handshake = ensure_handshake();
+        if (handshake != IoStatus::Ok) {
+            return ReadResult(handshake, 0U);
+        }
+        const int result = SSL_read(ssl_, data, static_cast<int>(bounded_socket_io_size(size)));
+        if (result > 0) {
+            want_ = 0;
+            return ReadResult(IoStatus::Ok, static_cast<std::size_t>(result));
+        }
+        const int error = SSL_get_error(ssl_, result);
+        if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
+            want_ = error == SSL_ERROR_WANT_READ ? IO_READ : IO_WRITE;
+            return ReadResult(IoStatus::WouldBlock, 0U);
+        }
+        if (error == SSL_ERROR_ZERO_RETURN || (error == SSL_ERROR_SYSCALL && result == 0)) {
+            want_ = 0;
+            return ReadResult(IoStatus::Eof, 0U);
+        }
+        fail("TLS read");
+        return ReadResult(IoStatus::Error, 0U);
+    }
+
+    WriteResult write(const char* data, std::size_t size) override {
+        const IoStatus handshake = ensure_handshake();
+        if (handshake != IoStatus::Ok) {
+            return WriteResult(handshake, 0U);
+        }
+        const int result = SSL_write(ssl_, data, static_cast<int>(bounded_socket_io_size(size)));
+        if (result > 0) {
+            want_ = 0;
+            return WriteResult(IoStatus::Ok, static_cast<std::size_t>(result));
+        }
+        const int error = SSL_get_error(ssl_, result);
+        if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
+            want_ = error == SSL_ERROR_WANT_READ ? IO_READ : IO_WRITE;
+            return WriteResult(IoStatus::WouldBlock, 0U);
+        }
+        fail("TLS write");
+        return WriteResult(IoStatus::Error, 0U);
+    }
+
+    void close() override {
+        if (ssl_ != nullptr) {
+            (void)SSL_shutdown(ssl_);
+            SSL_free(ssl_);
+            ssl_ = nullptr;
+        }
+        socket_.reset();
+    }
+
+private:
+    IoStatus ensure_handshake() {
+        if (handshake_done_) {
+            return IoStatus::Ok;
+        }
+        if (failed_) {
+            return IoStatus::Error;
+        }
+        const int result = server_ ? SSL_accept(ssl_) : SSL_connect(ssl_);
+        if (result == 1) {
+            try {
+                verify_peer(ssl_, pinned_peer_);
+            } catch (const std::exception& ex) {
+                fail(ex.what());
+                return IoStatus::Error;
+            }
+            handshake_done_ = true;
+            want_ = 0;
+            return IoStatus::Ok;
+        }
+        const int error = SSL_get_error(ssl_, result);
+        if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
+            want_ = error == SSL_ERROR_WANT_READ ? IO_READ : IO_WRITE;
+            return IoStatus::WouldBlock;
+        }
+        fail(server_ ? "TLS server handshake" : "TLS client handshake");
+        return IoStatus::Error;
+    }
+
+    void fail(const std::string& operation) {
+        failed_ = true;
+        error_ = openssl_compat::error_string(operation);
+        want_ = 0;
+    }
+
+    UniqueSocket socket_;
+    SSL* ssl_;
+    std::vector<unsigned char> pinned_peer_;
+    bool server_;
+    bool handshake_done_;
+    bool failed_;
+    std::string error_;
+    int want_;
+};
+
+std::shared_ptr<Stream> make_tls_server_stream(
+    UniqueSocket socket,
+    const std::shared_ptr<TlsContext>& context
+) {
+    SSL* ssl = SSL_new(context->context());
+    if (ssl == nullptr || SSL_set_fd(ssl, static_cast<int>(socket.get())) != 1) {
+        if (ssl != nullptr) {
+            SSL_free(ssl);
+        }
+        throw std::runtime_error(openssl_compat::error_string("creating TLS server stream"));
+    }
+    return std::shared_ptr<Stream>(
+        new OpenSslStream(std::move(socket), ssl, context->pinned_peer(), true)
+    );
+}
+
+std::shared_ptr<Stream> make_tls_client_stream(
+    UniqueSocket socket,
+    const std::shared_ptr<TlsContext>& context,
+    const std::string& server_name
+) {
+    SSL* ssl = SSL_new(context->context());
+    if (ssl == nullptr || SSL_set_fd(ssl, static_cast<int>(socket.get())) != 1
+        || SSL_set_tlsext_host_name(ssl, server_name.c_str()) != 1
+        || !openssl_compat::set_expected_host(ssl, server_name)) {
+        if (ssl != nullptr) {
+            SSL_free(ssl);
+        }
+        throw std::runtime_error(openssl_compat::error_string("creating TLS client stream"));
+    }
+    return std::shared_ptr<Stream>(
+        new OpenSslStream(std::move(socket), ssl, context->pinned_peer(), false)
+    );
+}
+
 #else
 
 class TlsContext {};
@@ -532,6 +682,15 @@ std::shared_ptr<ConnectionTransport> make_tls_client_connection_transport(
     const std::string&,
     unsigned long
 ) {
+    throw tls_disabled_error();
+}
+
+std::shared_ptr<Stream> make_tls_server_stream(UniqueSocket, const std::shared_ptr<TlsContext>&) {
+    throw tls_disabled_error();
+}
+
+std::shared_ptr<Stream>
+make_tls_client_stream(UniqueSocket, const std::shared_ptr<TlsContext>&, const std::string&) {
     throw tls_disabled_error();
 }
 

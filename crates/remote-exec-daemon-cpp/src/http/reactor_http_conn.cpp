@@ -207,19 +207,18 @@ bool HttpConn::ChunkScanner::feed(const char* data, std::size_t size) {
 HttpConn::HttpConn(
     std::uint64_t id,
     std::size_t shard_index,
-    UniqueSocket socket,
+    std::shared_ptr<Stream> stream,
     const Options& options
 )
-    : id_(id), shard_index_(shard_index), fd_(socket.get()),
-      stream_(make_socket_stream(std::move(socket))), loop_(options.loop), pool_(options.pool),
-      router_(options.router), exec_(options.exec), tunnel_(options.tunnel),
-      max_header_bytes_(options.max_header_bytes), max_body_bytes_(options.max_body_bytes),
-      idle_timeout_ms_(options.idle_timeout_ms), shutting_down_(options.shutting_down),
-      on_closed_(options.on_closed),
+    : id_(id), shard_index_(shard_index), fd_(stream ? stream->native_fd() : INVALID_SOCKET),
+      stream_(std::move(stream)), loop_(options.loop), pool_(options.pool), router_(options.router),
+      exec_(options.exec), tunnel_(options.tunnel), max_header_bytes_(options.max_header_bytes),
+      max_body_bytes_(options.max_body_bytes), idle_timeout_ms_(options.idle_timeout_ms),
+      shutting_down_(options.shutting_down), on_closed_(options.on_closed),
       input_(input_limit_for(options.max_header_bytes, options.max_body_bytes)), output_offset_(0U),
-      state_(State::Reading), closed_(false), head_parsed_(false), keep_alive_(true),
-      close_after_write_(false), upgrade_after_write_(false), header_end_(0U), body_length_(0U),
-      framing_(), head_(), scanner_(), timer_(0U), timer_armed_(false) {
+      state_(State::Reading), closed_(false), head_parsed_(false), first_request_(true),
+      keep_alive_(true), close_after_write_(false), upgrade_after_write_(false), header_end_(0U),
+      body_length_(0U), framing_(), head_(), scanner_(), timer_(0U), timer_armed_(false) {
 }
 
 HttpConn::~HttpConn() {
@@ -274,18 +273,25 @@ void HttpConn::close() {
 }
 
 void HttpConn::on_events(int bits) {
+    (void)bits;
     if (closed_) {
         return;
     }
-    if ((bits & IO_WRITE) != 0) {
+    if (state_ == State::Writing) {
         on_writable();
-    }
-    if (closed_) {
         return;
     }
-    if ((bits & IO_READ) != 0) {
+    if (state_ == State::Reading) {
         on_readable();
     }
+}
+
+void HttpConn::update_interest(int fallback) {
+    if (closed_ || fd_ == INVALID_SOCKET) {
+        return;
+    }
+    const int want = stream_ ? stream_->wanted_events() : 0;
+    loop_->set_interest(fd_, want != 0 ? want : fallback);
 }
 
 void HttpConn::on_readable() {
@@ -304,14 +310,17 @@ void HttpConn::on_readable() {
             if (process_input()) {
                 return;
             }
+            update_interest(IO_READ);
             continue;
         }
         if (result.status == IoStatus::WouldBlock) {
+            update_interest(IO_READ);
             return;
         }
         close();
         return;
     }
+    update_interest(IO_READ);
 }
 
 void HttpConn::on_writable() {
@@ -327,6 +336,7 @@ void HttpConn::on_writable() {
             continue;
         }
         if (result.status == IoStatus::WouldBlock) {
+            update_interest(IO_WRITE);
             return;
         }
         close();
@@ -352,10 +362,7 @@ void HttpConn::on_writable() {
     body_length_ = 0U;
     framing_ = HttpRequestBodyFraming();
     head_ = HttpRequest();
-    if (!loop_->set_interest(fd_, IO_READ)) {
-        close();
-        return;
-    }
+    update_interest(IO_READ);
     arm_timer();
     if (!input_.empty()) {
         (void)process_input();
@@ -399,6 +406,12 @@ bool HttpConn::process_input() {
         }
 
         keep_alive_ = !connection_close_requested(head_);
+        if (first_request_) {
+            first_request_ = false;
+            if (on_first_request_) {
+                on_first_request_();
+            }
+        }
         header_end_ = header_end + 4U;
         head_parsed_ = true;
 
@@ -563,10 +576,7 @@ void HttpConn::begin_tunnel_upgrade(const HttpRequest& request) {
     output_offset_ = 0U;
     state_ = State::Writing;
     upgrade_after_write_ = true;
-    if (!loop_->set_interest(fd_, IO_WRITE)) {
-        close();
-        return;
-    }
+    update_interest(IO_WRITE);
     arm_timer_with(EXEC_REQUEST_SAFETY_MS);
     on_writable();
 }
@@ -605,10 +615,7 @@ void HttpConn::begin_write(const HttpResponse& response, bool keep_alive) {
     output_ = render_http_response(response);
     output_offset_ = 0U;
     state_ = State::Writing;
-    if (!loop_->set_interest(fd_, IO_WRITE)) {
-        close();
-        return;
-    }
+    update_interest(IO_WRITE);
     arm_timer();
     on_writable();
 }

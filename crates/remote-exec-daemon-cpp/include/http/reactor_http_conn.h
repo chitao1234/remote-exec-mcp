@@ -32,13 +32,14 @@ public:
         std::size_t max_body_bytes;
         unsigned long idle_timeout_ms;
         std::atomic<bool>* shutting_down;
+        std::function<void()> on_first_request;
         std::function<void(std::uint64_t)> on_closed;
     };
 
     HttpConn(
         std::uint64_t id,
         std::size_t shard_index,
-        UniqueSocket socket,
+        std::shared_ptr<Stream> stream,
         const Options& options
     );
     ~HttpConn();
@@ -83,6 +84,7 @@ private:
     void begin_write(const HttpResponse& response, bool keep_alive);
     void fail(int status, const char* code, const std::string& message);
     void arm_timer();
+    void update_interest(int fallback);
     void arm_timer_with(unsigned long timeout_ms);
     void cancel_timer();
 
@@ -99,6 +101,7 @@ private:
     std::size_t max_body_bytes_;
     unsigned long idle_timeout_ms_;
     std::atomic<bool>* shutting_down_;
+    std::function<void()> on_first_request_;
     std::function<void(std::uint64_t)> on_closed_;
 
     ByteBuffer input_;
@@ -107,6 +110,7 @@ private:
     State state_;
     bool closed_;
     bool head_parsed_;
+    bool first_request_;
     bool keep_alive_;
     bool close_after_write_;
     bool upgrade_after_write_;
