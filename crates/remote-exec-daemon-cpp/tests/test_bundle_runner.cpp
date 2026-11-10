@@ -8,10 +8,65 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
 namespace {
+
+int run_test_command(const std::string& command) {
+#ifdef _WIN32
+    std::vector<char> mutable_command(command.begin(), command.end());
+    mutable_command.push_back('\0');
+
+    STARTUPINFOA startup;
+    ZeroMemory(&startup, sizeof(startup));
+    startup.cb = sizeof(startup);
+
+    PROCESS_INFORMATION process;
+    ZeroMemory(&process, sizeof(process));
+
+    // Do not use std::system here. COMMAND.COM on Windows 9x reports success
+    // for an aborting or nonzero child, which makes failing tests look passed.
+    if (!CreateProcessA(
+            NULL,
+            &mutable_command[0],
+            NULL,
+            NULL,
+            FALSE,
+            0,
+            NULL,
+            NULL,
+            &startup,
+            &process
+        )) {
+        std::cerr << "run-tests: unable to start '" << command << "' (error " << GetLastError()
+                  << ")\n";
+        return -1;
+    }
+
+    DWORD exit_code = 1;
+    if (WaitForSingleObject(process.hProcess, INFINITE) != WAIT_OBJECT_0
+        || !GetExitCodeProcess(process.hProcess, &exit_code)) {
+        exit_code = 1;
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return static_cast<int>(exit_code);
+#else
+    const int status = std::system(command.c_str());
+    if (status == -1) {
+        return -1;
+    }
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return 128 + WTERMSIG(status);
+    }
+    return status;
+#endif
+}
 
 struct TestCase {
     std::string name;
@@ -190,7 +245,7 @@ int main(int argc, char** argv) {
          ++it) {
         const TestCase& test = **it;
         std::cout << "[ RUN      ] " << test.name << std::endl;
-        const int status = std::system(test.command.c_str());
+        const int status = run_test_command(test.command);
         if (status != 0) {
             std::cerr << "[  FAILED  ] " << test.name << " (status " << status << ")\n";
             return 1;
