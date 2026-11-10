@@ -28,6 +28,29 @@ bool code_page_available(unsigned int code_page) {
     }
 }
 
+// Carry tests need the OS to reject incomplete sequences. Some code pages
+// (notably GB18030 on XP) report ERROR_INVALID_FLAGS and fall back to a
+// lenient conversion that accepts partial bytes, so the test is not
+// applicable there.
+bool code_page_detects_incomplete_sequences(unsigned int code_page, const std::string& partial) {
+    if (!code_page_available(code_page)) {
+        return false;
+    }
+    SetLastError(0);
+    const int result = MultiByteToWideChar(
+        static_cast<UINT>(code_page),
+        MB_ERR_INVALID_CHARS,
+        partial.data(),
+        static_cast<int>(partial.size()),
+        nullptr,
+        0
+    );
+    if (result > 0) {
+        return false;
+    }
+    return GetLastError() != ERROR_INVALID_FLAGS;
+}
+
 std::string raw_from_code_page(unsigned int code_page, const std::wstring& wide) {
     if (wide.empty()) {
         return "";
@@ -160,6 +183,9 @@ void assert_decode_split_carry(
     if (!code_page_available(code_page)) {
         return;
     }
+    if (!code_page_detects_incomplete_sequences(code_page, first_byte)) {
+        return;
+    }
 
     std::string carry;
     TEST_ASSERT(
@@ -182,6 +208,9 @@ void assert_decode_split_chunks(
         return;
     }
     TEST_ASSERT(!chunks.empty());
+    if (!code_page_detects_incomplete_sequences(code_page, chunks.front())) {
+        return;
+    }
 
     std::string carry;
     for (std::size_t index = 0; index + 1U < chunks.size(); ++index) {
