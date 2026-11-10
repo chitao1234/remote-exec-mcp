@@ -654,7 +654,8 @@ void ExecService::complete_waiter(const std::shared_ptr<ExecWaiter>& waiter) {
     if (!completed) {
         result.daemon_session_id = session->id;
     }
-    result.has_exit_code = session->exited.load();
+    // An exited process can still have output to drain through a live session.
+    result.has_exit_code = completed && session->exited.load();
     result.exit_code = session->exit_code;
     result.output = waiter->output.take();
     result.original_output_bytes = waiter->original_bytes;

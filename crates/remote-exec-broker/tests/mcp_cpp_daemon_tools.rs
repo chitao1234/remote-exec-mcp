@@ -25,15 +25,15 @@ async fn public_tools_smoke_against_real_cpp_daemon() {
         return;
     };
 
-    assert_list_targets_smoke(&fixture).await;
+    let supports_pty = assert_list_targets_smoke(&fixture).await;
     assert_exec_command_smoke(&fixture).await;
-    assert_write_stdin_smoke(&fixture).await;
+    assert_write_stdin_smoke(&fixture, supports_pty).await;
     assert_apply_patch_smoke(&fixture).await;
     assert_view_image_smoke(&fixture).await;
     assert_transfer_files_smoke(&fixture).await;
 }
 
-async fn assert_list_targets_smoke(fixture: &CppDaemonBrokerFixture) {
+async fn assert_list_targets_smoke(fixture: &CppDaemonBrokerFixture) -> bool {
     let result = fixture
         .client
         .call_tool("list_targets", &serde_json::json!({}))
@@ -60,6 +60,7 @@ async fn assert_list_targets_smoke(fixture: &CppDaemonBrokerFixture) {
     assert_eq!(daemon_info["supports_port_forward"], true);
     assert!(daemon_info.get("port_forward_protocol_version").is_none());
     assert_eq!(daemon_info["transfer_stream_protocol_version"], 2);
+    daemon_info["supports_pty"].as_bool().unwrap()
 }
 
 async fn assert_exec_command_smoke(fixture: &CppDaemonBrokerFixture) {
@@ -111,6 +112,59 @@ async fn assert_exec_command_smoke(fixture: &CppDaemonBrokerFixture) {
         assert_eq!(result.structured_content["exit_code"], 0);
         assert_eq!(result.structured_content["output"], "UTF-8\n1\n");
     }
+}
+
+#[cfg(not(windows))]
+#[tokio::test]
+async fn exec_drains_late_output_before_reporting_exit() {
+    let Some(fixture) =
+        CppDaemonBrokerFixture::spawn_with_daemon_config(FAST_YIELD_DAEMON_CONFIG).await
+    else {
+        return;
+    };
+    // The shell exits before its child closes stdout, leaving an exited process
+    // whose session must remain pollable until the child's output is drained.
+    let mut result = fixture
+        .client
+        .call_tool(
+            "exec_command",
+            &serde_json::json!({
+                "target": CPP_TARGET,
+                "cmd": "printf 'before-exit\\n'; (sleep 0.15; printf 'after-exit\\n') & exit 7",
+                "shell": test_shell(),
+                "login": false,
+                "tty": false,
+                "yield_time_ms": 1
+            }),
+        )
+        .await
+        .unwrap();
+    let mut output = String::new();
+    let started_at = Instant::now();
+    loop {
+        assert_tool_ok(&result, "exec with late output");
+        output.push_str(result.structured_content["output"].as_str().unwrap());
+        let Some(session_id) = result.structured_content["session_id"].as_str() else {
+            assert_eq!(result.structured_content["exit_code"], 7);
+            break;
+        };
+        assert!(result.structured_content["exit_code"].is_null());
+        assert!(started_at.elapsed() < Duration::from_secs(10));
+        result = fixture
+            .client
+            .call_tool(
+                "write_stdin",
+                &serde_json::json!({
+                    "target": CPP_TARGET,
+                    "session_id": session_id,
+                    "chars": "",
+                    "yield_time_ms": 10
+                }),
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(output, "before-exit\nafter-exit\n");
 }
 
 #[cfg(not(windows))]
@@ -206,7 +260,11 @@ async fn exec_accepts_a_custom_windows_shell_executable_name() {
     );
 }
 
-async fn assert_write_stdin_smoke(fixture: &CppDaemonBrokerFixture) {
+async fn assert_write_stdin_smoke(fixture: &CppDaemonBrokerFixture, supports_pty: bool) {
+    if !supports_pty {
+        eprintln!("skipping interactive stdin smoke: C++ daemon does not advertise PTY support");
+        return;
+    }
     let started = fixture
         .client
         .call_tool(
@@ -216,7 +274,7 @@ async fn assert_write_stdin_smoke(fixture: &CppDaemonBrokerFixture) {
                 "cmd": stdin_command(),
                 "shell": test_shell(),
                 "login": false,
-                "tty": stdin_requires_tty(),
+                "tty": true,
                 "yield_time_ms": 1
             }),
         )
@@ -594,16 +652,6 @@ fn stdin_payload() -> &'static str {
 #[cfg(not(windows))]
 fn stdin_payload() -> &'static str {
     "hello-from-stdin\n"
-}
-
-#[cfg(windows)]
-fn stdin_requires_tty() -> bool {
-    false
-}
-
-#[cfg(not(windows))]
-fn stdin_requires_tty() -> bool {
-    true
 }
 
 #[cfg(windows)]
