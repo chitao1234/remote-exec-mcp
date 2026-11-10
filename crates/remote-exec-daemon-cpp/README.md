@@ -9,10 +9,14 @@ The repository root [README](../../README.md) documents the complete
 `remote-exec-mcp` system. This file covers the C++ daemon's build and runtime
 workflow.
 
-## Migration status
+## Reactor status
 
-The daemon is moving from a blocking thread-per-unit core to a readiness-driven
-reactor. The production entrypoint now uses the reactor for these routes:
+The daemon uses a readiness-driven reactor with non-blocking streams and a
+small fixed blocking pool. Loop shards own their sockets; process output and
+tunnel expiry are timer-driven; no per-connection, per-stream, or TLS pump
+threads are created.
+
+The production entrypoint handles all routes and modes:
 
 - `health` and `target-info`;
 - `exec/start` and `exec/write` (non-blocking sessions, bounded output ring);
@@ -21,11 +25,12 @@ reactor. The production entrypoint now uses the reactor for these routes:
 - `patch/apply`;
 - `transfer/export`, `transfer/path-info`, and `transfer/import`;
 - the v4 port-forward upgrade tunnel, including retained listen sessions,
-  resume, TCP, and UDP.
+  resume, TCP, and UDP;
+- direct and reverse mode over plain HTTP or TLS.
 
-TLS transport and reverse connection mode are still the legacy implementation
-and are rejected at startup until they are moved onto the non-blocking stream
-layer. `target-info` advertises the routes above.
+`target-info` advertises the reactor's actual capabilities. The legacy
+thread-per-unit implementation remains in the tree only as dead code for its
+old unit tests; the daemon entrypoint no longer uses it.
 
 The reactor core bounds HTTP input and connection count, uses timers instead of
 polling ticks, and shards `select()` sets on Winsock 1.1 so `max_connections`
@@ -165,10 +170,6 @@ Reverse mode is exclusive with a direct listener. Set `connection_mode=reverse`
 and the broker connection, transport, and authentication settings shown in
 `config/daemon-cpp.example.ini`. Reverse TLS requires a TLS-enabled build;
 plain reverse mode requires `reverse_bearer_token`.
-
-The current reactor core rejects `transport = tls` and
-`connection_mode = reverse` at startup; those paragraphs describe the target
-behavior and apply again once the subsystem migrates.
 
 Optional settings cover:
 
