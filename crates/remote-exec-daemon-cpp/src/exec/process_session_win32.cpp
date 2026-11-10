@@ -1066,6 +1066,8 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
 
     stdin_pipe.read_end.reset();
     stdout_pipe.write_end.reset();
+    // Non-tty commands see EOF on stdin, matching the POSIX and Rust hosts.
+    stdin_pipe.write_end.reset();
 
     if (created == 0) {
         throw std::runtime_error(

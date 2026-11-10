@@ -243,11 +243,7 @@ std::shared_ptr<ExecSession> ExecService::spawn_session(const ExecStartRequestSp
     );
     session->started_at_ms = platform::monotonic_ms();
     session->output_fd = session->process->output_fd();
-#ifdef _WIN32
-    session->stdin_open = true;
-#else
     session->stdin_open = spec.tty_requested;
-#endif
     session->last_touched.store(make_touch_order());
     session->poll_active.store(true);
     return session;
