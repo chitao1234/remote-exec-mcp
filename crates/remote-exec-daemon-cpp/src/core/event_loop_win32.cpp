@@ -345,6 +345,8 @@ void EventLoop::run() {
             if (ready == SOCKET_ERROR) {
                 const int error = WSAGetLastError();
                 if (error == WSAEINTR) {
+                    FD_ZERO(&groups[i].read_fds);
+                    FD_ZERO(&groups[i].write_fds);
                     continue;
                 }
                 log_message(
