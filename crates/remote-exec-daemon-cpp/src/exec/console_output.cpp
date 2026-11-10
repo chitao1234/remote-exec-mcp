@@ -13,6 +13,7 @@
 #include "exec/console_output.h"
 #include "exec/utf8_stream_decode.h"
 #include "platform/platform.h"
+#include "platform/win32_dynamic.h"
 #include "platform/win32_error.h"
 #include "platform/win32_utf8.h"
 #include "win32_pipe_io.h"
@@ -49,7 +50,7 @@ UINT active_console_output_code_page() {
         return 0U;
     }
     GetConsoleOutputCodePageFn get_console_output_code_page =
-        reinterpret_cast<GetConsoleOutputCodePageFn>(proc);
+        remote_exec_win32::proc_address_as<GetConsoleOutputCodePageFn>(proc);
     return get_console_output_code_page();
 }
 
@@ -150,6 +151,9 @@ void carry_incomplete_code_page_suffix(UINT code_page, std::string* raw, std::st
     }
 }
 
+// Console/pipe output: decode with the active code page and the ANSI fallback.
+// If both fail, the intended last resort is the internal UTF-8 stream decoder.
+// Explicit UTF-8 streams (winpty/terminal) call utf8_stream_decode directly.
 std::string decode_console_output_with_code_pages(
     UINT primary_code_page,
     UINT fallback_code_page,
