@@ -184,7 +184,12 @@ struct TunnelConn : public std::enable_shared_from_this<TunnelConn> {
     void process_frames();
     void handle_frame(const PortTunnelFrame& frame);
     bool send_frame(const PortTunnelFrame& frame, bool droppable);
-    bool send_error(const std::string& code, const std::string& message, bool fatal);
+    bool send_error(
+        const std::string& code,
+        const std::string& message,
+        bool fatal,
+        std::uint32_t stream_id = 0U
+    );
     void close();
     void attach_session(const std::shared_ptr<TunnelSession>& session, std::uint64_t generation);
     void detach_session();
@@ -216,6 +221,7 @@ struct TunnelConn : public std::enable_shared_from_this<TunnelConn> {
     std::map<std::uint32_t, std::shared_ptr<TunnelUdpBind>> udp_binds;
     std::uint64_t dropped_datagrams;
     std::uint32_t next_stream_id;
+    bool close_after_flush;
 };
 
 struct TunnelServiceImpl {
@@ -526,7 +532,8 @@ void TunnelServiceImpl::handle_accept(const std::weak_ptr<TunnelSession>& weak_s
             conn_owner->send_error(
                 "port_tunnel_limit_exceeded",
                 "port tunnel active tcp stream limit reached",
-                false
+                false,
+                session->listener->listener_stream_id
             );
             continue;
         }
@@ -548,7 +555,12 @@ void TunnelServiceImpl::handle_accept(const std::weak_ptr<TunnelSession>& weak_s
                 }
             })) {
             conn_owner->close_stream(stream->id);
-            conn_owner->send_error("port_accept_failed", "unable to watch accepted stream", false);
+            conn_owner->send_error(
+                "port_accept_failed",
+                "unable to watch accepted stream",
+                false,
+                session->listener->listener_stream_id
+            );
             continue;
         }
 
@@ -615,7 +627,7 @@ void TunnelServiceImpl::handle_tcp_read(
             }
             return;
         }
-        conn->send_error("port_read_failed", "port tunnel tcp read failed", false);
+        conn->send_error("port_read_failed", "port tunnel tcp read failed", false, stream->id);
         conn->close_stream(stream->id);
         return;
     }
@@ -653,7 +665,7 @@ void TunnelServiceImpl::handle_tcp_write(
         if (result.status == IoStatus::WouldBlock) {
             return;
         }
-        conn->send_error("port_write_failed", "port tunnel tcp write failed", false);
+        conn->send_error("port_write_failed", "port tunnel tcp write failed", false, stream->id);
         conn->close_stream(stream->id);
         return;
     }
@@ -794,7 +806,12 @@ void TunnelServiceImpl::install_listener(
         listener->socket.reset();
         session->listener.reset();
         release(&retained_listeners);
-        conn->send_error("listener_open_failed", "unable to watch tcp listener", false);
+        conn->send_error(
+            "listener_open_failed",
+            "unable to watch tcp listener",
+            false,
+            listener_stream_id
+        );
         return;
     }
     conn->send_frame(
@@ -837,7 +854,7 @@ void TunnelServiceImpl::install_udp(
             bind->socket.reset();
             session->udp.reset();
             release(&udp_binds);
-            conn->send_error("listener_open_failed", "unable to watch udp bind", false);
+            conn->send_error("listener_open_failed", "unable to watch udp bind", false, stream_id);
             return;
         }
     } else {
@@ -849,7 +866,7 @@ void TunnelServiceImpl::install_udp(
             bind->socket.reset();
             conn->udp_binds.erase(stream_id);
             release(&udp_binds);
-            conn->send_error("listener_open_failed", "unable to watch udp bind", false);
+            conn->send_error("listener_open_failed", "unable to watch udp bind", false, stream_id);
             return;
         }
     }
@@ -889,7 +906,12 @@ void TunnelServiceImpl::finish_connect(
                 handle_tcp_write(weak_conn, weak_stream);
             }
         })) {
-        conn->send_error("port_connect_failed", "unable to watch connected tcp stream", false);
+        conn->send_error(
+            "port_connect_failed",
+            "unable to watch connected tcp stream",
+            false,
+            stream->id
+        );
         conn->close_stream(stream->id);
     }
 }
@@ -902,7 +924,7 @@ void TunnelServiceImpl::fail_connect(
     if (conn->closed || stream->closed) {
         return;
     }
-    conn->send_error("port_connect_failed", message, false);
+    conn->send_error("port_connect_failed", message, false, stream->id);
     conn->close_stream(stream->id);
 }
 
@@ -1012,6 +1034,10 @@ void TunnelConn::on_writable() {
     write_waiting = false;
     output.clear();
     output_offset = 0U;
+    if (close_after_flush) {
+        close();
+        return;
+    }
     flush_dropped_datagrams();
     if (!closed) {
         update_interest();
@@ -1048,12 +1074,17 @@ bool TunnelConn::send_frame(const PortTunnelFrame& frame, bool droppable) {
     return true;
 }
 
-bool TunnelConn::send_error(const std::string& code, const std::string& message, bool fatal) {
+bool TunnelConn::send_error(
+    const std::string& code,
+    const std::string& message,
+    bool fatal,
+    std::uint32_t stream_id
+) {
     try {
         return send_frame(
             make_frame(
                 PortTunnelFrameType::Error,
-                0U,
+                stream_id,
                 Json::parse(error_meta(code, message, fatal, generation)),
                 std::string()
             ),
@@ -1367,7 +1398,10 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
             service->close_session(session, true);
             session.reset();
         }
-        close();
+        close_after_flush = true;
+        if (output.empty()) {
+            close();
+        }
         return;
     case PortTunnelFrameType::TunnelHeartbeat:
         send_frame(
@@ -1399,7 +1433,8 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
             send_error(
                 "port_tunnel_limit_exceeded",
                 "port tunnel retained listener limit reached",
-                false
+                false,
+                listener_stream_id
             );
             return;
         }
@@ -1424,7 +1459,8 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
                         self->send_error(
                             "listener_open_failed",
                             "unable to open tcp listener",
-                            false
+                            false,
+                            listener_stream_id
                         );
                         service->release(&service->retained_listeners);
                         return;
@@ -1444,7 +1480,12 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
             });
         if (!posted) {
             service->release(&service->retained_listeners);
-            send_error("port_tunnel_limit_exceeded", "tunnel worker pool is full", false);
+            send_error(
+                "port_tunnel_limit_exceeded",
+                "tunnel worker pool is full",
+                false,
+                listener_stream_id
+            );
         }
         return;
     }
@@ -1460,7 +1501,8 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
             send_error(
                 "port_tunnel_limit_exceeded",
                 "port tunnel active tcp stream limit reached",
-                false
+                false,
+                frame.stream_id
             );
             return;
         }
@@ -1501,7 +1543,8 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
                     self->send_error(
                         "port_connect_failed",
                         error.empty() ? "unable to resolve endpoint" : error,
-                        false
+                        false,
+                        stream_id
                     );
                     service->release(&service->active_tcp_streams);
                     return;
@@ -1539,7 +1582,12 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
                     raw = INVALID_SOCKET;
                 }
                 if (raw == INVALID_SOCKET) {
-                    self->send_error("port_connect_failed", "unable to connect endpoint", false);
+                    self->send_error(
+                        "port_connect_failed",
+                        "unable to connect endpoint",
+                        false,
+                        stream_id
+                    );
                     service->release(&service->active_tcp_streams);
                     return;
                 }
@@ -1567,7 +1615,12 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
         });
         if (!posted) {
             service->release(&service->active_tcp_streams);
-            send_error("port_tunnel_limit_exceeded", "tunnel worker pool is full", false);
+            send_error(
+                "port_tunnel_limit_exceeded",
+                "tunnel worker pool is full",
+                false,
+                stream_id
+            );
         }
         return;
     }
@@ -1578,7 +1631,12 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
         std::map<std::uint32_t, std::shared_ptr<TunnelTcpStreamState>>::iterator it =
             streams.find(frame.stream_id);
         if (it == streams.end()) {
-            send_error("unknown_port_connection", "unknown tunnel tcp stream", false);
+            send_error(
+                "unknown_port_connection",
+                "unknown tunnel tcp stream",
+                false,
+                frame.stream_id
+            );
             return;
         }
         const std::shared_ptr<TunnelTcpStreamState>& stream = it->second;
@@ -1587,7 +1645,8 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
             send_error(
                 "port_tunnel_limit_exceeded",
                 "port tunnel tcp write queue limit reached",
-                false
+                false,
+                frame.stream_id
             );
             close_stream(frame.stream_id);
             return;
@@ -1615,7 +1674,26 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
         }
         return;
     }
-    case PortTunnelFrameType::Close:
+    case PortTunnelFrameType::Close: {
+        if (session) {
+            const bool listener_closed =
+                session->listener && session->listener->listener_stream_id == frame.stream_id;
+            const bool udp_closed = session->udp && session->udp->stream_id == frame.stream_id;
+            if (listener_closed || udp_closed) {
+                service->close_session(session, true);
+                session.reset();
+                send_frame(
+                    make_frame(
+                        PortTunnelFrameType::Close,
+                        frame.stream_id,
+                        Json::object(),
+                        std::string()
+                    ),
+                    false
+                );
+                return;
+            }
+        }
         close_stream(frame.stream_id);
         {
             std::map<std::uint32_t, std::shared_ptr<TunnelUdpBind>>::iterator it =
@@ -1629,7 +1707,12 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
                 service->release(&service->udp_binds);
             }
         }
+        send_frame(
+            make_frame(PortTunnelFrameType::Close, frame.stream_id, Json::object(), std::string()),
+            false
+        );
         return;
+    }
     case PortTunnelFrameType::UdpBind: {
         if (protocol != TunnelProtocol::Udp) {
             send_error("invalid_port_tunnel", "udp bind requires a udp tunnel", false);
@@ -1643,7 +1726,12 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
             normalize_port_forward_endpoint(meta_string(frame, "endpoint"));
         const std::uint32_t stream_id = frame.stream_id;
         if (!service->try_acquire(&service->udp_binds, service->limits.max_udp_binds)) {
-            send_error("port_tunnel_limit_exceeded", "port tunnel udp bind limit reached", false);
+            send_error(
+                "port_tunnel_limit_exceeded",
+                "port tunnel udp bind limit reached",
+                false,
+                stream_id
+            );
             return;
         }
         std::shared_ptr<TunnelConn> self = shared_from_this();
@@ -1663,7 +1751,12 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
             }
             service->loop->post([this, self, session_value, stream_id, socket]() {
                 if (socket == INVALID_SOCKET) {
-                    self->send_error("listener_open_failed", "unable to open udp bind", false);
+                    self->send_error(
+                        "listener_open_failed",
+                        "unable to open udp bind",
+                        false,
+                        stream_id
+                    );
                     service->release(&service->udp_binds);
                     return;
                 }
@@ -1677,7 +1770,12 @@ void TunnelConn::handle_frame(const PortTunnelFrame& frame) {
         });
         if (!posted) {
             service->release(&service->udp_binds);
-            send_error("port_tunnel_limit_exceeded", "tunnel worker pool is full", false);
+            send_error(
+                "port_tunnel_limit_exceeded",
+                "tunnel worker pool is full",
+                false,
+                stream_id
+            );
         }
         return;
     }

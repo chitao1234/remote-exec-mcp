@@ -462,6 +462,40 @@ void test_tunnel_listen(unsigned short port) {
     close_socket(client);
 }
 
+void test_tunnel_bind_conflict(unsigned short port) {
+    const int occupied = create_socket_cloexec(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    TEST_ASSERT(occupied != INVALID_SOCKET);
+    sockaddr_in address;
+    std::memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = 0;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    TEST_ASSERT(bind_socket(occupied, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+    TEST_ASSERT(listen_socket(occupied, 1) == 0);
+    socklen_t address_len = sizeof(address);
+    TEST_ASSERT(getsockname(occupied, reinterpret_cast<sockaddr*>(&address), &address_len) == 0);
+    const unsigned short occupied_port = ntohs(address.sin_port);
+
+    TunnelClient tunnel(port);
+    const std::string preface(port_tunnel_preface(), port_tunnel_preface_size());
+    send_bytes(tunnel.fd, preface.data(), preface.size());
+    tunnel.send(open_frame("listen", "tcp"));
+    const PortTunnelFrame ready = tunnel.read();
+    TEST_ASSERT(ready.type == PortTunnelFrameType::TunnelReady);
+
+    tunnel.send(tunnel_frame(
+        PortTunnelFrameType::TcpListen,
+        1U,
+        Json{{"endpoint", "127.0.0.1:" + std::to_string(occupied_port)}},
+        std::string()
+    ));
+    const PortTunnelFrame failed = tunnel.read();
+    TEST_ASSERT(failed.type == PortTunnelFrameType::Error);
+    TEST_ASSERT(failed.stream_id == 1U);
+    TEST_ASSERT(Json::parse(failed.meta).at("code").get<std::string>() == "listener_open_failed");
+    close_socket(occupied);
+}
+
 void test_tunnel_udp(unsigned short port) {
     TunnelClient tunnel(port);
     const std::string preface(port_tunnel_preface(), port_tunnel_preface_size());
@@ -514,6 +548,7 @@ void test_tunnel_udp(unsigned short port) {
 void test_tunnel(unsigned short port) {
     test_tunnel_connect(port);
     test_tunnel_listen(port);
+    test_tunnel_bind_conflict(port);
     test_tunnel_udp(port);
 }
 
