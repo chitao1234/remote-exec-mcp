@@ -3,10 +3,65 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::public::{
-    ApplyPatchInput, ForwardPortSpec, ForwardPortsInput, TransferEndpoint, ViewImageInput,
+    ApplyPatchInput, EditInput, ForwardPortSpec, ForwardPortsInput, ReadInput, TransferEndpoint,
+    ViewImageInput, WriteInput, WriteStdinInput,
 };
 use remote_exec_proto::rpc::ExecPtySize;
 use tokio::io::AsyncReadExt;
+
+pub struct WriteStdinCliInput {
+    pub first: String,
+    pub second: Option<String>,
+    pub chars: Option<String>,
+    pub chars_file: Option<PathBuf>,
+    pub yield_time_ms: Option<u64>,
+    pub max_output_tokens: Option<u32>,
+    pub pty_rows: Option<u16>,
+    pub pty_cols: Option<u16>,
+}
+
+pub async fn build_write_stdin_input(args: WriteStdinCliInput) -> anyhow::Result<WriteStdinInput> {
+    let (target, session_id, positional_chars) = if is_public_session_id(&args.first) {
+        anyhow::ensure!(
+            args.chars.is_none(),
+            "too many positional arguments for `write-stdin`"
+        );
+        (None, args.first, args.second)
+    } else {
+        let session_id = args
+            .second
+            .context("write-stdin requires `<SESSION_ID>` or `<TARGET> <SESSION_ID>`")?;
+        anyhow::ensure!(
+            is_public_session_id(&session_id),
+            "`{session_id}` is not a public session id (expected `sess_` followed by 32 hex characters)"
+        );
+        (Some(args.first), session_id, args.chars)
+    };
+
+    anyhow::ensure!(
+        positional_chars.is_none() || args.chars_file.is_none(),
+        "provide either inline chars or --chars-file, not both"
+    );
+    let chars = match positional_chars {
+        Some(chars) => Some(chars),
+        None => load_optional_text_input(None, args.chars_file).await?,
+    };
+
+    Ok(WriteStdinInput {
+        session_id,
+        chars,
+        yield_time_ms: args.yield_time_ms,
+        max_output_tokens: args.max_output_tokens,
+        pty_size: write_stdin_pty_size(args.pty_rows, args.pty_cols)?,
+        target,
+    })
+}
+
+pub fn is_public_session_id(value: &str) -> bool {
+    value.strip_prefix("sess_").is_some_and(|suffix| {
+        suffix.len() == 32 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
+}
 
 pub fn write_stdin_pty_size(
     rows: Option<u16>,
@@ -28,7 +83,7 @@ pub async fn build_apply_patch_input(
 ) -> anyhow::Result<ApplyPatchInput> {
     Ok(ApplyPatchInput {
         target,
-        input: load_required_text_input(input, input_file).await?,
+        input: load_text_input_or_stdin(input, input_file).await?,
         workdir,
     })
 }
@@ -45,6 +100,54 @@ pub fn build_view_image_input(
         workdir,
         detail,
     }
+}
+
+pub fn build_read_input(
+    target: String,
+    path: String,
+    offset: Option<u64>,
+    limit: Option<u64>,
+) -> ReadInput {
+    ReadInput {
+        target,
+        file_path: path,
+        offset,
+        limit,
+    }
+}
+
+pub async fn build_write_input(
+    target: String,
+    path: String,
+    content: Option<String>,
+    content_file: Option<PathBuf>,
+) -> anyhow::Result<WriteInput> {
+    Ok(WriteInput {
+        target,
+        file_path: path,
+        content: load_text_input_or_stdin(content, content_file).await?,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn build_edit_input(
+    target: String,
+    path: String,
+    old_string: Option<String>,
+    old_string_file: Option<PathBuf>,
+    new_string: Option<String>,
+    new_string_file: Option<PathBuf>,
+    replace_all: bool,
+) -> anyhow::Result<EditInput> {
+    Ok(EditInput {
+        target,
+        file_path: path,
+        old_string: load_required_text_input(old_string, old_string_file).await?,
+        new_string: load_optional_text_input(new_string, new_string_file)
+            .await?
+            .unwrap_or_default(),
+        replace_all,
+    })
 }
 
 pub fn build_forward_ports_open_input(
@@ -95,6 +198,16 @@ pub async fn load_required_text_input(
     load_optional_text_input(inline, file)
         .await?
         .context("missing required text input")
+}
+
+pub async fn load_text_input_or_stdin(
+    inline: Option<String>,
+    file: Option<PathBuf>,
+) -> anyhow::Result<String> {
+    match load_optional_text_input(inline, file).await? {
+        Some(text) => Ok(text),
+        None => read_text_path(Path::new("-")).await,
+    }
 }
 
 pub async fn load_optional_text_input(

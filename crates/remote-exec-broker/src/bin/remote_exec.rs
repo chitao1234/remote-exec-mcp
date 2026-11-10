@@ -3,10 +3,10 @@ use std::process::ExitCode;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use remote_exec_broker::cli::{
-    build_apply_patch_input, build_forward_ports_close_input, build_forward_ports_list_input,
-    build_forward_ports_open_input, build_view_image_input, emit_response,
-    emit_view_image_response, load_optional_text_input, parse_transfer_endpoint,
-    resolve_login_flag, write_image_output, write_stdin_pty_size,
+    WriteStdinCliInput, build_apply_patch_input, build_edit_input, build_forward_ports_close_input,
+    build_forward_ports_list_input, build_forward_ports_open_input, build_read_input,
+    build_view_image_input, build_write_input, build_write_stdin_input, emit_response,
+    emit_view_image_response, parse_transfer_endpoint, resolve_login_flag, write_image_output,
 };
 use remote_exec_broker::{Connection, RemoteExecClient, ToolResponse};
 use remote_exec_proto::public::{ForwardPortsInput, ListTargetsInput, TransferDestinationMode};
@@ -23,13 +23,23 @@ Exit codes:
 
 Examples:
   remote-exec --broker-config configs/broker.example.toml list-targets
-  remote-exec --broker-url http://127.0.0.1:8787/mcp exec --target builder-a \"uname -a\"
+  remote-exec --broker-url http://127.0.0.1:8787/mcp exec builder-a \"uname -a\"
 ";
 
 const TRANSFER_AFTER_HELP: &str = "\
 Endpoint format: <target>:<absolute-path>
 Repeat --source to transfer multiple inputs.
 For multi-source transfers, the destination path is treated as a directory root.
+";
+
+const WRITE_STDIN_AFTER_HELP: &str = "\
+Positional forms:
+  write-stdin <SESSION_ID> [CHARS]
+  write-stdin <TARGET> <SESSION_ID> [CHARS]
+
+The first argument is treated as a session id when it has the `sess_` form;
+otherwise it is the target and the second argument is the session id.
+Use --chars-file to read CHARS from a file or `-` instead of passing it inline.
 ";
 
 const EXIT_SUCCESS: u8 = 0;
@@ -64,6 +74,13 @@ impl CliError {
     fn connection(error: anyhow::Error) -> Self {
         Self {
             exit_code: EXIT_CONNECTION,
+            error,
+        }
+    }
+
+    fn tool(error: anyhow::Error) -> Self {
+        Self {
+            exit_code: EXIT_TOOL,
             error,
         }
     }
@@ -110,27 +127,51 @@ struct ConnectionArgs {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    #[command(about = "List configured targets using cached broker metadata.")]
+    #[command(
+        about = "List configured targets using cached broker metadata.",
+        alias = "list_targets",
+        visible_aliases = ["list", "ls"]
+    )]
     ListTargets,
     #[command(
         name = "exec-command",
         visible_alias = "exec",
+        alias = "exec_command",
         about = "Run a command on a configured target machine."
     )]
     Exec(ExecCommandArgs),
-    #[command(about = "Write to or poll an existing exec session.")]
+    #[command(
+        about = "Write to or poll an existing exec session.",
+        alias = "write_stdin",
+        after_help = WRITE_STDIN_AFTER_HELP
+    )]
     WriteStdin(WriteStdinArgs),
-    #[command(about = "Apply a patch on a configured target machine.")]
+    #[command(
+        about = "Apply a patch on a configured target machine.",
+        alias = "apply_patch"
+    )]
     ApplyPatch(ApplyPatchArgs),
-    #[command(about = "Read an image from a configured target machine.")]
+    #[command(
+        about = "Read an image from a configured target machine.",
+        alias = "view_image"
+    )]
     ViewImage(ViewImageArgs),
     #[command(
         about = "Transfer files or directory trees between local or configured targets.",
+        alias = "transfer_files",
+        visible_alias = "cp",
         after_help = TRANSFER_AFTER_HELP
     )]
     TransferFiles(TransferFilesArgs),
+    #[command(about = "Read a text file from a configured target machine.")]
+    Read(ReadArgs),
+    #[command(about = "Overwrite or create a text file on a configured target machine.")]
+    Write(WriteArgs),
+    #[command(about = "Replace text in a file on a configured target machine.")]
+    Edit(EditArgs),
     #[command(
         name = "forward-ports",
+        alias = "forward_ports",
         about = "Open, list, or close broker-mediated TCP/UDP port forwards."
     )]
     ForwardPorts(ForwardPortsArgs),
@@ -138,7 +179,7 @@ enum Command {
 
 #[derive(Args, Debug)]
 struct ExecCommandArgs {
-    #[arg(long, help = "Logical target name to run the command on.")]
+    #[arg(help = "Logical target name to run the command on.")]
     target: String,
 
     #[arg(help = "Shell command text to execute.")]
@@ -180,12 +221,14 @@ struct ExecCommandArgs {
 }
 
 #[derive(Args, Debug)]
-#[command(group(ArgGroup::new("input").args(["chars", "chars_file"])))]
 struct WriteStdinArgs {
-    #[arg(long, help = "Opaque public session id returned by exec-command.")]
-    session_id: String,
+    #[arg(help = "Public session id, or the target when followed by a session id.")]
+    first: String,
 
-    #[arg(long, help = "Inline text to write to the session. Omit to poll only.")]
+    #[arg(help = "Public session id or inline chars, after the first positional argument.")]
+    second: Option<String>,
+
+    #[arg(help = "Inline chars to write when a target and session id were provided.")]
     chars: Option<String>,
 
     #[arg(
@@ -211,26 +254,21 @@ struct WriteStdinArgs {
         help = "Resize PTY columns for this live session; requires --pty-rows."
     )]
     pty_cols: Option<u16>,
-
-    #[arg(long, help = "Optional target check for the session.")]
-    target: Option<String>,
 }
 
 #[derive(Args, Debug)]
 #[command(group(
-    ArgGroup::new("patch_input")
-        .required(true)
-        .args(["input", "input_file"])
+    ArgGroup::new("patch_input").args(["input", "input_file"])
 ))]
 struct ApplyPatchArgs {
-    #[arg(long, help = "Logical target name to apply the patch on.")]
+    #[arg(help = "Logical target name to apply the patch on.")]
     target: String,
+
+    #[arg(help = "Inline patch text to apply. Omit to read from stdin.")]
+    input: Option<String>,
 
     #[arg(long, help = "Working directory used to resolve patch paths.")]
     workdir: Option<String>,
-
-    #[arg(long, help = "Inline patch text to apply.")]
-    input: Option<String>,
 
     #[arg(
         long,
@@ -241,10 +279,10 @@ struct ApplyPatchArgs {
 
 #[derive(Args, Debug)]
 struct ViewImageArgs {
-    #[arg(long, help = "Logical target name to read the image from.")]
+    #[arg(help = "Logical target name to read the image from.")]
     target: String,
 
-    #[arg(long, help = "Absolute image path on the selected target.")]
+    #[arg(help = "Absolute image path on the selected target.")]
     path: String,
 
     #[arg(
@@ -264,6 +302,85 @@ struct ViewImageArgs {
         help = "Write the decoded image bytes to this local output path."
     )]
     out: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+struct ReadArgs {
+    #[arg(help = "Logical target name to read the file from.")]
+    target: String,
+
+    #[arg(help = "File path on the selected target.")]
+    path: String,
+
+    #[arg(long, help = "Zero-based line offset to start reading from.")]
+    offset: Option<u64>,
+
+    #[arg(long, help = "Maximum number of lines to return.")]
+    limit: Option<u64>,
+}
+
+#[derive(Args, Debug)]
+#[command(group(
+    ArgGroup::new("content_source").args(["content", "content_file"])
+))]
+struct WriteArgs {
+    #[arg(help = "Logical target name to write the file on.")]
+    target: String,
+
+    #[arg(help = "File path on the selected target.")]
+    path: String,
+
+    #[arg(help = "Inline text content to write. Omit to read from stdin.")]
+    content: Option<String>,
+
+    #[arg(
+        long,
+        help = "Read content from a file, or use `-` to read from stdin."
+    )]
+    content_file: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+#[command(group(
+    ArgGroup::new("old_source")
+        .required(true)
+        .args(["old_string", "old_string_file"])
+))]
+#[command(group(
+    ArgGroup::new("new_source")
+        .args(["new_string", "new_string_file"])
+))]
+struct EditArgs {
+    #[arg(help = "Logical target name to edit the file on.")]
+    target: String,
+
+    #[arg(help = "File path on the selected target.")]
+    path: String,
+
+    #[arg(help = "Inline text to replace. Omit when using --old-string-file.")]
+    old_string: Option<String>,
+
+    #[arg(help = "Inline replacement text. Omit to delete the matched text.")]
+    new_string: Option<String>,
+
+    #[arg(
+        long,
+        help = "Read the text to replace from a file, or use `-` to read from stdin."
+    )]
+    old_string_file: Option<PathBuf>,
+
+    #[arg(
+        long,
+        help = "Read replacement text from a file, or use `-` to read from stdin."
+    )]
+    new_string_file: Option<PathBuf>,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Replace every match instead of requiring a unique match."
+    )]
+    replace_all: bool,
 }
 
 #[derive(Args, Debug)]
@@ -458,6 +575,9 @@ async fn run_command(client: &RemoteExecClient, command: Command, json: bool) ->
         Command::WriteStdin(args) => run_write_stdin(client, args, json).await,
         Command::ApplyPatch(args) => run_apply_patch(client, args, json).await,
         Command::ViewImage(args) => run_view_image(client, args, json).await,
+        Command::Read(args) => run_read(client, args, json).await,
+        Command::Write(args) => run_write(client, args, json).await,
+        Command::Edit(args) => run_edit(client, args, json).await,
         Command::TransferFiles(args) => run_transfer_files(client, args, json).await,
         Command::ForwardPorts(args) => run_forward_ports(client, args, json).await,
     }
@@ -498,6 +618,9 @@ async fn run_view_image(
 ) -> CliResult<u8> {
     let output_path = args.out;
     let input = build_view_image_input(args.target, args.path, args.workdir, args.detail);
+    client
+        .ensure_tool_available("view_image")
+        .map_err(CliError::tool)?;
     let response = client
         .call_tool("view_image", &input)
         .await
@@ -511,6 +634,33 @@ async fn run_view_image(
     }
     emit_view_image_response(&response, json, output_path.as_deref()).map_err(CliError::usage)?;
     Ok(status_code(&response))
+}
+
+async fn run_read(client: &RemoteExecClient, args: ReadArgs, json: bool) -> CliResult<u8> {
+    let input = build_read_input(args.target, args.path, args.offset, args.limit);
+    call_and_emit(client, "read", &input, json).await
+}
+
+async fn run_write(client: &RemoteExecClient, args: WriteArgs, json: bool) -> CliResult<u8> {
+    let input = build_write_input(args.target, args.path, args.content, args.content_file)
+        .await
+        .map_err(CliError::usage)?;
+    call_and_emit(client, "write", &input, json).await
+}
+
+async fn run_edit(client: &RemoteExecClient, args: EditArgs, json: bool) -> CliResult<u8> {
+    let input = build_edit_input(
+        args.target,
+        args.path,
+        args.old_string,
+        args.old_string_file,
+        args.new_string,
+        args.new_string_file,
+        args.replace_all,
+    )
+    .await
+    .map_err(CliError::usage)?;
+    call_and_emit(client, "edit", &input, json).await
 }
 
 async fn run_transfer_files(
@@ -547,14 +697,17 @@ fn exec_command_input(args: ExecCommandArgs) -> remote_exec_proto::public::ExecC
 async fn write_stdin_input(
     args: WriteStdinArgs,
 ) -> anyhow::Result<remote_exec_proto::public::WriteStdinInput> {
-    Ok(remote_exec_proto::public::WriteStdinInput {
-        session_id: args.session_id,
-        chars: load_optional_text_input(args.chars, args.chars_file).await?,
+    build_write_stdin_input(WriteStdinCliInput {
+        first: args.first,
+        second: args.second,
+        chars: args.chars,
+        chars_file: args.chars_file,
         yield_time_ms: args.yield_time_ms,
         max_output_tokens: args.max_output_tokens,
-        pty_size: write_stdin_pty_size(args.pty_rows, args.pty_cols)?,
-        target: args.target,
+        pty_rows: args.pty_rows,
+        pty_cols: args.pty_cols,
     })
+    .await
 }
 
 fn transfer_files_input(
@@ -611,6 +764,7 @@ async fn call_and_emit<T>(
 where
     T: Serialize + ?Sized,
 {
+    client.ensure_tool_available(tool).map_err(CliError::tool)?;
     let response = client
         .call_tool(tool, input)
         .await

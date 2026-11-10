@@ -19,6 +19,35 @@ async fn run_cli(args: &[&str]) -> std::process::Output {
     .unwrap()
 }
 
+async fn run_cli_with_stdin(args: &[&str], stdin: &str) -> std::process::Output {
+    let args = args
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect::<Vec<_>>();
+    let stdin = stdin.to_string();
+    tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+
+        let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
+            .args(&args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stdin.as_bytes())
+            .unwrap();
+        child.wait_with_output()
+    })
+    .await
+    .unwrap()
+    .unwrap()
+}
+
 fn assert_exit_code(output: &std::process::Output, expected: i32) {
     assert_eq!(
         output.status.code(),
@@ -46,14 +75,7 @@ async fn remote_exec_cli_local_macos_shells_load_login_profiles() {
                 .env_remove("LOGIN_SENTINEL")
                 .arg("--broker-config")
                 .arg(&fixture.config_path)
-                .args([
-                    "--json",
-                    "exec-command",
-                    "--target",
-                    "local",
-                    "--shell",
-                    shell,
-                ])
+                .args(["--json", "exec-command", "local", "--shell", shell])
                 .arg(if login { "--login" } else { "--no-login" })
                 .args([
                     "--yield-time-ms",
@@ -136,7 +158,6 @@ async fn remote_exec_cli_returns_usage_code_for_input_errors() {
         "--broker-config",
         fixture.config_path.to_str().unwrap(),
         "apply-patch",
-        "--target",
         DEFAULT_TEST_TARGET,
         "--input-file",
         missing_patch.to_str().unwrap(),
@@ -188,7 +209,6 @@ async fn remote_exec_cli_returns_tool_code_for_tool_errors() {
         "--broker-config",
         fixture.config_path.to_str().unwrap(),
         "exec-command",
-        "--target",
         "missing-target",
         "printf nope",
     ])
@@ -321,6 +341,8 @@ async fn remote_exec_cli_help_documents_stdin_backed_inputs() {
     );
     let write_stdin_stdout = String::from_utf8(write_stdin.stdout).unwrap();
     assert!(write_stdin_stdout.contains("use `-` to read from stdin"));
+    assert!(write_stdin_stdout.contains("write-stdin <SESSION_ID> [CHARS]"));
+    assert!(write_stdin_stdout.contains("write-stdin <TARGET> <SESSION_ID> [CHARS]"));
 }
 
 #[tokio::test]
@@ -335,7 +357,7 @@ async fn remote_exec_cli_exec_alias_shows_exec_command_help() {
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Run a command on a configured target machine."));
-    assert!(stdout.contains("--target <TARGET>"));
+    assert!(stdout.contains("<TARGET> <CMD>"));
 }
 
 #[tokio::test]
@@ -441,5 +463,336 @@ async fn remote_exec_cli_forward_ports_opens_lists_and_closes_local_tcp_forward(
     assert_eq!(
         close_response["structured_content"]["forwards"][0]["status"],
         "closed"
+    );
+}
+
+async fn enable_file_tools(config_path: &std::path::Path) {
+    let mut config = tokio::fs::read_to_string(config_path).await.unwrap();
+    config.push_str("\n[tools.file]\nread = true\nwrite = true\nedit = true\n");
+    tokio::fs::write(config_path, config).await.unwrap();
+}
+
+#[tokio::test]
+async fn remote_exec_cli_reads_writes_and_edits_files() {
+    let fixture = support::spawners::spawn_broker_config_local_only().await;
+    enable_file_tools(&fixture.config_path).await;
+    let file_path = fixture._tempdir.path().join("cli-file.txt");
+    let file_path = file_path.to_str().unwrap();
+    let config_path = fixture.config_path.to_str().unwrap();
+
+    let write = run_cli(&[
+        "--broker-config",
+        config_path,
+        "write",
+        "local",
+        file_path,
+        "alpha\nbeta\n",
+    ])
+    .await;
+    assert!(
+        write.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&write.stdout),
+        String::from_utf8_lossy(&write.stderr)
+    );
+    assert_eq!(
+        tokio::fs::read_to_string(file_path).await.unwrap(),
+        "alpha\nbeta\n"
+    );
+
+    let read = run_cli(&["--broker-config", config_path, "read", "local", file_path]).await;
+    assert!(
+        read.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&read.stdout),
+        String::from_utf8_lossy(&read.stderr)
+    );
+    let read_stdout = String::from_utf8(read.stdout).unwrap();
+    assert!(read_stdout.contains("1: alpha"));
+    assert!(read_stdout.contains("2: beta"));
+
+    let edit = run_cli(&[
+        "--broker-config",
+        config_path,
+        "edit",
+        "local",
+        file_path,
+        "beta",
+        "gamma",
+    ])
+    .await;
+    assert!(
+        edit.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&edit.stdout),
+        String::from_utf8_lossy(&edit.stderr)
+    );
+    assert_eq!(
+        tokio::fs::read_to_string(file_path).await.unwrap(),
+        "alpha\ngamma\n"
+    );
+}
+
+#[tokio::test]
+async fn remote_exec_cli_reads_write_content_from_stdin() {
+    let fixture = support::spawners::spawn_broker_config_local_only().await;
+    enable_file_tools(&fixture.config_path).await;
+    let file_path = fixture._tempdir.path().join("cli-stdin.txt");
+    let file_path = file_path.to_str().unwrap();
+
+    let output = run_cli_with_stdin(
+        &[
+            "--broker-config",
+            fixture.config_path.to_str().unwrap(),
+            "write",
+            "local",
+            file_path,
+            "--content-file",
+            "-",
+        ],
+        "from stdin\n",
+    )
+    .await;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        tokio::fs::read_to_string(file_path).await.unwrap(),
+        "from stdin\n"
+    );
+}
+
+#[tokio::test]
+async fn remote_exec_cli_reports_disabled_file_tools() {
+    let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;
+    let output = run_cli(&[
+        "--broker-config",
+        fixture.config_path.to_str().unwrap(),
+        "read",
+        DEFAULT_TEST_TARGET,
+        "sample.txt",
+    ])
+    .await;
+
+    assert_exit_code(&output, 5);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("tools.file.read = true"),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr
+    );
+}
+
+#[tokio::test]
+async fn remote_exec_cli_help_lists_file_tools_and_positional_paths() {
+    let output = run_cli(&["--help"]).await;
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    for command in ["read", "write", "edit"] {
+        assert!(
+            stdout.contains(command),
+            "missing `{command}` in CLI help:\n{stdout}"
+        );
+    }
+
+    let view_image = run_cli(&["view-image", "--help"]).await;
+    assert!(
+        view_image.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&view_image.stdout),
+        String::from_utf8_lossy(&view_image.stderr)
+    );
+    let view_image_stdout = String::from_utf8(view_image.stdout).unwrap();
+    assert!(view_image_stdout.contains("<TARGET> <PATH>"));
+}
+
+#[tokio::test]
+async fn remote_exec_cli_accepts_mcp_style_tool_name_aliases() {
+    let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;
+    let output = run_cli(&[
+        "--broker-config",
+        fixture.config_path.to_str().unwrap(),
+        "--json",
+        "list_targets",
+    ])
+    .await;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        response["structured_content"]["targets"][0]["name"],
+        DEFAULT_TEST_TARGET
+    );
+}
+
+#[tokio::test]
+async fn remote_exec_cli_list_and_cp_aliases_work() {
+    let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;
+    for alias in ["list", "ls"] {
+        let output = run_cli(&[
+            "--broker-config",
+            fixture.config_path.to_str().unwrap(),
+            "--json",
+            alias,
+        ])
+        .await;
+        assert!(
+            output.status.success(),
+            "alias={alias}\nstdout:\n{}\n\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            response["structured_content"]["targets"][0]["name"],
+            DEFAULT_TEST_TARGET
+        );
+    }
+
+    let cp_help = run_cli(&["cp", "--help"]).await;
+    assert!(
+        cp_help.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&cp_help.stdout),
+        String::from_utf8_lossy(&cp_help.stderr)
+    );
+    assert!(
+        String::from_utf8(cp_help.stdout)
+            .unwrap()
+            .contains("Endpoint format: <target>:<absolute-path>")
+    );
+}
+
+#[tokio::test]
+async fn remote_exec_cli_write_stdin_accepts_session_first_and_target_first_forms() {
+    let fixture = support::spawners::spawn_broker_config_local_only().await;
+    let config_path = fixture.config_path.to_str().unwrap();
+    let session_id = "sess_00000000000000000000000000000000";
+
+    for args in [
+        vec!["write-stdin", session_id],
+        vec!["write-stdin", session_id, "input"],
+        vec!["write-stdin", "local", session_id],
+        vec!["write-stdin", "local", session_id, "input"],
+    ] {
+        let mut command = vec!["--broker-config", config_path];
+        command.extend(args.iter().copied());
+        let output = run_cli(&command).await;
+        assert_exit_code(&output, 5);
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(session_id),
+            "args={args:?}\nstdout:\n{}\n\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[tokio::test]
+async fn remote_exec_cli_write_stdin_rejects_invalid_session_after_target() {
+    let fixture = support::spawners::spawn_broker_config_local_only().await;
+    let output = run_cli(&[
+        "--broker-config",
+        fixture.config_path.to_str().unwrap(),
+        "write-stdin",
+        "local",
+        "not-a-session",
+    ])
+    .await;
+
+    assert_exit_code(&output, 2);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("not a public session id"),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[tokio::test]
+async fn remote_exec_cli_apply_patch_reads_patch_from_stdin() {
+    let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;
+    let output = run_cli_with_stdin(
+        &[
+            "--broker-config",
+            fixture.config_path.to_str().unwrap(),
+            "apply-patch",
+            DEFAULT_TEST_TARGET,
+        ],
+        "*** Begin Patch\n*** End Patch\n",
+    )
+    .await;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[tokio::test]
+async fn remote_exec_cli_apply_patch_accepts_positional_input() {
+    let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;
+    let output = run_cli(&[
+        "--broker-config",
+        fixture.config_path.to_str().unwrap(),
+        "apply-patch",
+        DEFAULT_TEST_TARGET,
+        "*** Begin Patch\n*** End Patch\n",
+    ])
+    .await;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[tokio::test]
+async fn remote_exec_cli_write_reads_content_from_stdin_when_omitted() {
+    let fixture = support::spawners::spawn_broker_config_local_only().await;
+    enable_file_tools(&fixture.config_path).await;
+    let file_path = fixture._tempdir.path().join("cli-implicit-stdin.txt");
+    let file_path = file_path.to_str().unwrap();
+
+    let output = run_cli_with_stdin(
+        &[
+            "--broker-config",
+            fixture.config_path.to_str().unwrap(),
+            "write",
+            "local",
+            file_path,
+        ],
+        "implicit stdin\n",
+    )
+    .await;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        tokio::fs::read_to_string(file_path).await.unwrap(),
+        "implicit stdin\n"
     );
 }

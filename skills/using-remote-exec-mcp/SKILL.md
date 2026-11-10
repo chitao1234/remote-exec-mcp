@@ -280,33 +280,22 @@ Use the CLI only when requested or when direct MCP tools are unavailable. Pass
 the broker URL supplied for the current environment:
 
 ```bash
-remote-exec --broker-url "$BROKER_URL" list-targets
-
-remote-exec --broker-url "$BROKER_URL" \
-  exec --target builder-a --workdir /srv/project 'cargo test'
-
-remote-exec --broker-url "$BROKER_URL" \
-  apply-patch --target builder-a --workdir /srv/project --input-file -
-
-remote-exec --broker-url "$BROKER_URL" \
-  transfer-files \
-  --source local:/tmp/source.txt \
-  --destination builder-a:/tmp/dest.txt \
-  --overwrite replace \
-  --create-parent
-
-remote-exec --broker-url "$BROKER_URL" \
-  forward-ports open \
-  --listen-side local \
-  --connect-side builder-a \
-  --forward tcp:127.0.0.1:15432=127.0.0.1:5432
+remote-exec --broker-url "$BROKER_URL" ls
+remote-exec --broker-url "$BROKER_URL" exec builder-a --workdir /srv/project 'cargo test'
+remote-exec --broker-url "$BROKER_URL" apply-patch builder-a --input-file -
+remote-exec --broker-url "$BROKER_URL" read builder-a /srv/project/src/main.rs
+remote-exec --broker-url "$BROKER_URL" write builder-a /tmp/notes.txt "hello"
+remote-exec --broker-url "$BROKER_URL" edit builder-a /tmp/notes.txt hello goodbye
+remote-exec --broker-url "$BROKER_URL" write-stdin builder-a "$SESSION_ID" "ls -la\n"
+remote-exec --broker-url "$BROKER_URL" cp --source local:/tmp/source.txt --destination builder-a:/tmp/dest.txt
+remote-exec --broker-url "$BROKER_URL" forward-ports open --listen-side local --connect-side builder-a --forward tcp:127.0.0.1:15432=127.0.0.1:5432
 ```
 
-Use kebab-case CLI names such as `list-targets`, `write-stdin`, and
-`transfer-files`. Use `exec` as the short form of `exec-command`. Use `--json`
-for structured output, `--input-file -` for patch input from stdin, and
-`--chars-file -` for session input from stdin. Run `remote-exec --help` or a
-subcommand's `--help` for less common flags.
+Target is the first positional. `ls` is `list-targets`, `cp` is
+`transfer-files`, and `exec` is `exec-command`. File tools need `[tools.file]`.
+`write` and `apply-patch` read stdin when their input is omitted.
+`write-stdin` takes `<SESSION_ID> [CHARS]` or `<TARGET> <SESSION_ID> [CHARS]`.
+Run `remote-exec --help` for the rest.
 
 ## Follow Common Workflows
 

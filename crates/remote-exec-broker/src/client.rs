@@ -53,6 +53,13 @@ impl RemoteExecClient {
         Ok(Self { transport })
     }
 
+    pub fn ensure_tool_available(&self, name: &str) -> anyhow::Result<()> {
+        match &self.transport {
+            ClientTransport::Direct(client) => client.ensure_tool_available(name),
+            ClientTransport::Mcp(client) => client.ensure_tool_available(name),
+        }
+    }
+
     pub async fn call_tool<T>(&self, name: &str, arguments: &T) -> anyhow::Result<ToolResponse>
     where
         T: serde::Serialize + ?Sized,
@@ -179,6 +186,18 @@ async fn connect_streamable_http(url: &str) -> anyhow::Result<McpBrokerClient> {
 }
 
 impl DirectBrokerClient {
+    fn ensure_tool_available(&self, name: &str) -> anyhow::Result<()> {
+        let Some(tool) = BrokerTool::from_name(name) else {
+            anyhow::bail!("unknown remote-exec tool `{name}`");
+        };
+        anyhow::ensure!(
+            tool.enabled_by_config(&self.state.tools),
+            "{}",
+            unavailable_tool_message(name)
+        );
+        Ok(())
+    }
+
     async fn call_tool(&self, name: &str, arguments: Map<String, Value>) -> ToolResponse {
         ToolResponse::from_call_tool_result(
             BrokerTool::call_direct(
@@ -195,6 +214,27 @@ impl DirectBrokerClient {
 impl McpBrokerClient {
     fn tool_name(&self, name: &str) -> String {
         resolve_mcp_tool_name(&self.tool_names, name)
+    }
+
+    fn ensure_tool_available(&self, name: &str) -> anyhow::Result<()> {
+        let mcp_name = self.tool_name(name);
+        anyhow::ensure!(
+            self.tool_names.contains(&mcp_name),
+            "{}",
+            unavailable_tool_message(name)
+        );
+        Ok(())
+    }
+}
+
+fn unavailable_tool_message(name: &str) -> String {
+    match name {
+        "read" | "write" | "edit" => format!(
+            "tool `{name}` is not enabled by the broker; set `tools.file.{name} = true` in the broker config to enable it"
+        ),
+        _ => format!(
+            "tool `{name}` is not advertised by the broker; check the broker configuration and version"
+        ),
     }
 }
 
