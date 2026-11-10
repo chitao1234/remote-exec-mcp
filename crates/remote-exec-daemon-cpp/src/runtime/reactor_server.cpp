@@ -166,16 +166,28 @@ struct ReverseConn : public std::enable_shared_from_this<ReverseConn> {
           registration_offset(0U), timer(0U), timer_armed(false), finished(false) {}
 
     ~ReverseConn() {
-        if (!finished) {
-            finished = true;
-            cancel_timer();
+        if (finished) {
+            return;
+        }
+        finished = true;
+        if (server != nullptr && server->shutting_down_.load()) {
+            // The loop may already be stopping or being destroyed. Its
+            // callbacks and timers are dropped with the loop; only release
+            // our own sockets here.
             if (stream) {
-                server->loops_[0]->remove(stream->native_fd());
                 stream->close();
             } else if (socket.valid()) {
-                server->loops_[0]->remove(socket.get());
                 socket.reset();
             }
+            return;
+        }
+        cancel_timer();
+        if (stream) {
+            server->loops_[0]->remove(stream->native_fd());
+            stream->close();
+        } else if (socket.valid()) {
+            server->loops_[0]->remove(socket.get());
+            socket.reset();
         }
     }
 
