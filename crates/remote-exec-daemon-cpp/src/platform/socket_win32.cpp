@@ -476,14 +476,23 @@ int socket_error_option(SOCKET socket, int* socket_error) {
 }
 
 int set_socket_reuseaddr(SOCKET socket) {
+    // Do not use SO_REUSEADDR on Windows: it lets a second socket bind and
+    // steal traffic from a live listener. Prefer exclusive address use where
+    // the headers expose it; otherwise Windows' default bind is already
+    // exclusive, including Windows 9x.
+#ifdef SO_EXCLUSIVEADDRUSE
     int yes = 1;
     return setsockopt(
         socket,
         SOL_SOCKET,
-        SO_REUSEADDR,
+        SO_EXCLUSIVEADDRUSE,
         reinterpret_cast<const char*>(&yes),
         sizeof(yes)
     );
+#else
+    (void)socket;
+    return 0;
+#endif
 }
 
 int set_socket_ipv6_only(SOCKET socket) {
