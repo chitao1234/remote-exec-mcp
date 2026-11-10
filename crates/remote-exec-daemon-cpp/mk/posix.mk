@@ -118,8 +118,6 @@ $(HOST_TEST_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp $(POSIX_CONFIG_HEADER) | $(BUILD_
 # newlines from a foreach whose body contains multiple separate eval calls.
 $(foreach test,$(HOST_POSIX_TESTS),$(eval $(call register_host_test,$(test))))
 
-test-server-streaming: $(HOST_SERVER_STREAMING_TEST_TARGET)
-
 test-bundle-posix: all-posix $(HOST_TEST_BINS) $(POSIX_TEST_BUNDLE_RUNNER)
 	mkdir -p $(POSIX_TEST_BUNDLE_DIR)/config $(POSIX_TEST_BUNDLE_DIR)/tests
 	cp $(POSIX_TARGET) $(POSIX_APPLY_PATCH_TARGET) $(HOST_TEST_BINS) $(POSIX_TEST_BUNDLE_DIR)/
@@ -152,4 +150,4 @@ stress-posix:
 		i=$$((i + 1)); \
 	done
 
-.PHONY: all-posix apply-patch-posix $(HOST_TEST_PHONY_TARGETS) test-host-build-version test-host-apply-patch-cli test-server-streaming test-bundle-posix check-posix force-posix-config stress-posix
+.PHONY: all-posix apply-patch-posix $(HOST_TEST_PHONY_TARGETS) test-host-build-version test-host-apply-patch-cli test-bundle-posix check-posix force-posix-config stress-posix

@@ -10,6 +10,7 @@
 
 #include "core/config.h"
 #include "core/event_loop.h"
+#include "exec/exec_types.h"
 #include "http/http_helpers.h"
 #include "platform/basic_mutex.h"
 #include "runtime/route_context.h"
@@ -93,8 +94,10 @@ private:
     void detach_output(const std::shared_ptr<ExecSession>& session);
     void remove_session(const std::shared_ptr<ExecSession>& session);
     void retire_session(const std::shared_ptr<ExecSession>& session);
-    HttpResponse make_response(const ExecSessionResult& result, unsigned long max_output_tokens)
-        const;
+    HttpResponse make_response(
+        const ExecSessionResult& result,
+        unsigned long max_output_tokens
+    ) const;
     HttpResponse disabled_response() const;
     HttpResponse busy_response() const;
 

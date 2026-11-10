@@ -1,8 +1,8 @@
 #include <string>
 
 #include "core/common.h"
+#include "exec/exec_types.h"
 #include "exec/process_session.h"
-#include "exec/session_store.h"
 #include "patch/patch_engine.h"
 #include "platform/platform.h"
 #include "rpc/capabilities_http_codec.h"

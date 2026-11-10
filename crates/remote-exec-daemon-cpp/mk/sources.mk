@@ -119,25 +119,14 @@ POSIX_PROCESS_SESSION_SRCS = \
 	$(PROCESS_ENVIRONMENT_SRCS) \
 	$(POSIX_CHILD_REAPER_SRCS)
 
-DAEMON_THREAD_SRCS = $(SOURCE_PREFIX)src/runtime/daemon_thread.cpp
-
-APP_CONTEXT_SRCS = $(SOURCE_PREFIX)src/runtime/app_context.cpp
-
 RUNTIME_SRCS = \
-	$(APP_CONTEXT_SRCS) \
 	$(SOURCE_PREFIX)src/runtime/server.cpp \
-	$(SOURCE_PREFIX)src/runtime/server_runtime.cpp \
-	$(SOURCE_PREFIX)src/runtime/connection_manager.cpp \
-	$(DAEMON_THREAD_SRCS)
+	$(SOURCE_PREFIX)src/runtime/daemon_thread.cpp
 
 PLATFORM_SRCS = $(SOURCE_PREFIX)src/platform/platform.cpp
 
-CONNECTION_TRANSPORT_SRCS = $(SOURCE_PREFIX)src/http/connection_transport.cpp
-
 HTTP_SRCS = \
-	$(CONNECTION_TRANSPORT_SRCS) \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
-	$(SOURCE_PREFIX)src/http/http_connection.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/http/http_request.cpp
 
@@ -152,13 +141,9 @@ ROUTE_SRCS = \
 	$(IMAGE_SRCS) \
 	$(SOURCE_PREFIX)src/rpc/server_contract.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_request_utils.cpp \
-	$(SOURCE_PREFIX)src/rpc/server_route_executor.cpp \
-	$(SOURCE_PREFIX)src/rpc/server_routes.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_common.cpp \
-	$(SOURCE_PREFIX)src/rpc/server_route_exec.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_file.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_image.cpp \
-	$(SOURCE_PREFIX)src/rpc/server_route_port_tunnel.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_route_transfer.cpp \
 	$(SOURCE_PREFIX)src/rpc/file_request_utils.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_http_codec.cpp \
@@ -171,21 +156,7 @@ PORT_FORWARD_SRCS = \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_endpoint.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_error.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_socket_ops.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_common.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_frame.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_sender.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_service.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_service_expiry.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_session.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_session_teardown.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_spawn.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_streams.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_transport.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_tcp.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_udp.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_workers.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_tunnel_error.cpp
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_frame.cpp
 
 BASE64_SRCS = $(SOURCE_PREFIX)src/codec/base64_codec.cpp
 
@@ -193,14 +164,7 @@ PATH_UTILS_SRCS = $(SOURCE_PREFIX)src/platform/path_utils.cpp
 
 WIN32_ERROR_SRCS = $(SOURCE_PREFIX)src/platform/win32_error.cpp
 
-SESSION_STORE_SUPPORT_SRCS = $(SOURCE_PREFIX)src/exec/output_renderer.cpp
-
-EXEC_HTTP_CODEC_SRCS = $(SOURCE_PREFIX)src/rpc/exec_http_codec.cpp
-
-SESSION_STORE_SRCS = \
-	$(SESSION_STORE_SUPPORT_SRCS) \
-	$(SOURCE_PREFIX)src/exec/session_store.cpp \
-	$(SOURCE_PREFIX)src/exec/session_pump.cpp
+OUTPUT_RENDERER_SRCS = $(SOURCE_PREFIX)src/exec/output_renderer.cpp
 
 BASIC_MUTEX_POSIX_SRCS = \
 	$(SOURCE_PREFIX)src/platform/basic_mutex.cpp \
@@ -210,9 +174,6 @@ BASIC_MUTEX_WINDOWS_SRCS = \
 	$(SOURCE_PREFIX)src/platform/basic_mutex.cpp \
 	$(SOURCE_PREFIX)src/platform/basic_mutex_win32.cpp
 
-WAKEUP_PIPE_POSIX_SRCS = $(SOURCE_PREFIX)src/platform/wakeup_pipe.cpp
-WAKEUP_PIPE_WINDOWS_SRCS = $(SOURCE_PREFIX)src/platform/wakeup_pipe_win32.cpp
-
 SOCKET_COMMON_SRCS = $(SOURCE_PREFIX)src/platform/socket.cpp
 SOCKET_POSIX_SRCS = \
 	$(SOCKET_COMMON_SRCS) \
@@ -220,18 +181,6 @@ SOCKET_POSIX_SRCS = \
 SOCKET_WINDOWS_SRCS = \
 	$(SOCKET_COMMON_SRCS) \
 	$(SOURCE_PREFIX)src/platform/socket_win32.cpp
-
-SERVER_TRANSPORT_POSIX_SRCS = \
-	$(CONNECTION_TRANSPORT_SRCS) \
-	$(SOCKET_POSIX_SRCS) \
-	$(SOURCE_PREFIX)src/http/server_transport.cpp \
-	$(SOURCE_PREFIX)src/http/server_transport_posix.cpp
-
-SERVER_TRANSPORT_WINDOWS_SRCS = \
-	$(CONNECTION_TRANSPORT_SRCS) \
-	$(SOCKET_WINDOWS_SRCS) \
-	$(SOURCE_PREFIX)src/http/server_transport.cpp \
-	$(SOURCE_PREFIX)src/http/server_transport_win32.cpp
 
 REACTOR_SRCS = \
 	$(SOURCE_PREFIX)src/core/byte_buffer.cpp \
@@ -260,7 +209,6 @@ BASE_COMMON_SRCS_NO_MAIN = \
 	$(PATH_UTILS_SRCS) \
 	$(SHELL_POLICY_SRCS) \
 	$(RUNTIME_SRCS) \
-	$(SESSION_STORE_SRCS) \
 	$(CAPABILITIES_SRCS) \
 	$(PATCH_SRCS) \
 	$(ROUTE_SRCS) \
@@ -269,20 +217,19 @@ BASE_COMMON_SRCS_NO_MAIN = \
 	$(TRANSFER_SRCS) \
 	$(POLICY_SRCS) \
 	$(RPC_FAILURE_SRCS) \
+	$(OUTPUT_RENDERER_SRCS) \
 	$(REACTOR_SRCS)
 
 POSIX_BASE_SRCS_NO_MAIN = \
 	$(BASE_COMMON_SRCS_NO_MAIN) \
-	$(SERVER_TRANSPORT_POSIX_SRCS) \
-	$(BASIC_MUTEX_POSIX_SRCS) \
-	$(WAKEUP_PIPE_POSIX_SRCS)
+	$(SOCKET_POSIX_SRCS) \
+	$(BASIC_MUTEX_POSIX_SRCS)
 
 WINDOWS_BASE_SRCS_NO_MAIN = \
 	$(BASE_COMMON_SRCS_NO_MAIN) \
-	$(SERVER_TRANSPORT_WINDOWS_SRCS) \
+	$(SOCKET_WINDOWS_SRCS) \
 	$(WIN32_ERROR_SRCS) \
-	$(BASIC_MUTEX_WINDOWS_SRCS) \
-	$(WAKEUP_PIPE_WINDOWS_SRCS)
+	$(BASIC_MUTEX_WINDOWS_SRCS)
 
 POSIX_SRCS = \
 	$(POSIX_BASE_SRCS_NO_MAIN) \
@@ -367,189 +314,8 @@ HOST_HTTP_REQUEST_SRCS = \
 	$(TEXT_UTILS_SRCS) \
 	$(TEXT_ENCODING_ACTIVE_SRCS)
 
-HOST_SERVER_TRANSPORT_TEST_COMMON_SRCS = \
-	$(SOURCE_PREFIX)tests/test_server_transport.cpp \
-	$(SOURCE_PREFIX)src/http/http_codec.cpp \
-	$(SOURCE_PREFIX)src/http/http_request.cpp \
-	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
-	$(JSON_SRCS) \
-	$(PLATFORM_SRCS) \
-	$(TEXT_UTILS_SRCS) \
-	$(TEXT_ENCODING_ACTIVE_SRCS)
-
-HOST_SERVER_TRANSPORT_SRCS = \
-	$(HOST_SERVER_TRANSPORT_TEST_COMMON_SRCS) \
-	$(SERVER_TRANSPORT_POSIX_SRCS)
-
-WINDOWS_SERVER_TRANSPORT_TEST_SRCS = \
-	$(HOST_SERVER_TRANSPORT_TEST_COMMON_SRCS) \
-	$(SERVER_TRANSPORT_WINDOWS_SRCS) \
-	$(LOGGING_SRCS) \
-	$(PATH_UTILS_SRCS) \
-	$(WIN32_ERROR_SRCS)
-
-SERVER_STREAMING_TEST_COMMON_SRCS = \
-	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
-	$(SOURCE_PREFIX)tests/test_server_streaming.cpp \
-	$(SOURCE_PREFIX)tests/test_server_streaming_shared.cpp \
-	$(SOURCE_PREFIX)tests/test_server_streaming_routes.cpp \
-	$(SOURCE_PREFIX)tests/test_server_streaming_protocol.cpp \
-	$(SOURCE_PREFIX)tests/test_server_streaming_tcp.cpp \
-	$(SOURCE_PREFIX)tests/test_server_streaming_udp.cpp \
-	$(SOURCE_PREFIX)tests/test_server_streaming_limits.cpp \
-	$(SOURCE_PREFIX)tests/test_server_streaming_lifecycle.cpp
-
-HOST_SERVER_STREAMING_SRCS = \
-	$(SERVER_STREAMING_TEST_COMMON_SRCS) \
-	$(POSIX_BASE_SRCS_NO_MAIN) \
-	$(POSIX_PROCESS_SESSION_SRCS)
-
-WINDOWS_SERVER_STREAMING_SRCS = \
-	$(SERVER_STREAMING_TEST_COMMON_SRCS) \
-	$(WINDOWS_BASE_SRCS_NO_MAIN) \
-	$(WINDOWS_DAEMON_SUPPORT_SRCS_NO_ERROR)
-
-HOST_SESSION_STORE_SRCS = \
-	$(SOURCE_PREFIX)tests/test_session_store.cpp \
-	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
-	$(BASE_COMMON_SRCS_NO_MAIN) \
-	$(SESSION_STORE_SRCS) \
-	$(EXEC_HTTP_CODEC_SRCS) \
-	$(DAEMON_THREAD_SRCS) \
-	$(POSIX_PROCESS_SESSION_SRCS) \
-	$(SERVER_TRANSPORT_POSIX_SRCS) \
-	$(WAKEUP_PIPE_POSIX_SRCS) \
-	$(PLATFORM_SRCS) \
-	$(PATH_UTILS_SRCS) \
-	$(SHELL_POLICY_SRCS) \
-	$(BASIC_MUTEX_POSIX_SRCS) \
-	$(LOGGING_SRCS) \
-	$(CONFIG_SRCS) \
-	$(TEXT_UTILS_SRCS) \
-	$(TEXT_ENCODING_ACTIVE_SRCS)
-
-HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS = \
-	$(SOURCE_PREFIX)tests/test_connection_manager.cpp \
-	$(SOURCE_PREFIX)src/runtime/connection_manager.cpp \
-	$(SOURCE_PREFIX)src/http/http_codec.cpp \
-	$(SOURCE_PREFIX)src/http/http_request.cpp \
-	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
-	$(JSON_SRCS) \
-	$(TEXT_UTILS_SRCS) \
-	$(TEXT_ENCODING_ACTIVE_SRCS) \
-	$(PLATFORM_SRCS) \
-	$(LOGGING_SRCS) \
-	$(DAEMON_THREAD_SRCS)
-
-HOST_CONNECTION_MANAGER_SRCS = \
-	$(HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS) \
-	$(SERVER_TRANSPORT_POSIX_SRCS) \
-	$(BASIC_MUTEX_POSIX_SRCS)
-
-HOST_TLS_TRANSPORT_SRCS = \
-	$(SOURCE_PREFIX)tests/test_tls_transport.cpp \
-	$(TLS_SRCS) \
-	$(CONNECTION_TRANSPORT_SRCS) \
-	$(SOCKET_POSIX_SRCS) \
-	$(BASIC_MUTEX_POSIX_SRCS) \
-	$(DAEMON_THREAD_SRCS) \
-	$(PLATFORM_SRCS) \
-	$(TEXT_UTILS_SRCS) \
-	$(TEXT_ENCODING_ACTIVE_SRCS) \
-	$(SOURCE_PREFIX)src/port_forward/port_forward_endpoint.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_forward_error.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_forward_socket_ops.cpp
-
-WINDOWS_TLS_TRANSPORT_SRCS = \
-	$(SOURCE_PREFIX)tests/test_tls_transport.cpp \
-	$(TLS_SRCS) \
-	$(CONNECTION_TRANSPORT_SRCS) \
-	$(SOCKET_WINDOWS_SRCS) \
-	$(BASIC_MUTEX_WINDOWS_SRCS) \
-	$(DAEMON_THREAD_SRCS) \
-	$(PLATFORM_SRCS) \
-	$(TEXT_UTILS_SRCS) \
-	$(TEXT_ENCODING_ACTIVE_SRCS) \
-	$(WIN32_ERROR_SRCS) \
-	$(SOURCE_PREFIX)src/port_forward/port_forward_endpoint.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_forward_error.cpp \
-	$(SOURCE_PREFIX)src/port_forward/port_forward_socket_ops.cpp
-
-WINDOWS_CONNECTION_MANAGER_TEST_SRCS = \
-	$(HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS) \
-	$(SERVER_TRANSPORT_WINDOWS_SRCS) \
-	$(BASIC_MUTEX_WINDOWS_SRCS) \
-	$(PATH_UTILS_SRCS) \
-	$(WIN32_ERROR_SRCS)
-
-SERVER_RUNTIME_TEST_COMMON_SRCS = \
-	$(SOURCE_PREFIX)tests/test_server_runtime.cpp
-
-HOST_SERVER_RUNTIME_TEST_SUPPORT_SRCS = \
-	$(SERVER_RUNTIME_TEST_COMMON_SRCS) \
-	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
-	$(POSIX_BASE_SRCS_NO_MAIN)
-
-WINDOWS_SERVER_RUNTIME_TEST_SUPPORT_SRCS = \
-	$(SERVER_RUNTIME_TEST_COMMON_SRCS) \
-	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
-	$(WINDOWS_BASE_SRCS_NO_MAIN)
-
-SERVER_ROUTES_TEST_COMMON_SRCS = \
-	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
-	$(SOURCE_PREFIX)tests/test_server_routes_shared.cpp \
-	$(SOURCE_PREFIX)tests/test_file_routes_shared.cpp \
-	$(APP_CONTEXT_SRCS) \
-	$(CAPABILITIES_SRCS) \
-	$(ROUTE_SRCS) \
-	$(SOURCE_PREFIX)src/http/http_codec.cpp \
-	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
-	$(JSON_SRCS) \
-	$(SESSION_STORE_SRCS) \
-	$(PLATFORM_SRCS) \
-	$(PATH_UTILS_SRCS) \
-	$(SHELL_POLICY_SRCS) \
-	$(PATCH_SRCS) \
-	$(LOGGING_SRCS) \
-	$(CONFIG_SRCS) \
-	$(TEXT_UTILS_SRCS) \
-	$(TEXT_ENCODING_ACTIVE_SRCS) \
-	$(DAEMON_THREAD_SRCS) \
-	$(TRANSFER_SRCS) \
-	$(POLICY_SRCS) \
-	$(RPC_FAILURE_SRCS) \
-	$(PORT_FORWARD_SRCS) \
-	$(BASE64_SRCS)
-
-HOST_SERVER_ROUTES_TEST_SUPPORT_SRCS = \
-	$(SERVER_ROUTES_TEST_COMMON_SRCS) \
-	$(SERVER_TRANSPORT_POSIX_SRCS) \
-	$(BASIC_MUTEX_POSIX_SRCS) \
-	$(WAKEUP_PIPE_POSIX_SRCS)
-
-WINDOWS_SERVER_ROUTES_TEST_SUPPORT_SRCS = \
-	$(SERVER_ROUTES_TEST_COMMON_SRCS) \
-	$(SERVER_TRANSPORT_WINDOWS_SRCS) \
-	$(WIN32_ERROR_SRCS) \
-	$(BASIC_MUTEX_WINDOWS_SRCS) \
-	$(WAKEUP_PIPE_WINDOWS_SRCS)
-
-HOST_SERVER_RUNTIME_SRCS = \
-	$(HOST_SERVER_RUNTIME_TEST_SUPPORT_SRCS) \
-	$(POSIX_PROCESS_SESSION_SRCS)
-
-HOST_SERVER_ROUTES_SRCS = \
-	$(SOURCE_PREFIX)tests/test_server_routes.cpp \
-	$(HOST_SERVER_ROUTES_TEST_SUPPORT_SRCS) \
-	$(POSIX_PROCESS_SESSION_SRCS)
-
-HOST_SERVER_ROUTES_COMMON_SRCS = \
-	$(SOURCE_PREFIX)tests/test_server_routes_common.cpp \
-	$(HOST_SERVER_ROUTES_TEST_SUPPORT_SRCS)
-
 HOST_SANDBOX_SRCS = \
 	$(SOURCE_PREFIX)tests/test_sandbox.cpp \
-	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
 	$(POSIX_BASE_SRCS_NO_MAIN) \
 	$(POSIX_PROCESS_SESSION_SRCS)
 
@@ -560,7 +326,6 @@ HOST_REACTOR_CORE_SRCS = \
 
 WINDOWS_SANDBOX_TEST_SRCS = \
 	$(SOURCE_PREFIX)tests/test_sandbox.cpp \
-	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
 	$(WINDOWS_BASE_SRCS_NO_MAIN) \
 	$(WINDOWS_DAEMON_SUPPORT_SRCS_NO_ERROR)
 
@@ -631,66 +396,3 @@ WINDOWS_DAEMON_SRCS = \
 	$(WINDOWS_BASE_SRCS_NO_MAIN) \
 	$(SOURCE_PREFIX)src/main.cpp \
 	$(WINDOWS_DAEMON_SUPPORT_SRCS_NO_ERROR)
-
-WINDOWS_SESSION_STORE_TEST_SRCS = \
-	$(SOURCE_PREFIX)tests/test_session_store.cpp \
-	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
-	$(BASE_COMMON_SRCS_NO_MAIN) \
-	$(SESSION_STORE_SRCS) \
-	$(EXEC_HTTP_CODEC_SRCS) \
-	$(WINDOWS_DAEMON_SUPPORT_SRCS) \
-	$(SERVER_TRANSPORT_WINDOWS_SRCS) \
-	$(WAKEUP_PIPE_WINDOWS_SRCS) \
-	$(PLATFORM_SRCS) \
-	$(PATH_UTILS_SRCS) \
-	$(SHELL_POLICY_SRCS) \
-	$(BASIC_MUTEX_WINDOWS_SRCS) \
-	$(LOGGING_SRCS) \
-	$(CONFIG_SRCS) \
-	$(TEXT_UTILS_SRCS) \
-	$(TEXT_ENCODING_ACTIVE_SRCS) \
-	$(DAEMON_THREAD_SRCS)
-
-WINDOWS_SERVER_ROUTES_COMMON_TEST_SRCS = \
-	$(SOURCE_PREFIX)tests/test_server_routes_common.cpp \
-	$(WINDOWS_SERVER_ROUTES_TEST_SUPPORT_SRCS) \
-	$(WINDOWS_DAEMON_SUPPORT_SRCS_NO_ERROR)
-
-WINDOWS_SERVER_ROUTES_TEST_SRCS = \
-	$(SOURCE_PREFIX)tests/test_server_routes.cpp \
-	$(WINDOWS_SERVER_ROUTES_TEST_SUPPORT_SRCS) \
-	$(WINDOWS_DAEMON_SUPPORT_SRCS_NO_ERROR)
-
-WINDOWS_SERVER_RUNTIME_TEST_SRCS = \
-	$(WINDOWS_SERVER_RUNTIME_TEST_SUPPORT_SRCS) \
-	$(WINDOWS_DAEMON_SUPPORT_SRCS_NO_ERROR)
-
-# Test source groups by portability. POSIX make currently builds every host
-# test; Windows makefiles consume the Windows-capable groups as those tests are
-# made portable.
-PLATFORM_NEUTRAL_TEST_SRCS = \
-	$(HOST_PATCH_SRCS) \
-	$(HOST_TRANSFER_SRCS) \
-	$(HOST_CONFIG_SRCS) \
-	$(HOST_BASIC_MUTEX_SRCS) \
-	$(HOST_HTTP_REQUEST_SRCS) \
-	$(HOST_SERVER_TRANSPORT_SRCS) \
-	$(HOST_CONNECTION_MANAGER_SRCS) \
-	$(HOST_SANDBOX_SRCS) \
-	$(HOST_PORT_TUNNEL_FRAME_SRCS)
-
-WINDOWS_CAPABLE_PROCESS_TEST_SRCS = \
-	$(SOURCE_PREFIX)tests/test_session_store.cpp \
-	$(WINDOWS_SERVER_STREAMING_SRCS)
-
-WINDOWS_CAPABLE_ROUTE_TEST_SRCS = \
-	$(WINDOWS_SERVER_ROUTES_COMMON_TEST_SRCS) \
-	$(WINDOWS_SERVER_ROUTES_TEST_SRCS)
-
-WINDOWS_CAPABLE_SERVER_SMOKE_TEST_SRCS = \
-	$(WINDOWS_SERVER_RUNTIME_TEST_SRCS)
-
-POSIX_ONLY_TEST_SRCS = \
-	$(HOST_SERVER_STREAMING_SRCS) \
-	$(HOST_SERVER_ROUTES_SRCS) \
-	$(HOST_REACTOR_CORE_SRCS)

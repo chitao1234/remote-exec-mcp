@@ -172,7 +172,7 @@ struct TunnelConn : public std::enable_shared_from_this<TunnelConn> {
           protocol(TunnelProtocol::Tcp), role(TunnelRole::Connect), generation(0U),
           preface_read(false), mode_set(false), closed(false), read_timer(0U), timer_armed(false),
           read_waiting(false), write_waiting(false), session(), dropped_datagrams(0U),
-          next_stream_id(2U) {}
+          next_stream_id(2U), close_after_flush(false) {}
 
     ~TunnelConn();
 

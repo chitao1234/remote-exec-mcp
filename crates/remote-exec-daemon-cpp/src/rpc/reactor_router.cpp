@@ -69,8 +69,10 @@ bool ReactorRouter::is_migrated(server_contract::RouteId route) {
     }
 }
 
-HttpResponse ReactorRouter::dispatch(server_contract::RouteId route, const HttpRequest& request)
-    const {
+HttpResponse ReactorRouter::dispatch(
+    server_contract::RouteId route,
+    const HttpRequest& request
+) const {
     HttpResponse response;
     if (reject_before_route(gate_, request, &response)) {
         write_request_id_header(response, request);

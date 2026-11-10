@@ -28,9 +28,8 @@ The production entrypoint handles all routes and modes:
   resume, TCP, and UDP;
 - direct and reverse mode over plain HTTP or TLS.
 
-`target-info` advertises the reactor's actual capabilities. The legacy
-thread-per-unit implementation remains in the tree only as dead code for its
-old unit tests; the daemon entrypoint no longer uses it.
+`target-info` advertises the reactor's actual capabilities. There is no
+separate legacy server implementation in the build.
 
 The reactor core bounds HTTP input and connection count, uses timers instead of
 polling ticks, and shards `select()` sets on Winsock 1.1 so `max_connections`
@@ -38,9 +37,7 @@ is not limited by `FD_SETSIZE`.
 
 ## Capabilities
 
-The table describes the wire capabilities the daemon is designed to provide.
-See [Migration status](#migration-status) for the subset implemented by the
-current reactor core.
+The table describes the wire capabilities the daemon provides.
 
 | Area | Support |
 | --- | --- |

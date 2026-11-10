@@ -240,8 +240,7 @@ ${HOST_TEST_OBJ_DIR}/${src:S|.cpp|.o|}: ${src} ${POSIX_CONFIG_HEADER}
 .endfor
 
 ${HOST_PROD_OBJ_DIR}/src/rpc/server_route_common.o \
-${HOST_TEST_OBJ_DIR}/src/rpc/server_route_common.o \
-${HOST_TEST_OBJ_DIR}/tests/test_server_routes_shared.o: ${BUILD_VERSION_HEADER}
+${HOST_TEST_OBJ_DIR}/src/rpc/server_route_common.o: ${BUILD_VERSION_HEADER}
 
 ${BUILD_VERSION_HEADER}: ${BUILD_VERSION_SCRIPT} force-build-version
 	sh ${BUILD_VERSION_SCRIPT} ${.TARGET}

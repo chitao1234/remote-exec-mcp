@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include "exec/session_store.h"
+#include "exec/exec_types.h"
 #include "http/http_helpers.h"
 
 Json exec_session_warnings_json(const std::vector<ExecSessionWarning>& warnings);

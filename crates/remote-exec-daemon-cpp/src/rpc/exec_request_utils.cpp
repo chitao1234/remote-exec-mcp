@@ -1,5 +1,6 @@
 #include "rpc/exec_request_utils.h"
 
+#include "exec/exec_types.h"
 #include "http/http_helpers.h"
 #include "platform/platform.h"
 #include "rpc/server_request_utils.h"

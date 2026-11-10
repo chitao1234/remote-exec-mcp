@@ -290,9 +290,7 @@ in a shared home. Before adding a test helper, check these first:
 - Cross-crate Rust test helpers: `crates/remote-exec-test-support/`
 - C++ tests: `crates/remote-exec-daemon-cpp/tests/` shared headers
   (`test_assert.h`, `test_filesystem.h`, `test_text_file.h`,
-  `test_contract_fixtures.h`, `test_daemon_fixtures.h`, `test_pty_helpers.h`,
-  `test_socket_pair.h`, `test_server_streaming_shared.h`,
-  `test_tar_helpers.h`)
+  `test_contract_fixtures.h`, `test_tar_helpers.h`)
 
 A helper used by more than one test file belongs in the shared home for
 that side, not duplicated per file. `#[allow(dead_code)]` on shared

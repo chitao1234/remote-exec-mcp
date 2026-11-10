@@ -307,17 +307,9 @@ MSVC_APPLY_PATCH_SRCS=$(WINDOWS_APPLY_PATCH_CLI_SRCS)
 MSVC_BASIC_MUTEX_TEST_SRCS=$(WINDOWS_BASIC_MUTEX_TEST_SRCS)
 MSVC_CONSOLE_OUTPUT_TEST_SRCS=$(WINDOWS_CONSOLE_OUTPUT_TEST_SRCS)
 MSVC_PATCH_TEST_SRCS=$(WINDOWS_PATCH_TEST_SRCS)
-MSVC_SESSION_STORE_TEST_SRCS=$(WINDOWS_SESSION_STORE_TEST_SRCS) $(MSVC_WINPTY_LIB_SRCS)
-MSVC_SERVER_STREAMING_TEST_SRCS=$(WINDOWS_SERVER_STREAMING_SRCS) $(MSVC_WINPTY_LIB_SRCS)
 MSVC_TRANSFER_TEST_SRCS=$(WINDOWS_TRANSFER_TEST_SRCS)
 MSVC_CONFIG_TEST_SRCS=$(WINDOWS_CONFIG_TEST_SRCS)
 MSVC_HTTP_REQUEST_TEST_SRCS=$(HOST_HTTP_REQUEST_SRCS)
-MSVC_SERVER_TRANSPORT_TEST_SRCS=$(WINDOWS_SERVER_TRANSPORT_TEST_SRCS)
-MSVC_CONNECTION_MANAGER_TEST_SRCS=$(WINDOWS_CONNECTION_MANAGER_TEST_SRCS)
-MSVC_TLS_TRANSPORT_TEST_SRCS=$(WINDOWS_TLS_TRANSPORT_SRCS)
-MSVC_SERVER_ROUTES_COMMON_TEST_SRCS=$(WINDOWS_SERVER_ROUTES_COMMON_TEST_SRCS) $(MSVC_WINPTY_LIB_SRCS)
-MSVC_SERVER_ROUTES_TEST_SRCS=$(WINDOWS_SERVER_ROUTES_TEST_SRCS) $(MSVC_WINPTY_LIB_SRCS)
-MSVC_SERVER_RUNTIME_TEST_SRCS=$(WINDOWS_SERVER_RUNTIME_TEST_SRCS) $(MSVC_WINPTY_LIB_SRCS)
 MSVC_SANDBOX_TEST_SRCS=$(WINDOWS_SANDBOX_TEST_SRCS) $(MSVC_WINPTY_LIB_SRCS)
 MSVC_PORT_TUNNEL_FRAME_TEST_SRCS=$(HOST_PORT_TUNNEL_FRAME_SRCS)
 MSVC_WINPTY_AGENT_LEGACY_OUTPUTS= \
@@ -400,34 +392,18 @@ MSVC_BUILD_SELECTED_WINPTY_AGENT_PREFIX=$(CXX) $(MSVC_CXXFLAGS) $(MSVC_SELECTED_
 MSVC_BASIC_MUTEX_TEST=$(MSVC_SELECTED_BIN_DIR)\test_basic_mutex-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_CONSOLE_OUTPUT_TEST=$(MSVC_SELECTED_BIN_DIR)\test_console_output-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_PATCH_TEST=$(MSVC_SELECTED_BIN_DIR)\test_patch-$(MSVC_SELECTED_BINARY_TAG).exe
-MSVC_SESSION_STORE_TEST=$(MSVC_SELECTED_BIN_DIR)\test_session_store-$(MSVC_SELECTED_BINARY_TAG).exe
-MSVC_SERVER_STREAMING_TEST=$(MSVC_SELECTED_BIN_DIR)\test_server_streaming-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_TRANSFER_TEST=$(MSVC_SELECTED_BIN_DIR)\test_transfer-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_CONFIG_TEST=$(MSVC_SELECTED_BIN_DIR)\test_config-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_HTTP_REQUEST_TEST=$(MSVC_SELECTED_BIN_DIR)\test_http_request-$(MSVC_SELECTED_BINARY_TAG).exe
-MSVC_SERVER_TRANSPORT_TEST=$(MSVC_SELECTED_BIN_DIR)\test_server_transport-$(MSVC_SELECTED_BINARY_TAG).exe
-MSVC_CONNECTION_MANAGER_TEST=$(MSVC_SELECTED_BIN_DIR)\test_connection_manager-$(MSVC_SELECTED_BINARY_TAG).exe
-MSVC_TLS_TRANSPORT_TEST=$(MSVC_SELECTED_BIN_DIR)\test_tls_transport-$(MSVC_SELECTED_BINARY_TAG).exe
-MSVC_SERVER_ROUTES_COMMON_TEST=$(MSVC_SELECTED_BIN_DIR)\test_server_routes_common-$(MSVC_SELECTED_BINARY_TAG).exe
-MSVC_SERVER_ROUTES_TEST=$(MSVC_SELECTED_BIN_DIR)\test_server_routes-$(MSVC_SELECTED_BINARY_TAG).exe
-MSVC_SERVER_RUNTIME_TEST=$(MSVC_SELECTED_BIN_DIR)\test_server_runtime-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_SANDBOX_TEST=$(MSVC_SELECTED_BIN_DIR)\test_sandbox-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_PORT_TUNNEL_FRAME_TEST=$(MSVC_SELECTED_BIN_DIR)\test_port_tunnel_frame-$(MSVC_SELECTED_BINARY_TAG).exe
 MSVC_TEST_BINS= \
     $(MSVC_BASIC_MUTEX_TEST) \
     $(MSVC_CONSOLE_OUTPUT_TEST) \
     $(MSVC_PATCH_TEST) \
-    $(MSVC_SESSION_STORE_TEST) \
-    $(MSVC_SERVER_STREAMING_TEST) \
     $(MSVC_TRANSFER_TEST) \
     $(MSVC_CONFIG_TEST) \
     $(MSVC_HTTP_REQUEST_TEST) \
-    $(MSVC_SERVER_TRANSPORT_TEST) \
-    $(MSVC_CONNECTION_MANAGER_TEST) \
-    $(MSVC_TLS_TRANSPORT_TEST) \
-    $(MSVC_SERVER_ROUTES_COMMON_TEST) \
-    $(MSVC_SERVER_ROUTES_TEST) \
-    $(MSVC_SERVER_RUNTIME_TEST) \
     $(MSVC_SANDBOX_TEST) \
     $(MSVC_PORT_TUNNEL_FRAME_TEST)
 !IF "$(TEST_BUNDLE_DIR)" != ""
@@ -448,17 +424,9 @@ MSVC_TEST_PHONY_TARGETS= \
     test-msvc-basic-mutex \
     test-msvc-console-output \
     test-msvc-patch \
-    test-msvc-session-store \
-    test-msvc-server-streaming \
     test-msvc-transfer \
     test-msvc-config \
     test-msvc-http-request \
-    test-msvc-server-transport \
-    test-msvc-connection-manager \
-    test-msvc-tls-transport \
-    test-msvc-server-routes-common \
-    test-msvc-server-routes \
-    test-msvc-server-runtime \
     test-msvc-sandbox \
     test-msvc-port-tunnel-frame
 
@@ -477,17 +445,9 @@ test-bundle-msvc: all-msvc $(MSVC_SELECTED_WINPTY_AGENT) $(MSVC_TEST_BINS) $(MSV
 	@copy /Y "$(MSVC_BASIC_MUTEX_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_basic_mutex.exe" >nul
 	@copy /Y "$(MSVC_CONSOLE_OUTPUT_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_console_output.exe" >nul
 	@copy /Y "$(MSVC_PATCH_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_patch.exe" >nul
-	@copy /Y "$(MSVC_SESSION_STORE_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_session_store.exe" >nul
-	@copy /Y "$(MSVC_SERVER_STREAMING_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_server_streaming.exe" >nul
 	@copy /Y "$(MSVC_TRANSFER_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_transfer.exe" >nul
 	@copy /Y "$(MSVC_CONFIG_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_config.exe" >nul
 	@copy /Y "$(MSVC_HTTP_REQUEST_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_http_request.exe" >nul
-	@copy /Y "$(MSVC_SERVER_TRANSPORT_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_server_transport.exe" >nul
-	@copy /Y "$(MSVC_CONNECTION_MANAGER_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_connection_manager.exe" >nul
-	@copy /Y "$(MSVC_TLS_TRANSPORT_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_tls_transport.exe" >nul
-	@copy /Y "$(MSVC_SERVER_ROUTES_COMMON_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_server_routes_common.exe" >nul
-	@copy /Y "$(MSVC_SERVER_ROUTES_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_server_routes.exe" >nul
-	@copy /Y "$(MSVC_SERVER_RUNTIME_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_server_runtime.exe" >nul
 	@copy /Y "$(MSVC_SANDBOX_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_sandbox.exe" >nul
 	@copy /Y "$(MSVC_PORT_TUNNEL_FRAME_TEST)" "$(MSVC_TEST_BUNDLE_DIR)\test_port_tunnel_frame.exe" >nul
 	@copy /Y "$(DAEMON_CPP_DIR)\config\daemon-cpp.example.ini" "$(MSVC_TEST_BUNDLE_DIR)\config\" >nul
@@ -496,17 +456,9 @@ test-bundle-msvc: all-msvc $(MSVC_SELECTED_WINPTY_AGENT) $(MSVC_TEST_BINS) $(MSV
 	@echo basic-mutex test_basic_mutex.exe>"$(MSVC_TEST_BUNDLE_MANIFEST)"
 	@echo console-output test_console_output.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
 	@echo patch test_patch.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
-	@echo session-store test_session_store.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
-	@echo server-streaming test_server_streaming.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
 	@echo transfer test_transfer.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
 	@echo config test_config.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
 	@echo http-request test_http_request.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
-	@echo server-transport test_server_transport.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
-	@echo connection-manager test_connection_manager.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
-	@echo tls-transport test_tls_transport.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
-	@echo server-routes-common test_server_routes_common.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
-	@echo server-routes test_server_routes.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
-	@echo server-runtime test_server_runtime.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
 	@echo sandbox test_sandbox.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
 	@echo port-tunnel-frame test_port_tunnel_frame.exe>>"$(MSVC_TEST_BUNDLE_MANIFEST)"
 	@echo C++ MSVC test bundle: $(MSVC_TEST_BUNDLE_DIR)
@@ -522,12 +474,6 @@ test-msvc-console-output: $(MSVC_CONSOLE_OUTPUT_TEST)
 test-msvc-patch: $(MSVC_PATCH_TEST)
 	$(MSVC_RUN_TEST)
 
-test-msvc-session-store: $(MSVC_SESSION_STORE_TEST)
-	$(MSVC_RUN_TEST)
-
-test-msvc-server-streaming: $(MSVC_SERVER_STREAMING_TEST)
-	$(MSVC_RUN_TEST)
-
 test-msvc-transfer: $(MSVC_TRANSFER_TEST)
 	$(MSVC_RUN_TEST)
 
@@ -535,24 +481,6 @@ test-msvc-config: $(MSVC_CONFIG_TEST)
 	$(MSVC_RUN_TEST)
 
 test-msvc-http-request: $(MSVC_HTTP_REQUEST_TEST)
-	$(MSVC_RUN_TEST)
-
-test-msvc-server-transport: $(MSVC_SERVER_TRANSPORT_TEST)
-	$(MSVC_RUN_TEST)
-
-test-msvc-connection-manager: $(MSVC_CONNECTION_MANAGER_TEST)
-	$(MSVC_RUN_TEST)
-
-test-msvc-tls-transport: $(MSVC_TLS_TRANSPORT_TEST)
-	$(MSVC_RUN_TEST)
-
-test-msvc-server-routes-common: $(MSVC_SERVER_ROUTES_COMMON_TEST)
-	$(MSVC_RUN_TEST)
-
-test-msvc-server-routes: $(MSVC_SERVER_ROUTES_TEST)
-	$(MSVC_RUN_TEST)
-
-test-msvc-server-runtime: $(MSVC_SERVER_RUNTIME_TEST)
 	$(MSVC_RUN_TEST)
 
 test-msvc-sandbox: $(MSVC_SANDBOX_TEST)
@@ -618,12 +546,6 @@ test-msvc-native-console-output:
 test-msvc-native-patch:
 	@$(MSVC_REENTER_NATIVE) test-msvc-patch
 
-test-msvc-native-session-store:
-	@$(MSVC_REENTER_NATIVE) test-msvc-session-store
-
-test-msvc-native-server-streaming:
-	@$(MSVC_REENTER_NATIVE) test-msvc-server-streaming
-
 test-msvc-native-transfer:
 	@$(MSVC_REENTER_NATIVE) test-msvc-transfer
 
@@ -632,24 +554,6 @@ test-msvc-native-config:
 
 test-msvc-native-http-request:
 	@$(MSVC_REENTER_NATIVE) test-msvc-http-request
-
-test-msvc-native-server-transport:
-	@$(MSVC_REENTER_NATIVE) test-msvc-server-transport
-
-test-msvc-native-connection-manager:
-	@$(MSVC_REENTER_NATIVE) test-msvc-connection-manager
-
-test-msvc-native-tls-transport:
-	@$(MSVC_REENTER_NATIVE) test-msvc-tls-transport
-
-test-msvc-native-server-routes-common:
-	@$(MSVC_REENTER_NATIVE) test-msvc-server-routes-common
-
-test-msvc-native-server-routes:
-	@$(MSVC_REENTER_NATIVE) test-msvc-server-routes
-
-test-msvc-native-server-runtime:
-	@$(MSVC_REENTER_NATIVE) test-msvc-server-runtime
 
 test-msvc-native-sandbox:
 	@$(MSVC_REENTER_NATIVE) test-msvc-sandbox
@@ -666,12 +570,6 @@ test-msvc-xp-console-output:
 test-msvc-xp-patch:
 	@$(MSVC_REENTER_XP) test-msvc-patch
 
-test-msvc-xp-session-store:
-	@$(MSVC_REENTER_XP) test-msvc-session-store
-
-test-msvc-xp-server-streaming:
-	@$(MSVC_REENTER_XP) test-msvc-server-streaming
-
 test-msvc-xp-transfer:
 	@$(MSVC_REENTER_XP) test-msvc-transfer
 
@@ -680,24 +578,6 @@ test-msvc-xp-config:
 
 test-msvc-xp-http-request:
 	@$(MSVC_REENTER_XP) test-msvc-http-request
-
-test-msvc-xp-server-transport:
-	@$(MSVC_REENTER_XP) test-msvc-server-transport
-
-test-msvc-xp-connection-manager:
-	@$(MSVC_REENTER_XP) test-msvc-connection-manager
-
-test-msvc-xp-tls-transport:
-	@$(MSVC_REENTER_XP) test-msvc-tls-transport
-
-test-msvc-xp-server-routes-common:
-	@$(MSVC_REENTER_XP) test-msvc-server-routes-common
-
-test-msvc-xp-server-routes:
-	@$(MSVC_REENTER_XP) test-msvc-server-routes
-
-test-msvc-xp-server-runtime:
-	@$(MSVC_REENTER_XP) test-msvc-server-runtime
 
 test-msvc-xp-sandbox:
 	@$(MSVC_REENTER_XP) test-msvc-sandbox
@@ -746,16 +626,6 @@ $(MSVC_PATCH_TEST): $(MSVC_PATCH_TEST_SRCS)
 	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
 	$(MSVC_BUILD_SELECTED_TEST_PREFIX) $(MSVC_PATCH_TEST_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
 
-$(MSVC_SESSION_STORE_TEST): $(MSVC_SESSION_STORE_TEST_SRCS) $(MSVC_SELECTED_WINPTY_AGENT)
-	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
-	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
-	$(MSVC_BUILD_SELECTED_TEST_PREFIX) $(MSVC_SESSION_STORE_TEST_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
-
-$(MSVC_SERVER_STREAMING_TEST): $(MSVC_SERVER_STREAMING_TEST_SRCS) $(MSVC_SELECTED_WINPTY_AGENT)
-	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
-	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
-	$(MSVC_BUILD_SELECTED_TEST_PREFIX) $(MSVC_SERVER_STREAMING_TEST_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
-
 $(MSVC_TRANSFER_TEST): $(MSVC_TRANSFER_TEST_SRCS)
 	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
 	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
@@ -770,36 +640,6 @@ $(MSVC_HTTP_REQUEST_TEST): $(MSVC_HTTP_REQUEST_TEST_SRCS)
 	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
 	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
 	$(MSVC_BUILD_SELECTED_TEST_PREFIX) $(MSVC_HTTP_REQUEST_TEST_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
-
-$(MSVC_SERVER_TRANSPORT_TEST): $(MSVC_SERVER_TRANSPORT_TEST_SRCS)
-	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
-	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
-	$(MSVC_BUILD_SELECTED_TEST_PREFIX) $(MSVC_SERVER_TRANSPORT_TEST_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
-
-$(MSVC_CONNECTION_MANAGER_TEST): $(MSVC_CONNECTION_MANAGER_TEST_SRCS)
-	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
-	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
-	$(MSVC_BUILD_SELECTED_TEST_PREFIX) $(MSVC_CONNECTION_MANAGER_TEST_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
-
-$(MSVC_TLS_TRANSPORT_TEST): $(MSVC_TLS_TRANSPORT_TEST_SRCS)
-	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
-	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
-	$(MSVC_BUILD_SELECTED_TEST_PREFIX) $(MSVC_TLS_TRANSPORT_TEST_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
-
-$(MSVC_SERVER_ROUTES_COMMON_TEST): $(MSVC_SERVER_ROUTES_COMMON_TEST_SRCS) $(MSVC_SELECTED_WINPTY_AGENT)
-	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
-	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
-	$(MSVC_BUILD_SELECTED_TEST_PREFIX) $(MSVC_SERVER_ROUTES_COMMON_TEST_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
-
-$(MSVC_SERVER_ROUTES_TEST): $(MSVC_SERVER_ROUTES_TEST_SRCS) $(MSVC_SELECTED_WINPTY_AGENT)
-	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
-	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
-	$(MSVC_BUILD_SELECTED_TEST_PREFIX) $(MSVC_SERVER_ROUTES_TEST_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
-
-$(MSVC_SERVER_RUNTIME_TEST): $(MSVC_SERVER_RUNTIME_TEST_SRCS) $(MSVC_SELECTED_WINPTY_AGENT)
-	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
-	@$(MSVC_ENSURE_SELECTED_TEST_OBJ_DIR)
-	$(MSVC_BUILD_SELECTED_TEST_PREFIX) $(MSVC_SERVER_RUNTIME_TEST_SRCS) $(MSVC_SELECTED_LDLIBS) $(MSVC_SELECTED_LDFLAGS)
 
 $(MSVC_SANDBOX_TEST): $(MSVC_SANDBOX_TEST_SRCS)
 	@$(MSVC_ENSURE_SELECTED_BIN_DIR)
@@ -835,17 +675,9 @@ clean:
     test-msvc-native-basic-mutex \
     test-msvc-native-console-output \
     test-msvc-native-patch \
-    test-msvc-native-session-store \
-    test-msvc-native-server-streaming \
     test-msvc-native-transfer \
     test-msvc-native-config \
     test-msvc-native-http-request \
-    test-msvc-native-server-transport \
-    test-msvc-native-connection-manager \
-    test-msvc-native-tls-transport \
-    test-msvc-native-server-routes-common \
-    test-msvc-native-server-routes \
-    test-msvc-native-server-runtime \
     test-msvc-native-sandbox \
     test-msvc-native-port-tunnel-frame \
     test-msvc-xp \
@@ -853,17 +685,9 @@ clean:
     test-msvc-xp-basic-mutex \
     test-msvc-xp-console-output \
     test-msvc-xp-patch \
-    test-msvc-xp-session-store \
-    test-msvc-xp-server-streaming \
     test-msvc-xp-transfer \
     test-msvc-xp-config \
     test-msvc-xp-http-request \
-    test-msvc-xp-server-transport \
-    test-msvc-xp-connection-manager \
-    test-msvc-xp-tls-transport \
-    test-msvc-xp-server-routes-common \
-    test-msvc-xp-server-routes \
-    test-msvc-xp-server-runtime \
     test-msvc-xp-sandbox \
     test-msvc-xp-port-tunnel-frame \
     check-msvc \

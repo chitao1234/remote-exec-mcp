@@ -450,7 +450,8 @@ void test_tunnel_listen(unsigned short port) {
     TEST_ASSERT(inbound.stream_id == accepted_stream);
     TEST_ASSERT(std::string(inbound.data.begin(), inbound.data.end()) == "world");
 
-    tunnel.send(tunnel_frame(PortTunnelFrameType::TcpData, accepted_stream, Json::object(), "hello")
+    tunnel.send(
+        tunnel_frame(PortTunnelFrameType::TcpData, accepted_stream, Json::object(), "hello")
     );
     char buffer[5];
     TEST_ASSERT(read_exact(client, buffer, sizeof(buffer)));
