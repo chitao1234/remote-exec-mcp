@@ -129,7 +129,10 @@ std::size_t tunnel_socket_capacity(const DaemonConfig& config) {
         const std::size_t value = static_cast<std::size_t>(limits[i]);
         total = value > max - total ? max : total + value;
     }
-    return total;
+    // Tunnel control connections are not part of these resource limits, so
+    // keep the loop at least as large as the POSIX backend's normal ceiling.
+    const std::size_t minimum = 4096U;
+    return total < minimum ? minimum : total;
 }
 
 std::size_t required_shards(const DaemonConfig& config) {
