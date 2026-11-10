@@ -24,8 +24,9 @@ class HttpConn;
 struct ReverseConn;
 
 // Reactor-based daemon core. The listener lives on shard 0 and hands accepted
-// connections to the shard that will own them. On Winsock 1.1 each shard is a
-// select() set, so multiple shards are how the daemon exceeds FD_SETSIZE.
+// connections to the shard that will own them. On Winsock 1.1 each shard uses
+// select() sets, and the tunnel runs on a dedicated loop so forwarded sockets
+// do not compete with HTTP connections for a shard.
 class ReactorServer {
 public:
     explicit ReactorServer(const DaemonConfig& config);
@@ -50,6 +51,8 @@ private:
     void finalize();
     void schedule_exec_tick();
     void exec_tick();
+    void schedule_tunnel_tick();
+    void tunnel_tick();
     void reverse_tick();
     void start_reverse_connect();
     void begin_reverse_connect(const std::vector<SocketAddress>& addresses);
@@ -64,6 +67,8 @@ private:
     AppSandboxState sandbox_;
     std::vector<std::unique_ptr<EventLoop>> loops_;
     std::vector<std::thread> loop_threads_;
+    std::unique_ptr<EventLoop> tunnel_loop_;
+    std::thread tunnel_thread_;
     std::unique_ptr<BlockingPool> pool_;
     friend struct ReverseConn;
 

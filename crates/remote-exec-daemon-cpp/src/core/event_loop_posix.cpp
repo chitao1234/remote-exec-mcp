@@ -40,7 +40,9 @@ struct EventLoop::Impl {
         std::function<void(int)> on_events;
     };
 
-    Impl() : next_timer_id(1), wake_read(-1), wake_write(-1), stop_requested(false) {}
+    Impl()
+        : next_timer_id(1), wake_read(-1), wake_write(-1), stop_requested(false),
+          capacity(MAX_WATCHED_SOCKETS) {}
 
     std::map<SOCKET, Entry> fds;
     std::deque<std::function<void()>> posted;
@@ -51,9 +53,13 @@ struct EventLoop::Impl {
     int wake_read;
     int wake_write;
     bool stop_requested;
+    std::size_t capacity;
 };
 
-EventLoop::EventLoop() : impl_(new Impl()) {
+EventLoop::EventLoop(std::size_t capacity) : impl_(new Impl()) {
+    if (capacity != 0U) {
+        impl_->capacity = capacity;
+    }
     int fds[2];
     if (posix_fd::create_cloexec_pipe(fds) != 0) {
         return;
@@ -86,6 +92,9 @@ std::size_t EventLoop::max_watched_sockets() {
 
 bool EventLoop::add(SOCKET fd, int interest, const std::function<void(int)>& on_events) {
     if (!valid() || fd < 0) {
+        return false;
+    }
+    if (impl_->fds.find(fd) == impl_->fds.end() && impl_->fds.size() >= impl_->capacity) {
         return false;
     }
     Impl::Entry& entry = impl_->fds[fd];

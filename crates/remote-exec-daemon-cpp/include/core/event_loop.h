@@ -19,7 +19,10 @@ class EventLoop {
 public:
     typedef std::uint64_t TimerId;
 
-    EventLoop();
+    // capacity is the maximum number of watched sockets. Zero selects the
+    // backend default; the Windows backend chunks large loops across multiple
+    // select() sets so callers may request more than FD_SETSIZE.
+    explicit EventLoop(std::size_t capacity = 0);
     ~EventLoop();
 
     bool valid() const;

@@ -32,6 +32,36 @@ bool set_socket_nonblocking_option(SOCKET socket, bool enabled) {
     return ioctlsocket(socket, FIONBIO, &mode) == 0;
 }
 
+// A select() set can watch at most FD_SETSIZE sockets. Large loops split
+// their sockets across several sets; the first set blocks for the common
+// timeout and the rest are polled without waiting, so one loop thread can
+// still own more sockets than a single fd_set allows.
+const unsigned long MULTI_SELECT_WAIT_MS = 20UL;
+
+std::size_t app_sockets_per_select_group() {
+    return static_cast<std::size_t>(FD_SETSIZE) - 1U;
+}
+
+std::size_t select_group_count(std::size_t app_sockets) {
+    const std::size_t per_group = app_sockets_per_select_group();
+    if (per_group == 0U) {
+        return 1U;
+    }
+    return app_sockets == 0U ? 1U : (app_sockets + per_group - 1U) / per_group;
+}
+
+struct SelectGroup {
+    SelectGroup() : read_fds(), write_fds(), watched(), wake_ready(false) {
+        FD_ZERO(&read_fds);
+        FD_ZERO(&write_fds);
+    }
+
+    fd_set read_fds;
+    fd_set write_fds;
+    std::vector<SOCKET> watched;
+    bool wake_ready;
+};
+
 } // namespace
 
 struct EventLoop::Impl {
@@ -43,7 +73,7 @@ struct EventLoop::Impl {
 
     Impl()
         : next_timer_id(1), wake_read(INVALID_SOCKET), wake_write(INVALID_SOCKET),
-          stop_requested(false) {}
+          stop_requested(false), capacity(static_cast<std::size_t>(FD_SETSIZE) - 1U) {}
 
     std::map<SOCKET, Entry> fds;
     std::deque<std::function<void()>> posted;
@@ -54,9 +84,13 @@ struct EventLoop::Impl {
     SOCKET wake_read;
     SOCKET wake_write;
     bool stop_requested;
+    std::size_t capacity;
 };
 
-EventLoop::EventLoop() : impl_(new Impl()) {
+EventLoop::EventLoop(std::size_t capacity) : impl_(new Impl()) {
+    if (capacity != 0U) {
+        impl_->capacity = capacity;
+    }
     SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listener == INVALID_SOCKET) {
         return;
@@ -131,8 +165,7 @@ bool EventLoop::add(SOCKET fd, int interest, const std::function<void(int)>& on_
         return false;
     }
     std::map<SOCKET, Impl::Entry>::iterator existing = impl_->fds.find(fd);
-    if (existing == impl_->fds.end()
-        && impl_->fds.size() + 1U >= static_cast<std::size_t>(FD_SETSIZE)) {
+    if (existing == impl_->fds.end() && impl_->fds.size() >= impl_->capacity) {
         return false;
     }
     Impl::Entry& entry = impl_->fds[fd];
@@ -239,87 +272,120 @@ void EventLoop::run() {
             (*it)();
         }
 
-        fd_set read_fds;
-        fd_set write_fds;
-        FD_ZERO(&read_fds);
-        FD_ZERO(&write_fds);
-        FD_SET(impl_->wake_read, &read_fds);
-        std::vector<SOCKET> watched;
-        watched.reserve(impl_->fds.size());
+        std::vector<SOCKET> active;
+        active.reserve(impl_->fds.size());
         for (std::map<SOCKET, Impl::Entry>::const_iterator it = impl_->fds.begin();
              it != impl_->fds.end();
              ++it) {
-            if (it->second.interest == 0) {
-                continue;
+            if (it->second.interest != 0) {
+                active.push_back(it->first);
             }
-            if ((it->second.interest & IO_READ) != 0) {
-                FD_SET(it->first, &read_fds);
+        }
+
+        const std::size_t per_group = app_sockets_per_select_group();
+        const std::size_t group_count = select_group_count(active.size());
+        std::vector<SelectGroup> groups(group_count);
+        for (std::size_t i = 0; i < groups.size(); ++i) {
+            FD_SET(impl_->wake_read, &groups[i].read_fds);
+            groups[i].watched.reserve(
+                i + 1U == groups.size() ? active.size() - i * per_group : per_group
+            );
+        }
+        for (std::size_t i = 0; i < active.size(); ++i) {
+            const std::size_t group = std::min(i / per_group, groups.size() - 1U);
+            const Impl::Entry& entry = impl_->fds.find(active[i])->second;
+            if ((entry.interest & IO_READ) != 0) {
+                FD_SET(active[i], &groups[group].read_fds);
             }
-            if ((it->second.interest & IO_WRITE) != 0) {
-                FD_SET(it->first, &write_fds);
+            if ((entry.interest & IO_WRITE) != 0) {
+                FD_SET(active[i], &groups[group].write_fds);
             }
-            watched.push_back(it->first);
+            groups[group].watched.push_back(active[i]);
         }
 
         struct timeval timeout;
-        struct timeval* timeout_ptr = nullptr;
+        struct timeval zero_timeout;
+        zero_timeout.tv_sec = 0;
+        zero_timeout.tv_usec = 0;
+        std::uint64_t wait_ms = 0U;
+        bool have_timeout = false;
         {
             BasicLockGuard lock(impl_->mutex);
             if (!impl_->timers.empty()) {
                 const std::uint64_t now = platform::monotonic_ms();
                 const std::uint64_t deadline = impl_->timers.begin()->first.first;
-                const std::uint64_t remaining = deadline <= now ? 0U : deadline - now;
-                const std::uint64_t bounded =
-                    remaining > static_cast<std::uint64_t>(MAX_SELECT_TIMEOUT_MS)
-                        ? static_cast<std::uint64_t>(MAX_SELECT_TIMEOUT_MS)
-                        : remaining;
-                timeout.tv_sec = static_cast<long>(bounded / 1000U);
-                timeout.tv_usec = static_cast<long>((bounded % 1000U) * 1000U);
-                timeout_ptr = &timeout;
+                wait_ms = deadline <= now ? 0U : deadline - now;
+                have_timeout = true;
             }
         }
+        if (group_count > 1U) {
+            wait_ms = have_timeout ? std::min<std::uint64_t>(wait_ms, MULTI_SELECT_WAIT_MS)
+                                   : static_cast<std::uint64_t>(MULTI_SELECT_WAIT_MS);
+            have_timeout = true;
+        } else if (have_timeout) {
+            wait_ms =
+                std::min<std::uint64_t>(wait_ms, static_cast<std::uint64_t>(MAX_SELECT_TIMEOUT_MS));
+        }
+        struct timeval* timeout_ptr = nullptr;
+        if (have_timeout) {
+            timeout.tv_sec = static_cast<long>(wait_ms / 1000U);
+            timeout.tv_usec = static_cast<long>((wait_ms % 1000U) * 1000U);
+            timeout_ptr = &timeout;
+        }
 
-        const int ready = select(0, &read_fds, &write_fds, nullptr, timeout_ptr);
-        if (ready == SOCKET_ERROR) {
-            const int error = WSAGetLastError();
-            if (error == WSAEINTR) {
-                continue;
-            }
-            log_message(
-                LOG_ERROR,
-                "event_loop",
-                std::string("select failed with WSA error ") + std::to_string(error)
+        bool wake_ready = false;
+        for (std::size_t i = 0; i < groups.size(); ++i) {
+            const int ready = select(
+                0,
+                &groups[i].read_fds,
+                &groups[i].write_fds,
+                nullptr,
+                i == 0U ? timeout_ptr : &zero_timeout
             );
-            return;
-        }
-        if (ready == 0) {
-            continue;
+            if (ready == SOCKET_ERROR) {
+                const int error = WSAGetLastError();
+                if (error == WSAEINTR) {
+                    continue;
+                }
+                log_message(
+                    LOG_ERROR,
+                    "event_loop",
+                    std::string("select failed with WSA error ") + std::to_string(error)
+                );
+                return;
+            }
+            if (ready > 0 && FD_ISSET(impl_->wake_read, &groups[i].read_fds)) {
+                wake_ready = true;
+            }
         }
 
-        if (FD_ISSET(impl_->wake_read, &read_fds)) {
+        if (wake_ready) {
             char buffer[256];
             while (recv(impl_->wake_read, buffer, sizeof(buffer), 0) > 0) {
             }
         }
 
         std::vector<ReadyCallback> callbacks;
-        callbacks.reserve(watched.size());
-        for (std::size_t i = 0; i < watched.size(); ++i) {
-            int bits = 0;
-            if (FD_ISSET(watched[i], &read_fds)) {
-                bits |= IO_READ;
+        callbacks.reserve(active.size());
+        for (std::size_t group = 0; group < groups.size(); ++group) {
+            for (std::size_t i = 0; i < groups[group].watched.size(); ++i) {
+                const SOCKET fd = groups[group].watched[i];
+                int bits = 0;
+                if (FD_ISSET(fd, &groups[group].read_fds)) {
+                    bits |= IO_READ;
+                }
+                if (FD_ISSET(fd, &groups[group].write_fds)) {
+                    bits |= IO_WRITE;
+                }
+                if (bits == 0) {
+                    continue;
+                }
+                std::map<SOCKET, Impl::Entry>::const_iterator it = impl_->fds.find(fd);
+                if (it == impl_->fds.end()) {
+                    continue;
+                }
+                callbacks.push_back(ReadyCallback(it->second.on_events, bits));
             }
-            if (FD_ISSET(watched[i], &write_fds)) {
-                bits |= IO_WRITE;
-            }
-            if (bits == 0) {
-                continue;
-            }
-            std::map<SOCKET, Impl::Entry>::const_iterator it = impl_->fds.find(watched[i]);
-            if (it == impl_->fds.end()) {
-                continue;
-            }
-            callbacks.push_back(ReadyCallback(it->second.on_events, bits));
         }
         for (std::size_t i = 0; i < callbacks.size(); ++i) {
             callbacks[i].callback(callbacks[i].bits);

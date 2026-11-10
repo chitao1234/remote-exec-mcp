@@ -33,7 +33,9 @@ separate legacy server implementation in the build.
 
 The reactor core bounds HTTP input and connection count, uses timers instead of
 polling ticks, and shards `select()` sets on Winsock 1.1 so `max_connections`
-is not limited by `FD_SETSIZE`.
+is not limited by `FD_SETSIZE`. The port-forward tunnel runs on its own loop,
+and that loop chunks its sockets across multiple `select()` sets, so forwarded
+streams are not capped by a single shard's `FD_SETSIZE` either.
 
 ## Capabilities
 

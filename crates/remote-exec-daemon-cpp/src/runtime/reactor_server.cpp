@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -113,6 +114,22 @@ SOCKET create_listener_socket(const DaemonConfig& config) {
         throw std::runtime_error("failed to set listener non-blocking");
     }
     return listener;
+}
+
+std::size_t tunnel_socket_capacity(const DaemonConfig& config) {
+    const std::size_t max = std::numeric_limits<std::size_t>::max();
+    std::size_t total = 64U;
+    const unsigned long limits[] = {
+        config.port_forward_limits.max_active_tcp_streams,
+        config.port_forward_limits.max_retained_listeners,
+        config.port_forward_limits.max_udp_binds,
+        config.port_forward_limits.max_retained_sessions,
+    };
+    for (std::size_t i = 0; i < sizeof(limits) / sizeof(limits[0]); ++i) {
+        const std::size_t value = static_cast<std::size_t>(limits[i]);
+        total = value > max - total ? max : total + value;
+    }
+    return total;
 }
 
 std::size_t required_shards(const DaemonConfig& config) {
@@ -369,7 +386,8 @@ struct ReverseConn : public std::enable_shared_from_this<ReverseConn> {
 };
 
 ReactorServer::ReactorServer(const DaemonConfig& config)
-    : config_(config), metadata_(), sandbox_(), loops_(), loop_threads_(),
+    : config_(config), metadata_(), sandbox_(), loops_(), loop_threads_(), tunnel_loop_(),
+      tunnel_thread_(),
       pool_(new BlockingPool(config.blocking_workers, config.blocking_workers * 8U + 8U)), exec_(),
       router_(), listener_(), connections_mutex_(), connections_(), shard_connections_(),
       next_shard_(0U), next_connection_id_(1U), bound_port_(0U), listener_paused_(false),
@@ -424,10 +442,11 @@ ReactorServer::ReactorServer(const DaemonConfig& config)
         loops_[0].get(),
         pool_.get()
     ));
+    tunnel_loop_.reset(new EventLoop(tunnel_socket_capacity(config_)));
     tunnel_.reset(new TunnelService(
         config_.port_forward_limits,
         config_.http_auth_bearer_token,
-        loops_[0].get(),
+        tunnel_loop_.get(),
         pool_.get()
     ));
     router_.reset(new ReactorRouter(config_, metadata_, sandbox_));
@@ -489,6 +508,12 @@ bool ReactorServer::start(std::string* error) {
             return false;
         }
     }
+    if (!tunnel_loop_ || !tunnel_loop_->valid()) {
+        if (error != nullptr) {
+            *error = "tunnel event loop initialization failed";
+        }
+        return false;
+    }
 
     std::size_t capacity = 0U;
     for (std::size_t i = 0; i < loops_.size(); ++i) {
@@ -507,6 +532,7 @@ bool ReactorServer::start(std::string* error) {
             return false;
         }
         schedule_exec_tick();
+        schedule_tunnel_tick();
         return true;
     }
 
@@ -536,6 +562,7 @@ bool ReactorServer::start(std::string* error) {
 
     bound_port_ = socket_bound_port_or_zero(listener_.get());
     schedule_exec_tick();
+    schedule_tunnel_tick();
     return true;
 }
 
@@ -546,6 +573,9 @@ void ReactorServer::run() {
     for (std::size_t i = 1; i < loops_.size(); ++i) {
         loop_threads_.push_back(std::thread([this, i]() { loops_[i]->run(); }));
     }
+    if (tunnel_loop_) {
+        tunnel_thread_ = std::thread([this]() { tunnel_loop_->run(); });
+    }
     loops_[0]->run();
     stop_loops();
     for (std::size_t i = 0; i < loop_threads_.size(); ++i) {
@@ -554,6 +584,9 @@ void ReactorServer::run() {
         }
     }
     loop_threads_.clear();
+    if (tunnel_thread_.joinable()) {
+        tunnel_thread_.join();
+    }
     finalize();
 }
 
@@ -571,6 +604,9 @@ void ReactorServer::request_stop() {
     for (std::size_t i = 0; i < loops_.size(); ++i) {
         loops_[i]->post([this, i]() { loops_[i]->stop(); });
     }
+    if (tunnel_loop_) {
+        tunnel_loop_->post([this]() { tunnel_loop_->stop(); });
+    }
 }
 
 void ReactorServer::schedule_exec_tick() {
@@ -584,11 +620,22 @@ void ReactorServer::exec_tick() {
     if (exec_) {
         exec_->tick();
     }
+    reverse_tick();
+    schedule_exec_tick();
+}
+
+void ReactorServer::schedule_tunnel_tick() {
+    if (shutting_down_.load() || !tunnel_loop_) {
+        return;
+    }
+    tunnel_loop_->add_timer(platform::monotonic_ms() + 20U, [this]() { tunnel_tick(); });
+}
+
+void ReactorServer::tunnel_tick() {
     if (tunnel_) {
         tunnel_->tick();
     }
-    reverse_tick();
-    schedule_exec_tick();
+    schedule_tunnel_tick();
 }
 
 void ReactorServer::reverse_tick() {
@@ -722,6 +769,9 @@ void ReactorServer::reverse_attempt_finished(bool success) {
 void ReactorServer::stop_loops() {
     for (std::size_t i = 0; i < loops_.size(); ++i) {
         loops_[i]->stop();
+    }
+    if (tunnel_loop_) {
+        tunnel_loop_->stop();
     }
 }
 
