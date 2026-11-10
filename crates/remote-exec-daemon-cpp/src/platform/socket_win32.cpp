@@ -301,6 +301,11 @@ void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms) {
     }
 }
 
+bool socket_set_nonblocking(SOCKET socket, bool enabled) {
+    u_long mode = enabled ? 1UL : 0UL;
+    return ioctlsocket(socket, FIONBIO, &mode) == 0;
+}
+
 int last_socket_error() {
     return WSAGetLastError();
 }

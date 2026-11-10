@@ -106,6 +106,7 @@ int connect_socket(SOCKET socket, const sockaddr* address, socklen_t address_len
 SOCKET accept_socket(SOCKET listener, sockaddr* peer_address, socklen_t* peer_len);
 SOCKET accept_socket_cloexec(SOCKET listener, sockaddr* peer_address, socklen_t* peer_len);
 void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms);
+bool socket_set_nonblocking(SOCKET socket, bool enabled);
 int wait_socket_readable_or_wakeup(SOCKET socket, SOCKET wakeup_fd, unsigned long timeout_ms);
 int wait_socket_readable(SOCKET socket, unsigned long timeout_ms);
 int wait_socket_writable(SOCKET socket, unsigned long timeout_ms);

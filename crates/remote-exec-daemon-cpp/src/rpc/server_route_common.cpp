@@ -22,6 +22,10 @@ HttpResponse run_rpc_route(const RpcRouteBody& body) {
     return response;
 }
 
+HttpResponse json_request_error_response(const std::exception& ex) {
+    return make_rpc_error_response(400, "bad_request", ex.what());
+}
+
 } // namespace
 
 HttpResponse handle_transfer_rpc_route(const std::string& route_name, const RpcRouteBody& body) {
@@ -39,6 +43,10 @@ HttpResponse handle_transfer_rpc_route(const std::string& route_name, const RpcR
         response.status = transfer_error_status(failure.code);
         write_transfer_error_response(response, failure);
         return response;
+    } catch (const JsonRequestError& ex) {
+        return json_request_error_response(ex);
+    } catch (const Json::exception& ex) {
+        return json_request_error_response(ex);
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", route_name + " failed: " + message);
@@ -70,6 +78,10 @@ HttpResponse handle_image_rpc_route(const std::string& route_name, const RpcRout
         response.status = status;
         write_rpc_error(response, status, image_error_code_name(failure.code), failure.what());
         return response;
+    } catch (const JsonRequestError& ex) {
+        return json_request_error_response(ex);
+    } catch (const Json::exception& ex) {
+        return json_request_error_response(ex);
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", route_name + " failed: " + message);
@@ -107,6 +119,10 @@ HttpResponse handle_file_rpc_route(const std::string& route_name, const RpcRoute
         response.status = status;
         write_rpc_error(response, status, file_error_code_name(failure.code), failure.what());
         return response;
+    } catch (const JsonRequestError& ex) {
+        return json_request_error_response(ex);
+    } catch (const Json::exception& ex) {
+        return json_request_error_response(ex);
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_ERROR, "server", route_name + " failed: " + message);
@@ -168,6 +184,10 @@ HttpResponse handle_exec_rpc_route(
         response.status = ex.status;
         write_rpc_error(response, ex.status, ex.code, ex.message);
         return response;
+    } catch (const JsonRequestError& ex) {
+        return json_request_error_response(ex);
+    } catch (const Json::exception& ex) {
+        return json_request_error_response(ex);
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_ERROR, "server", route_name + " failed: " + message);
@@ -187,6 +207,10 @@ HttpResponse handle_patch_rpc_route(const RpcRouteBody& body) {
         response.status = 400;
         write_rpc_error(response, 400, "sandbox_denied", ex.what());
         return response;
+    } catch (const JsonRequestError& ex) {
+        return json_request_error_response(ex);
+    } catch (const Json::exception& ex) {
+        return json_request_error_response(ex);
     } catch (const std::exception& ex) {
         log_message(LOG_WARN, "server", std::string("patch/apply failed: ") + ex.what());
         HttpResponse response;

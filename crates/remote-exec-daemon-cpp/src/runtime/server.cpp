@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 #ifndef _WIN32
 #include <csignal>
@@ -9,18 +10,18 @@
 #endif
 
 #include "core/logging.h"
+#include "core/stdio_retry.h"
 #include "platform/path_utils.h"
 #include "platform/platform.h"
+#include "platform/scoped_file.h"
+#include "runtime/reactor_server.h"
+#include "runtime/server.h"
+
 #ifndef _WIN32
-#include "exec/posix_child_reaper.h"
 #include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
 #include "platform/posix_signal.h"
 #endif
-#include "core/stdio_retry.h"
-#include "platform/scoped_file.h"
-#include "runtime/server.h"
-#include "runtime/server_runtime.h"
 
 #ifndef _WIN32
 namespace {
@@ -72,10 +73,12 @@ void wait_for_shutdown_signal() {
     }
 }
 
-} // namespace
-#endif
+void wake_shutdown_waiter() {
+    shutdown_signal_handler(0);
+}
 
-#ifdef _WIN32
+} // namespace
+#else
 namespace {
 
 struct ConsoleShutdownState {
@@ -144,6 +147,15 @@ public:
 #endif
     }
 };
+
+void wait_for_shutdown_signal() {
+    WaitForSingleObject(console_shutdown_state().requested, INFINITE);
+}
+
+void wake_shutdown_waiter() {
+    SetEvent(console_shutdown_state().requested);
+}
+
 } // namespace
 
 #ifdef REMOTE_EXEC_CPP_TESTING
@@ -175,51 +187,43 @@ int run_server(const DaemonConfig& config) {
     NetworkSession network;
 #ifdef _WIN32
     ConsoleShutdownRegistration shutdown_registration;
-#endif
-    {
-        ServerRuntime runtime(config);
-#ifndef _WIN32
-        install_posix_child_reaper();
-        install_shutdown_signal_handlers();
-#endif
-        if (config.connection_mode == ConnectionMode::Reverse) {
-            runtime.start_reverse_loop();
-        } else {
-            runtime.start_accept_loop();
-            const unsigned short bound_port = runtime.bound_port();
-            write_test_bound_addr_file(runtime.config(), bound_port);
-        }
-
-        LogMessageBuilder message(
-            config.connection_mode == ConnectionMode::Reverse ? "connecting" : "listening"
-        );
-        message.raw("on")
-            .raw(runtime.config().listen_host)
-            .field(
-                "port",
-                config.connection_mode == ConnectionMode::Reverse ? config.reverse_broker_port
-                                                                  : runtime.bound_port()
-            )
-            .quoted_field("target", runtime.config().target)
-            .bool_field("http_auth_enabled", !runtime.config().http_auth_bearer_token.empty())
-            .quoted_field("platform", platform::platform_name())
-            .quoted_field("arch", platform::arch_name())
-            .quoted_field("default_shell", runtime.metadata().default_shell)
-            .quoted_field("daemon_instance_id", runtime.metadata().daemon_instance_id);
-        log_message(LOG_INFO, "server", message.str());
-
-#ifndef _WIN32
-        wait_for_shutdown_signal();
 #else
-        WaitForSingleObject(console_shutdown_state().requested, INFINITE);
+    install_shutdown_signal_handlers();
 #endif
-        log_message(LOG_INFO, "server", "shutdown signal received");
-        runtime.request_shutdown();
-        runtime.join();
+
+    ReactorServer server(config);
+    std::string start_error;
+    if (!server.start(&start_error)) {
+        log_message(LOG_ERROR, "server", start_error);
+        std::fprintf(stderr, "%s\n", start_error.c_str());
+        return 1;
     }
-#ifndef _WIN32
-    shutdown_posix_child_reaper();
-#endif
+
+    write_test_bound_addr_file(config, server.bound_port());
+
+    LogMessageBuilder message(
+        config.connection_mode == ConnectionMode::Reverse ? "connecting" : "listening"
+    );
+    message.raw("on")
+        .raw(server.config().listen_host)
+        .field("port", server.bound_port())
+        .quoted_field("target", server.config().target)
+        .bool_field("http_auth_enabled", !server.config().http_auth_bearer_token.empty())
+        .quoted_field("platform", platform::platform_name())
+        .quoted_field("arch", platform::arch_name())
+        .quoted_field("default_shell", server.metadata().default_shell)
+        .quoted_field("daemon_instance_id", server.metadata().daemon_instance_id);
+    log_message(LOG_INFO, "server", message.str());
+
+    std::thread shutdown_thread([&server]() {
+        wait_for_shutdown_signal();
+        server.request_stop();
+    });
+
+    server.run();
+    wake_shutdown_waiter();
+    shutdown_thread.join();
+
     log_message(LOG_INFO, "server", "shutdown complete");
     return 0;
 }

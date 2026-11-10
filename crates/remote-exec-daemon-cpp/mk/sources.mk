@@ -233,6 +233,19 @@ SERVER_TRANSPORT_WINDOWS_SRCS = \
 	$(SOURCE_PREFIX)src/http/server_transport.cpp \
 	$(SOURCE_PREFIX)src/http/server_transport_win32.cpp
 
+REACTOR_SRCS = \
+	$(SOURCE_PREFIX)src/core/byte_buffer.cpp \
+	$(SOURCE_PREFIX)src/core/event_loop_posix.cpp \
+	$(SOURCE_PREFIX)src/core/event_loop_win32.cpp \
+	$(SOURCE_PREFIX)src/core/socket_stream.cpp \
+	$(SOURCE_PREFIX)src/core/blocking_pool.cpp \
+	$(SOURCE_PREFIX)src/core/json_value.cpp \
+	$(SOURCE_PREFIX)src/http/reactor_http_conn.cpp \
+	$(SOURCE_PREFIX)src/rpc/reactor_router.cpp \
+	$(SOURCE_PREFIX)src/runtime/reactor_server.cpp
+
+JSON_SRCS = $(SOURCE_PREFIX)src/core/json_value.cpp
+
 BASE_COMMON_SRCS_NO_MAIN = \
 	$(CONFIG_SRCS) \
 	$(TLS_SRCS) \
@@ -252,7 +265,8 @@ BASE_COMMON_SRCS_NO_MAIN = \
 	$(BASE64_SRCS) \
 	$(TRANSFER_SRCS) \
 	$(POLICY_SRCS) \
-	$(RPC_FAILURE_SRCS)
+	$(RPC_FAILURE_SRCS) \
+	$(REACTOR_SRCS)
 
 POSIX_BASE_SRCS_NO_MAIN = \
 	$(BASE_COMMON_SRCS_NO_MAIN) \
@@ -346,6 +360,7 @@ HOST_HTTP_REQUEST_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
+	$(JSON_SRCS) \
 	$(TEXT_UTILS_SRCS) \
 	$(TEXT_ENCODING_ACTIVE_SRCS)
 
@@ -354,6 +369,7 @@ HOST_SERVER_TRANSPORT_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
+	$(JSON_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(TEXT_UTILS_SRCS) \
 	$(TEXT_ENCODING_ACTIVE_SRCS)
@@ -415,6 +431,7 @@ HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
+	$(JSON_SRCS) \
 	$(TEXT_UTILS_SRCS) \
 	$(TEXT_ENCODING_ACTIVE_SRCS) \
 	$(PLATFORM_SRCS) \
@@ -484,6 +501,7 @@ SERVER_ROUTES_TEST_COMMON_SRCS = \
 	$(ROUTE_SRCS) \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
+	$(JSON_SRCS) \
 	$(SESSION_STORE_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
@@ -529,6 +547,11 @@ HOST_SERVER_ROUTES_COMMON_SRCS = \
 HOST_SANDBOX_SRCS = \
 	$(SOURCE_PREFIX)tests/test_sandbox.cpp \
 	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
+	$(POSIX_BASE_SRCS_NO_MAIN) \
+	$(POSIX_PROCESS_SESSION_SRCS)
+
+HOST_REACTOR_CORE_SRCS = \
+	$(SOURCE_PREFIX)tests/test_reactor_core.cpp \
 	$(POSIX_BASE_SRCS_NO_MAIN) \
 	$(POSIX_PROCESS_SESSION_SRCS)
 
@@ -666,4 +689,5 @@ WINDOWS_CAPABLE_SERVER_SMOKE_TEST_SRCS = \
 
 POSIX_ONLY_TEST_SRCS = \
 	$(HOST_SERVER_STREAMING_SRCS) \
-	$(HOST_SERVER_ROUTES_SRCS)
+	$(HOST_SERVER_ROUTES_SRCS) \
+	$(HOST_REACTOR_CORE_SRCS)

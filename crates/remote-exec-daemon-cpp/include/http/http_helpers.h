@@ -4,9 +4,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "json.hpp"
-
-using Json = nlohmann::json;
+#include "core/json_value.h"
 
 class HttpRequestError : public std::runtime_error {
 public:

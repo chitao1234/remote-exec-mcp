@@ -62,7 +62,15 @@ const char* port_tunnel_mode_name(PortTunnelMode mode) {
 }
 
 std::string frame_meta_string(const PortTunnelFrame& frame, const std::string& key) {
-    return Json::parse(frame.meta).at(key).get<std::string>();
+    try {
+        return Json::parse(frame.meta).at(key).get<std::string>();
+    } catch (const Json::exception& ex) {
+        throw PortForwardError(
+            400,
+            "invalid_port_tunnel",
+            std::string("invalid tunnel frame metadata: ") + ex.what()
+        );
+    }
 }
 
 PortTunnelFrame make_empty_frame(PortTunnelFrameType type, uint32_t stream_id) {

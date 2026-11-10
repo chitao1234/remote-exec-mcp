@@ -123,6 +123,10 @@ void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms) {
     }
 }
 
+bool socket_set_nonblocking(SOCKET socket, bool enabled) {
+    return posix_fd::set_nonblocking(socket, enabled);
+}
+
 int last_socket_error() {
     return errno;
 }

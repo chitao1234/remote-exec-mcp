@@ -9,7 +9,37 @@ The repository root [README](../../README.md) documents the complete
 `remote-exec-mcp` system. This file covers the C++ daemon's build and runtime
 workflow.
 
+## Migration status
+
+The daemon is moving from a blocking thread-per-unit core to a readiness-driven
+reactor. The production entrypoint now uses the reactor for these routes:
+
+- `health` and `target-info`;
+- `file/read`, `file/write`, and `file/edit`;
+- `image/read`;
+- `patch/apply`.
+
+Routes that have not migrated yet return `501 not_migrated`, and
+`target-info` does not advertise them:
+
+- `exec/start`, `exec/write`;
+- `transfer/export`, `transfer/path-info`, `transfer/import`;
+- the port-forward upgrade route.
+
+TLS transport and reverse connection mode are rejected at startup until they
+are reimplemented on the non-blocking stream layer. The legacy thread-based
+implementation is still present for its tests and is removed as each subsystem
+migrates.
+
+The reactor core bounds HTTP input and connection count, uses timers instead of
+polling ticks, and shards `select()` sets on Winsock 1.1 so `max_connections`
+is not limited by `FD_SETSIZE`.
+
 ## Capabilities
+
+The table describes the wire capabilities the daemon is designed to provide.
+See [Migration status](#migration-status) for the subset implemented by the
+current reactor core.
 
 | Area | Support |
 | --- | --- |
@@ -140,13 +170,25 @@ and the broker connection, transport, and authentication settings shown in
 `config/daemon-cpp.example.ini`. Reverse TLS requires a TLS-enabled build;
 plain reverse mode requires `reverse_bearer_token`.
 
+The current reactor core rejects `transport = tls` and
+`connection_mode = reverse` at startup; those paragraphs describe the target
+behavior and apply again once the subsystem migrates.
+
 Optional settings cover:
 
 - `default_shell`, `allow_login_shell`, and Windows `windows_posix_root` for
   command execution and single-slash POSIX path translation;
+- `max_connections` (socket capacity, 256 by default), `io_threads` (minimum
+  reactor shards), and `blocking_workers` (file, archive, patch, and image
+  workers);
 - request, session, transfer, forwarding, yield-time limits, and
   `stdin_write_timeout_ms` (30 seconds by default);
 - static `sandbox_*_allow` and `sandbox_*_deny` path rules.
+
+On Winsock 1.1 a `select()` set holds at most `FD_SETSIZE` sockets, so the
+reactor automatically creates enough shards for `max_connections` plus the
+listener and wakeup socket. `io_threads` can raise that minimum; it never
+reduces it below what the configured connection limit requires.
 
 Omitted or empty allow lists permit all paths for that access class; deny rules
 override them. The sandbox applies to resolved operation paths and is not a

@@ -17,7 +17,8 @@ HOST_POSIX_TESTS = \
 	SERVER_RUNTIME \
 	SERVER_ROUTES \
 	SANDBOX \
-	PORT_TUNNEL_FRAME
+	PORT_TUNNEL_FRAME \
+	REACTOR_CORE
 
 HOST_BASIC_MUTEX_BIN = test_basic_mutex
 HOST_PATCH_BIN = test_patch
@@ -33,6 +34,7 @@ HOST_SERVER_RUNTIME_BIN = test_server_runtime
 HOST_SERVER_ROUTES_BIN = test_server_routes
 HOST_SANDBOX_BIN = test_sandbox
 HOST_PORT_TUNNEL_FRAME_BIN = test_port_tunnel_frame
+HOST_REACTOR_CORE_BIN = test_reactor_core
 
 HOST_BASIC_MUTEX_NAME = basic-mutex
 HOST_PATCH_NAME = patch
@@ -48,6 +50,7 @@ HOST_SERVER_RUNTIME_NAME = server-runtime
 HOST_SERVER_ROUTES_NAME = server-routes
 HOST_SANDBOX_NAME = sandbox
 HOST_PORT_TUNNEL_FRAME_NAME = port-tunnel-frame
+HOST_REACTOR_CORE_NAME = reactor-core
 
 HOST_BASIC_MUTEX_TEST_TARGET = test-host-basic-mutex
 HOST_PATCH_TEST_TARGET = test-host-patch
@@ -63,3 +66,4 @@ HOST_SERVER_RUNTIME_TEST_TARGET = test-host-server-runtime
 HOST_SERVER_ROUTES_TEST_TARGET = test-host-server-routes
 HOST_SANDBOX_TEST_TARGET = test-host-sandbox
 HOST_PORT_TUNNEL_FRAME_TEST_TARGET = test-port-tunnel-frame
+HOST_REACTOR_CORE_TEST_TARGET = test-host-reactor-core

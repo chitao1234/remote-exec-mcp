@@ -32,6 +32,9 @@ constexpr unsigned long DEFAULT_REVERSE_RECONNECT_MS = 1000UL;
 constexpr std::size_t DEFAULT_MAX_REQUEST_HEADER_BYTES = 64UL * 1024UL;
 constexpr std::size_t DEFAULT_MAX_REQUEST_BODY_BYTES = 512UL * 1024UL * 1024UL;
 constexpr unsigned long DEFAULT_MAX_OPEN_SESSIONS = 64UL;
+constexpr std::size_t DEFAULT_MAX_CONNECTIONS = 256UL;
+constexpr unsigned long DEFAULT_IO_THREADS = 1UL;
+constexpr unsigned long DEFAULT_BLOCKING_WORKERS = 4UL;
 
 enum class ConnectionMode { Listen, Reverse };
 enum class Transport { Http, Tls };
@@ -131,6 +134,9 @@ struct DaemonConfig {
     unsigned long stdin_write_timeout_ms = DEFAULT_STDIN_WRITE_TIMEOUT_MS;
     TransferLimitConfig transfer_limits = default_transfer_limit_config();
     unsigned long max_open_sessions = DEFAULT_MAX_OPEN_SESSIONS;
+    std::size_t max_connections = DEFAULT_MAX_CONNECTIONS;
+    unsigned long io_threads = DEFAULT_IO_THREADS;
+    unsigned long blocking_workers = DEFAULT_BLOCKING_WORKERS;
     PortForwardLimitConfig port_forward_limits;
     YieldTimeConfig yield_time;
     bool sandbox_configured = false;

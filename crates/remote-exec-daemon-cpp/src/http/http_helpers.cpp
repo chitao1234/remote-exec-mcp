@@ -53,10 +53,7 @@ std::string HttpRequest::header(const std::string& name) const {
 }
 
 Json parse_json_body(const HttpRequest& req) {
-    if (req.body.empty()) {
-        return Json::object();
-    }
-    return Json::parse(req.body);
+    return parse_request_json_object(req.body);
 }
 
 bool request_has_bearer_auth(const HttpRequest& req, const std::string& bearer_token) {
@@ -128,12 +125,20 @@ static std::string reason_phrase(int status) {
         return "Not Found";
     case 405:
         return "Method Not Allowed";
+    case 408:
+        return "Request Timeout";
     case 413:
         return "Payload Too Large";
     case 429:
         return "Too Many Requests";
+    case 431:
+        return "Request Header Fields Too Large";
     case 500:
         return "Internal Server Error";
+    case 501:
+        return "Not Implemented";
+    case 503:
+        return "Service Unavailable";
     default:
         return "Error";
     }

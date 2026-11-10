@@ -144,7 +144,7 @@ std::string daemon_instance_id() {
 } // namespace
 
 ServerRuntime::ServerRuntime(const DaemonConfig& config)
-    : config_(config), connections_(config.max_open_sessions), shutting_down_(false),
+    : config_(config), connections_(config.max_connections), shutting_down_(false),
       accept_thread_(), maintenance_thread_(), reverse_live_(0UL), reverse_busy_(0UL) {
     metadata_.daemon_instance_id = daemon_instance_id();
     metadata_.hostname = platform::hostname();
@@ -404,8 +404,7 @@ void ServerRuntime::reverse_loop() {
             if (!connections_.try_start_transport(
                     client,
                     [this](const std::shared_ptr<ConnectionTransport>& client) {
-                        std::shared_ptr<std::atomic<bool>> became_busy(
-                            new std::atomic<bool>(false)
+                        std::shared_ptr<std::atomic<bool>> became_busy(new std::atomic<bool>(false)
                         );
                         handle_client(
                             make_http_connection_context(
@@ -429,7 +428,14 @@ void ServerRuntime::reverse_loop() {
                     }
                 )) {
                 reverse_live_.fetch_sub(1UL);
-                return;
+                {
+                    BasicLockGuard lock(mutex_);
+                    if (shutting_down_) {
+                        return;
+                    }
+                }
+                platform::sleep_ms(config_.reverse_reconnect_ms);
+                continue;
             }
         } catch (const std::exception& ex) {
             log_message(LOG_WARN, "server", std::string("reverse connection failed: ") + ex.what());

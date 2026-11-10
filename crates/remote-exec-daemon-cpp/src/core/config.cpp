@@ -127,9 +127,9 @@ static std::vector<std::string> split_semicolon_list(const std::string& raw) {
     std::size_t start = 0;
     while (start <= raw.size()) {
         const std::size_t end = raw.find(';', start);
-        const std::string part = trim_ascii(
-            raw.substr(start, end == std::string::npos ? std::string::npos : end - start)
-        );
+        const std::string part =
+            trim_ascii(raw.substr(start, end == std::string::npos ? std::string::npos : end - start)
+            );
         if (!part.empty()) {
             values.push_back(part);
         }
@@ -472,6 +472,15 @@ static void validate_daemon_config(const DaemonConfig& config) {
     if (config.max_open_sessions == 0) {
         throw std::runtime_error("max_open_sessions must be greater than zero");
     }
+    if (config.max_connections == 0) {
+        throw std::runtime_error("max_connections must be greater than zero");
+    }
+    if (config.io_threads == 0) {
+        throw std::runtime_error("io_threads must be greater than zero");
+    }
+    if (config.blocking_workers == 0) {
+        throw std::runtime_error("blocking_workers must be greater than zero");
+    }
     validate_port_forward_limits(config.port_forward_limits);
     validate_transfer_limits(config.transfer_limits);
 }
@@ -578,6 +587,11 @@ DaemonConfig load_config(const std::string& path) {
     config.transfer_limits = read_transfer_limits(values);
     config.max_open_sessions =
         read_optional_unsigned_long(values, "max_open_sessions", DEFAULT_MAX_OPEN_SESSIONS);
+    config.max_connections =
+        read_optional_size_t(values, "max_connections", DEFAULT_MAX_CONNECTIONS);
+    config.io_threads = read_optional_unsigned_long(values, "io_threads", DEFAULT_IO_THREADS);
+    config.blocking_workers =
+        read_optional_unsigned_long(values, "blocking_workers", DEFAULT_BLOCKING_WORKERS);
     config.port_forward_limits = read_port_forward_limits(values);
     config.yield_time = read_yield_time_config(values);
     config.sandbox_configured = has_key_with_prefix(values, "sandbox_");
