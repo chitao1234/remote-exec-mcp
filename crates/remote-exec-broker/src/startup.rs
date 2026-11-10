@@ -497,12 +497,17 @@ mod tests {
 
     #[tokio::test]
     async fn remote_startup_probes_are_parallel_and_bounded() {
+        // Gates prove concurrency; allow extra scheduling time on loaded CI VMs.
+        let test_timeout = Duration::from_secs(10);
         let mut targets = BTreeMap::new();
         let mut requests = Vec::new();
         let mut releases = Vec::new();
         for index in 0..4 {
             let (addr, request, release) = spawn_gated_http_server().await;
-            targets.insert(format!("slow-{index}"), remote_http_target(addr, 10_000));
+            // Keep requests alive throughout both gated test phases.
+            let mut target = remote_http_target(addr, 30_000);
+            target.timeouts.request_ms = 30_000;
+            targets.insert(format!("slow-{index}"), target);
             requests.push(request);
             releases.push(release);
         }
@@ -526,7 +531,7 @@ mod tests {
             .unwrap(),
         ));
 
-        tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::time::timeout(test_timeout, async {
             for request in requests {
                 request
                     .await
@@ -539,7 +544,7 @@ mod tests {
             let _ = release.send(());
         }
 
-        let state = tokio::time::timeout(Duration::from_secs(2), build)
+        let state = tokio::time::timeout(test_timeout, build)
             .await
             .expect("startup should finish after releasing probes")
             .unwrap()

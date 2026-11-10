@@ -18,7 +18,8 @@ env:
 jobs:
   bsd-test:
     name: BSD test (${{ matrix.os.label }})
-    runs-on: ubuntu-latest
+    # Keep VM hosts stable across ubuntu-latest image migrations.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       BSD_NAME: ${{ matrix.os.name }}
