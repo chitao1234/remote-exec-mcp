@@ -9,11 +9,55 @@
 #include "test_contract_fixtures.h"
 #include "test_filesystem.h"
 
+#ifdef _WIN32
+#include <windows.h>
+
+#include "platform/win32_utf8.h"
+#endif
+
 namespace fs = test_fs;
 
 namespace {
 
 #ifdef _WIN32
+#ifdef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
+bool ansi_represents_wide(const wchar_t* text) {
+    BOOL used_default = FALSE;
+    const int length = WideCharToMultiByte(CP_ACP, 0, text, -1, nullptr, 0, nullptr, &used_default);
+    return length > 0 && used_default == FALSE;
+}
+#endif
+
+bool ansi_represents_paths(const std::wstring* paths, std::size_t count) {
+#ifdef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
+    for (std::size_t i = 0; i < count; ++i) {
+        if (!ansi_represents_wide(paths[i].c_str())) {
+            return false;
+        }
+    }
+#else
+    (void)paths;
+    (void)count;
+#endif
+    return true;
+}
+
+void assert_unicode_path_case_folding() {
+    const std::wstring upper = L"C:\\R\u00C9SUM\u00C9\\\u00C4rger.txt";
+    const std::wstring lower = L"c:/r\u00E9sum\u00E9/\u00E4rger.TXT";
+#ifdef REMOTE_EXEC_CPP_WINDOWS_ANSI_API
+    // The ANSI Win9x path API is limited to the active code page. Do not
+    // assume Western accented characters are representable there (for
+    // example, a CP936 host maps them through a lossy fallback).
+    if (!ansi_represents_wide(upper.c_str()) || !ansi_represents_wide(lower.c_str())) {
+        return;
+    }
+#endif
+    TEST_ASSERT(
+        host_path_equal(win32_utf8::utf8_from_wide(upper), win32_utf8::utf8_from_wide(lower))
+    );
+}
+
 void test_concurrent_first_path_comparison() {
     StartGate start;
     std::vector<std::thread> workers;
@@ -39,6 +83,19 @@ fs::path make_test_root() {
     fs::remove_all(root);
     fs::create_directories(root);
     return root;
+}
+
+bool path_text_supported(const std::string& utf8) {
+#if defined(_WIN32) && defined(REMOTE_EXEC_CPP_WINDOWS_ANSI_API)
+    try {
+        return ansi_represents_wide(win32_utf8::wide_from_utf8(utf8).c_str());
+    } catch (const std::exception&) {
+        return false;
+    }
+#else
+    (void)utf8;
+    return true;
+#endif
 }
 
 bool denied(
@@ -221,10 +278,12 @@ void run_shared_path_compare_cases() {
         if (it->at("platform").get<std::string>() != platform) {
             continue;
         }
-        TEST_ASSERT(
-            host_path_equal(it->at("left").get<std::string>(), it->at("right").get<std::string>())
-            == it->at("expected").get<bool>()
-        );
+        const std::string left = it->at("left").get<std::string>();
+        const std::string right = it->at("right").get<std::string>();
+        if (!path_text_supported(left) || !path_text_supported(right)) {
+            continue;
+        }
+        TEST_ASSERT(host_path_equal(left, right) == it->at("expected").get<bool>());
     }
 
     const Json& prefix_cases = cases.at("path_has_prefix");
@@ -232,13 +291,12 @@ void run_shared_path_compare_cases() {
         if (it->at("platform").get<std::string>() != platform) {
             continue;
         }
-        TEST_ASSERT(
-            host_path_has_prefix(
-                it->at("path").get<std::string>(),
-                it->at("prefix").get<std::string>()
-            )
-            == it->at("expected").get<bool>()
-        );
+        const std::string path = it->at("path").get<std::string>();
+        const std::string prefix = it->at("prefix").get<std::string>();
+        if (!path_text_supported(path) || !path_text_supported(prefix)) {
+            continue;
+        }
+        TEST_ASSERT(host_path_has_prefix(path, prefix) == it->at("expected").get<bool>());
     }
 
     const Json& within_cases = cases.at("path_is_within");
@@ -246,13 +304,12 @@ void run_shared_path_compare_cases() {
         if (it->at("platform").get<std::string>() != platform) {
             continue;
         }
-        TEST_ASSERT(
-            host_path_is_within(
-                it->at("path").get<std::string>(),
-                it->at("root").get<std::string>()
-            )
-            == it->at("expected").get<bool>()
-        );
+        const std::string path = it->at("path").get<std::string>();
+        const std::string root = it->at("root").get<std::string>();
+        if (!path_text_supported(path) || !path_text_supported(root)) {
+            continue;
+        }
+        TEST_ASSERT(host_path_is_within(path, root) == it->at("expected").get<bool>());
     }
 }
 
@@ -476,7 +533,7 @@ int main() {
 
 #ifdef _WIN32
     TEST_ASSERT(host_path_equal("/c/WORK/File.txt", "c:\\work\\file.txt"));
-    TEST_ASSERT(host_path_equal("C:\\RÉSUMÉ\\Ärger.txt", "c:/résumé/ärger.TXT"));
+    assert_unicode_path_case_folding();
     TEST_ASSERT(host_path_is_within("C:\\WORK\\SECRET\\key.txt", "c:/work/secret"));
     TEST_ASSERT(!host_path_is_within("C:\\Worker\\out.txt", "c:/work"));
 
@@ -488,13 +545,33 @@ int main() {
     TEST_ASSERT(denied(&windows_compiled, SANDBOX_READ, "C:\\WORK\\SECRET\\key.txt"));
     TEST_ASSERT(denied(&windows_compiled, SANDBOX_READ, "C:\\Worker\\out.txt"));
 
-    FilesystemSandbox unicode_windows_sandbox;
-    unicode_windows_sandbox.read.allow.push_back("C:\\RÉSUMÉ");
-    unicode_windows_sandbox.read.deny.push_back("C:\\RÉSUMÉ\\Ärger");
-    const CompiledFilesystemSandbox unicode_windows_compiled =
-        compile_filesystem_sandbox(unicode_windows_sandbox);
-    authorize_path(&unicode_windows_compiled, SANDBOX_READ, "c:/résumé/out.txt");
-    TEST_ASSERT(denied(&unicode_windows_compiled, SANDBOX_READ, "C:\\résumé\\ärger\\key.txt"));
+    const std::wstring unicode_allow = L"C:\\R\u00C9SUM\u00C9";
+    const std::wstring unicode_deny = L"C:\\R\u00C9SUM\u00C9\\\u00C4rger";
+    const std::wstring unicode_authorized = L"c:/r\u00E9sum\u00E9/out.txt";
+    const std::wstring unicode_denied = L"C:\\r\u00E9sum\u00E9\\\u00E4rger\\key.txt";
+    const std::wstring unicode_paths[] = {
+        unicode_allow,
+        unicode_deny,
+        unicode_authorized,
+        unicode_denied,
+    };
+    if (ansi_represents_paths(unicode_paths, 4U)) {
+        FilesystemSandbox unicode_windows_sandbox;
+        unicode_windows_sandbox.read.allow.push_back(win32_utf8::utf8_from_wide(unicode_allow));
+        unicode_windows_sandbox.read.deny.push_back(win32_utf8::utf8_from_wide(unicode_deny));
+        const CompiledFilesystemSandbox unicode_windows_compiled =
+            compile_filesystem_sandbox(unicode_windows_sandbox);
+        authorize_path(
+            &unicode_windows_compiled,
+            SANDBOX_READ,
+            win32_utf8::utf8_from_wide(unicode_authorized)
+        );
+        TEST_ASSERT(denied(
+            &unicode_windows_compiled,
+            SANDBOX_READ,
+            win32_utf8::utf8_from_wide(unicode_denied)
+        ));
+    }
 
     run_windows_short_alias_sandbox_cases();
 #endif

@@ -205,17 +205,28 @@ void test_decode_carry() {
     assert_decode_split_carry(949U, "\xC7", "\xD1", "\xED\x95\x9C");
 }
 
-void test_decode_carries_split_utf8_code_page() {
-    assert_decode_split_chunks(65001U, {"\xE4\xBD", "\xA0"}, "\xE4\xBD\xA0");
-    assert_decode_split_chunks(65001U, {"\xF0", "\x9F\x98", "\x80"}, "\xF0\x9F\x98\x80");
+void test_utf8_stream_split_chunks() {
+    const std::string three_byte[] = {"\xE4\xBD", "\xA0"};
+    const std::string four_byte[] = {"\xF0", "\x9F\x98", "\x80"};
+
+    std::string carry;
+    TEST_ASSERT(decode_utf8_stream_for_test(&carry, three_byte[0], false).empty());
+    TEST_ASSERT(carry == three_byte[0]);
+    TEST_ASSERT(decode_utf8_stream_for_test(&carry, three_byte[1], false) == "\xE4\xBD\xA0");
+    TEST_ASSERT(carry.empty());
+
+    TEST_ASSERT(decode_utf8_stream_for_test(&carry, four_byte[0], false).empty());
+    TEST_ASSERT(carry == four_byte[0]);
+    TEST_ASSERT(decode_utf8_stream_for_test(&carry, four_byte[1], false).empty());
+    TEST_ASSERT(carry == "\xF0\x9F\x98");
+    TEST_ASSERT(decode_utf8_stream_for_test(&carry, four_byte[2], false) == "\xF0\x9F\x98\x80");
+    TEST_ASSERT(carry.empty());
 }
 
-void test_utf8_code_page_wins_over_valid_gbk_mojibake() {
+void test_utf8_stream_preserves_valid_multibyte_sequences() {
     std::string carry;
     TEST_ASSERT(
-        decode_console_output_for_test(
-            65001U,
-            936U,
+        decode_utf8_stream_for_test(
             &carry,
             "\xE6\xAD\xA3\xE5\x9C\xA8\xE4\xB8\x8B\xE8\xBD\xBD",
             false
@@ -224,9 +235,7 @@ void test_utf8_code_page_wins_over_valid_gbk_mojibake() {
     );
     TEST_ASSERT(carry.empty());
     TEST_ASSERT(
-        decode_console_output_for_test(
-            65001U,
-            936U,
+        decode_utf8_stream_for_test(
             &carry,
             "\xE2\x96\x92\xE2\x96\x92\xE2\x96\x92\xE2\x96\x92",
             false
@@ -497,8 +506,8 @@ int main() {
     test_invalid_utf8_to_wide();
     test_code_page_decode();
     test_decode_carry();
-    test_decode_carries_split_utf8_code_page();
-    test_utf8_code_page_wins_over_valid_gbk_mojibake();
+    test_utf8_stream_split_chunks();
+    test_utf8_stream_preserves_valid_multibyte_sequences();
     test_decode_carries_split_four_byte_code_page_sequence();
     test_decode_complete_dbcs_character_does_not_carry_trail_byte();
     test_invalid_decode_fallback();

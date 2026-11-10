@@ -28,7 +28,9 @@
 #include "port_forward/port_tunnel_frame.h"
 #include "rpc/server_contract.h"
 #include "runtime/reactor_server.h"
+#include "test_commands.h"
 #include "test_filesystem.h"
+#include "test_progress.h"
 #include "test_tar_helpers.h"
 #include "tls/tls_connection_transport.h"
 namespace {
@@ -556,9 +558,13 @@ void test_tunnel_udp(unsigned short port) {
 }
 
 void test_tunnel(unsigned short port) {
+    test_progress::mark("tunnel/connect");
     test_tunnel_connect(port);
+    test_progress::mark("tunnel/listen");
     test_tunnel_listen(port);
+    test_progress::mark("tunnel/bind-conflict");
     test_tunnel_bind_conflict(port);
+    test_progress::mark("tunnel/udp");
     test_tunnel_udp(port);
 }
 
@@ -604,67 +610,75 @@ void test_reverse() {
     config.reverse_max_connections = 1U;
     config.reverse_reconnect_ms = 100U;
 
-    ReactorServer server(config);
-    std::string start_error;
-    if (!server.start(&start_error)) {
-        TEST_FAIL_MESSAGE(start_error);
+    test_progress::mark("reverse/start");
+    {
+        ReactorServer server(config);
+        std::string start_error;
+        if (!server.start(&start_error)) {
+            TEST_FAIL_MESSAGE(start_error);
+        }
+        std::thread server_thread([&]() { server.run(); });
+        test_progress::mark("reverse/wait");
+
+        std::atomic<bool> broker_ok(false);
+        std::thread broker_thread([&]() {
+            const SOCKET accepted = accept_socket_cloexec(broker_listener, nullptr, nullptr);
+            if (accepted == INVALID_SOCKET) {
+                return;
+            }
+            set_socket_timeout_ms(accepted, 5000);
+            char magic[8];
+            char length[4];
+            if (!read_exact(accepted, magic, sizeof(magic))
+                || std::string(magic, sizeof(magic)) != "REXREV1\n"
+                || !read_exact(accepted, length, sizeof(length))) {
+                close_socket(accepted);
+                return;
+            }
+            const std::uint32_t size =
+                (static_cast<std::uint32_t>(static_cast<unsigned char>(length[0])) << 24)
+                | (static_cast<std::uint32_t>(static_cast<unsigned char>(length[1])) << 16)
+                | (static_cast<std::uint32_t>(static_cast<unsigned char>(length[2])) << 8)
+                | static_cast<std::uint32_t>(static_cast<unsigned char>(length[3]));
+            std::string payload(size, '\0');
+            if (!read_exact(accepted, &payload[0], payload.size())) {
+                close_socket(accepted);
+                return;
+            }
+            if (payload.find("\"target\":\"reactor-reverse-test\"") == std::string::npos
+                || payload.find("\"bearer_token\":\"reverse-secret\"") == std::string::npos) {
+                close_socket(accepted);
+                return;
+            }
+            const std::string ack_payload = "{\"accepted\":true}";
+            std::string ack = "REXREV1\n";
+            ack.push_back('\0');
+            ack.push_back('\0');
+            ack.push_back('\0');
+            ack.push_back(static_cast<char>(ack_payload.size()));
+            ack += ack_payload;
+            send_bytes(accepted, ack.data(), ack.size());
+
+            const std::string request = "POST /v1/health HTTP/1.1\r\n"
+                                        "Host: 127.0.0.1\r\n"
+                                        "Connection: close\r\n"
+                                        "Content-Length: 2\r\n\r\n{}";
+            send_bytes(accepted, request.data(), request.size());
+            const Response response = read_response(accepted);
+            broker_ok.store(response.status == 200);
+            close_socket(accepted);
+        });
+
+        TEST_ASSERT(test_assert::wait_until_true(broker_ok, 8000U));
+        test_progress::mark("reverse/stop");
+        server.request_stop();
+        server_thread.join();
+        test_progress::mark("reverse/server-joined");
+        broker_thread.join();
+        test_progress::mark("reverse/broker-joined");
+        close_socket(broker_listener);
     }
-    std::thread server_thread([&]() { server.run(); });
-
-    std::atomic<bool> broker_ok(false);
-    std::thread broker_thread([&]() {
-        const int accepted = accept_socket_cloexec(broker_listener, nullptr, nullptr);
-        if (accepted == INVALID_SOCKET) {
-            return;
-        }
-        set_socket_timeout_ms(accepted, 5000);
-        char magic[8];
-        char length[4];
-        if (!read_exact(accepted, magic, sizeof(magic))
-            || std::string(magic, sizeof(magic)) != "REXREV1\n"
-            || !read_exact(accepted, length, sizeof(length))) {
-            close_socket(accepted);
-            return;
-        }
-        const std::uint32_t size =
-            (static_cast<std::uint32_t>(static_cast<unsigned char>(length[0])) << 24)
-            | (static_cast<std::uint32_t>(static_cast<unsigned char>(length[1])) << 16)
-            | (static_cast<std::uint32_t>(static_cast<unsigned char>(length[2])) << 8)
-            | static_cast<std::uint32_t>(static_cast<unsigned char>(length[3]));
-        std::string payload(size, '\0');
-        if (!read_exact(accepted, &payload[0], payload.size())) {
-            close_socket(accepted);
-            return;
-        }
-        if (payload.find("\"target\":\"reactor-reverse-test\"") == std::string::npos
-            || payload.find("\"bearer_token\":\"reverse-secret\"") == std::string::npos) {
-            close_socket(accepted);
-            return;
-        }
-        const std::string ack_payload = "{\"accepted\":true}";
-        std::string ack = "REXREV1\n";
-        ack.push_back('\0');
-        ack.push_back('\0');
-        ack.push_back('\0');
-        ack.push_back(static_cast<char>(ack_payload.size()));
-        ack += ack_payload;
-        send_bytes(accepted, ack.data(), ack.size());
-
-        const std::string request = "POST /v1/health HTTP/1.1\r\n"
-                                    "Host: 127.0.0.1\r\n"
-                                    "Connection: close\r\n"
-                                    "Content-Length: 2\r\n\r\n{}";
-        send_bytes(accepted, request.data(), request.size());
-        const Response response = read_response(accepted);
-        broker_ok.store(response.status == 200);
-        close_socket(accepted);
-    });
-
-    TEST_ASSERT(test_assert::wait_until_true(broker_ok, 8000U));
-    server.request_stop();
-    server_thread.join();
-    broker_thread.join();
-    close_socket(broker_listener);
+    test_progress::mark("reverse/server-destroyed");
 }
 
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
@@ -819,14 +833,9 @@ void test_transfer(unsigned short port, const test_fs::path& root) {
     std::remove(destination.string().c_str());
 }
 
-void test_exec(unsigned short port) {
-#ifdef _WIN32
-    const char* background_command = "ping -n 2 127.0.0.1 >nul & echo done";
-    const char* sleep_command = "ping -n 3 127.0.0.1 >nul";
-#else
-    const char* background_command = "printf start; sleep 1; printf done";
-    const char* sleep_command = "sleep 1";
-#endif
+void test_exec(unsigned short port, const test_fs::path& root) {
+    const std::string background_command = test_commands::echo_after_delay(root, "done", 1000UL);
+    const std::string sleep_command = test_commands::delay_command(1000UL);
     const Response start = request(
         port,
         "/v1/exec/start",
@@ -994,12 +1003,17 @@ void test_reactor_server() {
     TEST_ASSERT(invalid_upgrade.status == 400);
     TEST_ASSERT(invalid_upgrade.body.find("bad_request") != std::string::npos);
 
-    test_exec(port);
+    test_progress::mark("exec");
+    test_exec(port, root);
+    test_progress::mark("transfer");
     test_transfer(port, root);
+    test_progress::mark("tunnel");
     test_tunnel(port);
 
+    test_progress::mark("stop");
     server.request_stop();
     server_thread.join();
+    test_progress::mark("reactor-server-joined");
 }
 
 } // namespace
@@ -1014,8 +1028,10 @@ int main() {
     test_event_loop();
 #endif
     test_reactor_server();
+    test_progress::mark("reverse");
     test_reverse();
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
+    test_progress::mark("tls");
     test_tls();
 #endif
     return 0;
