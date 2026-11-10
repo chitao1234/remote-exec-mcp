@@ -3,6 +3,7 @@
 #include "core/config.h"
 #include "http/http_helpers.h"
 #include "rpc/server_contract.h"
+#include "rpc/server_route_transfer.h"
 #include "runtime/app_state.h"
 #include "runtime/route_context.h"
 
@@ -32,4 +33,5 @@ private:
     FileRouteContext file_;
     ImageRouteContext image_;
     PatchRouteContext patch_;
+    TransferRouteContext transfer_;
 };

@@ -18,18 +18,14 @@ reactor. The production entrypoint now uses the reactor for these routes:
 - `exec/start` and `exec/write` (non-blocking sessions, bounded output ring);
 - `file/read`, `file/write`, and `file/edit`;
 - `image/read`;
-- `patch/apply`.
+- `patch/apply`;
+- `transfer/export`, `transfer/path-info`, and `transfer/import`;
+- the v4 port-forward upgrade tunnel, including retained listen sessions,
+  resume, TCP, and UDP.
 
-Routes that have not migrated yet return `501 not_migrated`, and
-`target-info` does not advertise them:
-
-- `transfer/export`, `transfer/path-info`, `transfer/import`;
-- the port-forward upgrade route.
-
-TLS transport and reverse connection mode are rejected at startup until they
-are reimplemented on the non-blocking stream layer. The legacy thread-based
-implementation is still present for its tests and is removed as each subsystem
-migrates.
+TLS transport and reverse connection mode are still the legacy implementation
+and are rejected at startup until they are moved onto the non-blocking stream
+layer. `target-info` advertises the routes above.
 
 The reactor core bounds HTTP input and connection count, uses timers instead of
 polling ticks, and shards `select()` sets on Winsock 1.1 so `max_connections`

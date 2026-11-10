@@ -16,6 +16,7 @@
 class BlockingPool;
 class ExecService;
 class ReactorRouter;
+class TunnelService;
 
 // One HTTP/1.1 connection driven entirely by loop readiness. The connection
 // never blocks: reads and writes return WouldBlock and interest is flipped.
@@ -26,6 +27,7 @@ public:
         BlockingPool* pool;
         const ReactorRouter* router;
         ExecService* exec;
+        TunnelService* tunnel;
         std::size_t max_header_bytes;
         std::size_t max_body_bytes;
         unsigned long idle_timeout_ms;
@@ -76,6 +78,8 @@ private:
     void on_handler_done(const std::shared_ptr<HttpResponse>& response);
     bool process_input();
     void dispatch(HttpRequest& request);
+    void begin_tunnel_upgrade(const HttpRequest& request);
+    void finish_upgrade();
     void begin_write(const HttpResponse& response, bool keep_alive);
     void fail(int status, const char* code, const std::string& message);
     void arm_timer();
@@ -90,6 +94,7 @@ private:
     BlockingPool* pool_;
     const ReactorRouter* router_;
     ExecService* exec_;
+    TunnelService* tunnel_;
     std::size_t max_header_bytes_;
     std::size_t max_body_bytes_;
     unsigned long idle_timeout_ms_;
@@ -104,6 +109,7 @@ private:
     bool head_parsed_;
     bool keep_alive_;
     bool close_after_write_;
+    bool upgrade_after_write_;
     std::size_t header_end_;
     std::size_t body_length_;
     HttpRequestBodyFraming framing_;

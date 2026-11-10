@@ -17,6 +17,7 @@ class EventLoop;
 class BlockingPool;
 class ExecService;
 class ReactorRouter;
+class TunnelService;
 class HttpConn;
 
 // Reactor-based daemon core. The listener lives on shard 0 and hands accepted
@@ -57,6 +58,7 @@ private:
     std::vector<std::thread> loop_threads_;
     std::unique_ptr<BlockingPool> pool_;
     std::unique_ptr<ExecService> exec_;
+    std::unique_ptr<TunnelService> tunnel_;
     std::unique_ptr<ReactorRouter> router_;
     UniqueSocket listener_;
     BasicMutex connections_mutex_;

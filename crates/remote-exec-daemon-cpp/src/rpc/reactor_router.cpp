@@ -43,7 +43,8 @@ ReactorRouter::ReactorRouter(
                                                                    metadata.daemon_instance_id,
                                                                    config.allow_apply_patch,
                                                                    make_patch_options(config)
-                                                               ) {
+                                                               ),
+      transfer_(gate_, paths_, config.transfer_limits) {
 }
 
 bool ReactorRouter::runs_inline(server_contract::RouteId route) {
@@ -59,6 +60,9 @@ bool ReactorRouter::is_migrated(server_contract::RouteId route) {
     case server_contract::ROUTE_FILE_READ:
     case server_contract::ROUTE_FILE_WRITE:
     case server_contract::ROUTE_FILE_EDIT:
+    case server_contract::ROUTE_TRANSFER_EXPORT:
+    case server_contract::ROUTE_TRANSFER_PATH_INFO:
+    case server_contract::ROUTE_TRANSFER_IMPORT:
         return true;
     default:
         return false;
@@ -94,6 +98,15 @@ HttpResponse ReactorRouter::dispatch(server_contract::RouteId route, const HttpR
         break;
     case server_contract::ROUTE_FILE_EDIT:
         response = handle_file_edit(file_, request);
+        break;
+    case server_contract::ROUTE_TRANSFER_EXPORT:
+        response = handle_transfer_export(transfer_, request);
+        break;
+    case server_contract::ROUTE_TRANSFER_PATH_INFO:
+        response = handle_transfer_path_info(transfer_, request);
+        break;
+    case server_contract::ROUTE_TRANSFER_IMPORT:
+        response = handle_transfer_import(transfer_, request);
         break;
     default:
         response = make_rpc_error_response(

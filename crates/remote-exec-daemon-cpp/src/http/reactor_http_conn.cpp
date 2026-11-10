@@ -10,6 +10,7 @@
 #include "exec/exec_service.h"
 #include "http/http_request.h"
 #include "platform/platform.h"
+#include "port_forward/tunnel_service.h"
 #include "rpc/reactor_router.h"
 #include "rpc/server_contract.h"
 #include "rpc/server_route_common.h"
@@ -211,13 +212,14 @@ HttpConn::HttpConn(
 )
     : id_(id), shard_index_(shard_index), fd_(socket.get()),
       stream_(make_socket_stream(std::move(socket))), loop_(options.loop), pool_(options.pool),
-      router_(options.router), exec_(options.exec), max_header_bytes_(options.max_header_bytes),
-      max_body_bytes_(options.max_body_bytes), idle_timeout_ms_(options.idle_timeout_ms),
-      shutting_down_(options.shutting_down), on_closed_(options.on_closed),
+      router_(options.router), exec_(options.exec), tunnel_(options.tunnel),
+      max_header_bytes_(options.max_header_bytes), max_body_bytes_(options.max_body_bytes),
+      idle_timeout_ms_(options.idle_timeout_ms), shutting_down_(options.shutting_down),
+      on_closed_(options.on_closed),
       input_(input_limit_for(options.max_header_bytes, options.max_body_bytes)), output_offset_(0U),
       state_(State::Reading), closed_(false), head_parsed_(false), keep_alive_(true),
-      close_after_write_(false), header_end_(0U), body_length_(0U), framing_(), head_(), scanner_(),
-      timer_(0U), timer_armed_(false) {
+      close_after_write_(false), upgrade_after_write_(false), header_end_(0U), body_length_(0U),
+      framing_(), head_(), scanner_(), timer_(0U), timer_armed_(false) {
 }
 
 HttpConn::~HttpConn() {
@@ -333,6 +335,10 @@ void HttpConn::on_writable() {
 
     output_.clear();
     output_offset_ = 0U;
+    if (upgrade_after_write_) {
+        finish_upgrade();
+        return;
+    }
     if (close_after_write_) {
         close();
         return;
@@ -466,6 +472,11 @@ void HttpConn::dispatch(HttpRequest& request) {
         return;
     }
 
+    if (route == server_contract::ROUTE_PORT_TUNNEL) {
+        begin_tunnel_upgrade(request);
+        return;
+    }
+
     if (route == server_contract::ROUTE_EXEC_START || route == server_contract::ROUTE_EXEC_WRITE) {
         if (exec_ == nullptr) {
             begin_write(
@@ -530,6 +541,54 @@ void HttpConn::on_handler_done(const std::shared_ptr<HttpResponse>& response) {
         return;
     }
     begin_write(*response, keep_alive_);
+}
+
+void HttpConn::begin_tunnel_upgrade(const HttpRequest& request) {
+    if (tunnel_ == nullptr) {
+        begin_write(
+            make_rpc_error_response(500, "internal_error", "port tunnel unavailable"),
+            false
+        );
+        return;
+    }
+    HttpResponse error;
+    if (!tunnel_->validate_upgrade(request, &error)) {
+        begin_write(error, false);
+        return;
+    }
+
+    std::map<std::string, std::string> headers;
+    headers[request_id_header_name()] = request_id_for_request(request);
+    output_ = render_http_upgrade_response(server_contract::PORT_TUNNEL_UPGRADE_TOKEN, headers);
+    output_offset_ = 0U;
+    state_ = State::Writing;
+    upgrade_after_write_ = true;
+    if (!loop_->set_interest(fd_, IO_WRITE)) {
+        close();
+        return;
+    }
+    arm_timer_with(EXEC_REQUEST_SAFETY_MS);
+    on_writable();
+}
+
+void HttpConn::finish_upgrade() {
+    if (closed_) {
+        return;
+    }
+    std::shared_ptr<Stream> transport = stream_;
+    stream_.reset();
+    std::string initial_input = input_.take();
+
+    closed_ = true;
+    state_ = State::Closed;
+    cancel_timer();
+    loop_->remove(fd_);
+    if (on_closed_) {
+        on_closed_(id_);
+    }
+    if (tunnel_ != nullptr) {
+        tunnel_->adopt(transport, initial_input);
+    }
 }
 
 void HttpConn::begin_write(const HttpResponse& response, bool keep_alive) {

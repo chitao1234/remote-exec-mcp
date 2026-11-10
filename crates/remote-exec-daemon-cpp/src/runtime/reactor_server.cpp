@@ -17,6 +17,7 @@
 #include "http/reactor_http_conn.h"
 #include "platform/platform.h"
 #include "policy/filesystem_sandbox.h"
+#include "port_forward/tunnel_service.h"
 #include "rpc/reactor_router.h"
 #include "runtime/route_context.h"
 
@@ -40,9 +41,10 @@ DaemonCapabilities reactor_capabilities(const DaemonConfig& config) {
     DaemonCapabilities capabilities = detect_daemon_capabilities(config);
     capabilities.supports_exec = config.allow_exec;
     capabilities.supports_pty = process_session_supports_pty();
-    capabilities.supports_port_forward = false;
-    capabilities.port_forward_protocol_version = 0U;
-    capabilities.transfer_stream_protocol_version = 0U;
+    capabilities.supports_port_forward = true;
+    capabilities.port_forward_protocol_version = server_contract::PORT_TUNNEL_PROTOCOL_VERSION;
+    capabilities.transfer_stream_protocol_version =
+        server_contract::TRANSFER_STREAM_PROTOCOL_VERSION;
     return capabilities;
 }
 
@@ -151,6 +153,12 @@ ReactorServer::ReactorServer(const DaemonConfig& config)
         config_.stdin_write_timeout_ms,
         config_.max_open_sessions,
         config_.allow_exec,
+        loops_[0].get(),
+        pool_.get()
+    ));
+    tunnel_.reset(new TunnelService(
+        config_.port_forward_limits,
+        config_.http_auth_bearer_token,
         loops_[0].get(),
         pool_.get()
     ));
@@ -304,6 +312,9 @@ void ReactorServer::exec_tick() {
     if (exec_) {
         exec_->tick();
     }
+    if (tunnel_) {
+        tunnel_->tick();
+    }
     schedule_exec_tick();
 }
 
@@ -366,6 +377,7 @@ void ReactorServer::accept_ready() {
         options.pool = pool_.get();
         options.router = router_.get();
         options.exec = exec_.get();
+        options.tunnel = tunnel_.get();
         options.max_header_bytes = config_.max_request_header_bytes;
         options.max_body_bytes = config_.max_request_body_bytes;
         options.idle_timeout_ms = config_.http_connection_idle_timeout_ms;
@@ -420,6 +432,9 @@ void ReactorServer::finalize() {
     finalized_ = true;
     if (exec_) {
         exec_->cancel_all();
+    }
+    if (tunnel_) {
+        tunnel_->shutdown();
     }
     if (pool_) {
         pool_->stop();
