@@ -437,7 +437,8 @@ static void assert_streaming_import_ignores_generic_http_body_limit(const fs::pa
     TEST_ASSERT(fs::read_file_bytes(imported_path) == "stream body exceeds generic http limit");
 }
 
-static void assert_streaming_import_failure_closes_connection_with_unread_body(const fs::path& root
+static void assert_streaming_import_failure_closes_connection_with_unread_body(
+    const fs::path& root
 ) {
     TestHttpConnectionHarness harness(root);
     harness.state.config.transfer_limits.max_archive_bytes = 16U;

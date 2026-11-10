@@ -95,8 +95,9 @@ const RouteDispatchEntry ROUTE_DISPATCH[] = {
     {server_contract::ROUTE_TRANSFER_EXPORT,
      &route_transfer_export,
      ROUTE_EXECUTION_STREAMING_EXPORT},
-    {server_contract::ROUTE_TRANSFER_PATH_INFO, &route_transfer_path_info, ROUTE_EXECUTION_BUFFERED
-    },
+    {server_contract::ROUTE_TRANSFER_PATH_INFO,
+     &route_transfer_path_info,
+     ROUTE_EXECUTION_BUFFERED},
     {server_contract::ROUTE_TRANSFER_IMPORT,
      &route_transfer_import,
      ROUTE_EXECUTION_STREAMING_IMPORT},

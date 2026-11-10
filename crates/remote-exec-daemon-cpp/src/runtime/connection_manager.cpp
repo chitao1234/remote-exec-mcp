@@ -125,11 +125,9 @@ bool ConnectionManager::try_start_transport(
             return false;
         }
         const unsigned long worker_id = next_worker_id_++;
-        record.reset(new WorkerRecord(
-            worker_id,
-            [client, worker_main]() { worker_main(client); },
-            client
-        ));
+        record.reset(
+            new WorkerRecord(worker_id, [client, worker_main]() { worker_main(client); }, client)
+        );
         workers_[worker_id] = record;
         if (!launch_worker_locked(record, start_gate)) {
             return false;

@@ -404,7 +404,8 @@ void ServerRuntime::reverse_loop() {
             if (!connections_.try_start_transport(
                     client,
                     [this](const std::shared_ptr<ConnectionTransport>& client) {
-                        std::shared_ptr<std::atomic<bool>> became_busy(new std::atomic<bool>(false)
+                        std::shared_ptr<std::atomic<bool>> became_busy(
+                            new std::atomic<bool>(false)
                         );
                         handle_client(
                             make_http_connection_context(

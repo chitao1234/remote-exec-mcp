@@ -127,9 +127,9 @@ static std::vector<std::string> split_semicolon_list(const std::string& raw) {
     std::size_t start = 0;
     while (start <= raw.size()) {
         const std::size_t end = raw.find(';', start);
-        const std::string part =
-            trim_ascii(raw.substr(start, end == std::string::npos ? std::string::npos : end - start)
-            );
+        const std::string part = trim_ascii(
+            raw.substr(start, end == std::string::npos ? std::string::npos : end - start)
+        );
         if (!part.empty()) {
             values.push_back(part);
         }

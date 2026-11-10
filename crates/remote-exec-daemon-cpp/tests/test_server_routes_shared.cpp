@@ -256,8 +256,10 @@ static void assert_image_routes(TestRouteHarness& harness, const fs::path& root)
     const fs::path image_file = root / "tiny.png";
     fs::write_file_bytes(
         image_file,
-        base64_decode_bytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
-                            "x8AAwMCAO+aL9sAAAAASUVORK5CYII=")
+        base64_decode_bytes(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
+            "x8AAwMCAO+aL9sAAAAASUVORK5CYII="
+        )
     );
     const std::string original_image = fs::read_file_bytes(image_file);
 
@@ -339,8 +341,10 @@ static void assert_image_routes(TestRouteHarness& harness, const fs::path& root)
     fs::create_directories(blocked_image_dir);
     fs::write_file_bytes(
         blocked_image_dir / "blocked.png",
-        base64_decode_bytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////"
-                            "fwAJ+wP9KobjigAAAABJRU5ErkJggg==")
+        base64_decode_bytes(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////"
+            "fwAJ+wP9KobjigAAAABJRU5ErkJggg=="
+        )
     );
     fs::permissions(blocked_image_dir, fs::perms::none, fs::perm_options::replace);
     const fs::path blocked_image_path = blocked_image_dir / "blocked.png";
@@ -378,8 +382,10 @@ static void assert_windows_posix_root_routes(const fs::path& root) {
     const fs::path image_file = assets / "rooted.png";
     fs::write_file_bytes(
         image_file,
-        base64_decode_bytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
-                            "x8AAwMCAO+aL9sAAAAASUVORK5CYII=")
+        base64_decode_bytes(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
+            "x8AAwMCAO+aL9sAAAAASUVORK5CYII="
+        )
     );
 
     TestRouteHarness harness(synthetic_root);

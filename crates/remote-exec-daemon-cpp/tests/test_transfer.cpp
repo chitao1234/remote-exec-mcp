@@ -164,7 +164,8 @@ static std::vector<std::string> read_tar_paths(const std::string& archive) {
     return paths;
 }
 
-static std::vector<std::pair<std::string, std::string>> read_tar_symlinks(const std::string& archive
+static std::vector<std::pair<std::string, std::string>> read_tar_symlinks(
+    const std::string& archive
 ) {
     const std::vector<TarWalkEntry> entries = walk_tar_entries(archive);
     std::vector<std::pair<std::string, std::string>> symlinks;

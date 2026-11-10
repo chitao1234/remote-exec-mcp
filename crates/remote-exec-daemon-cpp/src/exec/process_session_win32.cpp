@@ -341,8 +341,10 @@ void write_stdin_to_pipe(const UniqueHandle& stdin_write, const std::string& cha
             == 0) {
             const DWORD error = GetLastError();
             if (is_win32_pipe_closed_error(error)) {
-                throw ProcessStdinClosedError("stdin is closed for this session; rerun "
-                                              "exec_command with tty=true to keep stdin open");
+                throw ProcessStdinClosedError(
+                    "stdin is closed for this session; rerun "
+                    "exec_command with tty=true to keep stdin open"
+                );
             }
             throw std::runtime_error(last_error_message("WriteFile"));
         }
@@ -386,8 +388,10 @@ void write_stdin_to_pipe_with_timeout(
     unsigned long timeout_ms
 ) {
     if (!stdin_write.valid()) {
-        throw ProcessStdinClosedError("stdin is closed for this session; rerun exec_command with "
-                                      "tty=true to keep stdin open");
+        throw ProcessStdinClosedError(
+            "stdin is closed for this session; rerun exec_command with "
+            "tty=true to keep stdin open"
+        );
     }
 
     UniqueHandle duplicate =

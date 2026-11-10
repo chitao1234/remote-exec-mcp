@@ -627,8 +627,10 @@ static bool marker_count_stable(const fs::path& path, unsigned long timeout_ms) 
 
 static void assert_win32_process_tree_terminates_descendants(const fs::path& root) {
     if (!win32_process_tree::process_tree_snapshot_supported()) {
-        std::printf("skipping Win32 descendant process-tree termination test: process snapshots "
-                    "unavailable\n");
+        std::printf(
+            "skipping Win32 descendant process-tree termination test: process snapshots "
+            "unavailable\n"
+        );
         return;
     }
 
@@ -2040,8 +2042,8 @@ static void assert_tty_resume_round_trip(
     std::string resume_output = normalize_output(waiting.at("output").get<std::string>())
                                 + normalize_output(resumed.at("output").get<std::string>());
     const std::uint64_t resume_started = platform::monotonic_ms();
-    while (resumed.at("running").get<bool>() && platform::monotonic_ms() - resume_started < 5000UL
-    ) {
+    while (resumed.at("running").get<bool>()
+           && platform::monotonic_ms() - resume_started < 5000UL) {
         resumed = poll_session(store, waiting_id, fast_yield, "", 250UL);
         resume_output += normalize_output(resumed.at("output").get<std::string>());
     }

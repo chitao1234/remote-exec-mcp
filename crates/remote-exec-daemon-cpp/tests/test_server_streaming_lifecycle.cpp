@@ -328,7 +328,8 @@ static void assert_service_shutdown_releases_detached_retained_listener(TestDaem
     wait_until_bindable(endpoint);
 }
 
-static void assert_service_shutdown_closes_retained_listener_with_active_stream(const fs::path& root
+static void assert_service_shutdown_closes_retained_listener_with_active_stream(
+    const fs::path& root
 ) {
     TestDaemonState state;
     initialize_test_daemon_state(state, root);
@@ -458,7 +459,8 @@ static void assert_expired_tunnel_session_is_released(TestDaemonState& state) {
     TEST_ASSERT(rebound.valid());
 }
 
-static void assert_detached_listener_expiry_survives_last_external_service_ref(const fs::path& root
+static void assert_detached_listener_expiry_survives_last_external_service_ref(
+    const fs::path& root
 ) {
     TestDaemonState state;
     initialize_test_daemon_state(state, root);
@@ -477,7 +479,8 @@ static void assert_detached_listener_expiry_survives_last_external_service_ref(c
     wait_until_bindable(endpoint);
 }
 
-static void assert_detached_udp_bind_expiry_survives_last_external_service_ref(const fs::path& root
+static void assert_detached_udp_bind_expiry_survives_last_external_service_ref(
+    const fs::path& root
 ) {
     TestDaemonState state;
     initialize_test_daemon_state(state, root);

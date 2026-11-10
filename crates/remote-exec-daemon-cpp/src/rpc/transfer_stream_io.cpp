@@ -154,16 +154,19 @@ std::size_t StringTransferStreamByteReader::read(char* data, std::size_t size) {
     return count;
 }
 
-ChunkedTransferStreamArchiveSink::ChunkedTransferStreamArchiveSink(TransferStreamChunkWriter* chunks
+ChunkedTransferStreamArchiveSink::ChunkedTransferStreamArchiveSink(
+    TransferStreamChunkWriter* chunks
 )
     : chunks_(chunks), archive_bytes_(0U), pending_() {
 }
 
 void ChunkedTransferStreamArchiveSink::send_preface() {
-    chunks_->write_chunk(std::string(
-        server_contract::TRANSFER_STREAM_PREFACE,
-        server_contract::TRANSFER_STREAM_PREFACE_LEN
-    ));
+    chunks_->write_chunk(
+        std::string(
+            server_contract::TRANSFER_STREAM_PREFACE,
+            server_contract::TRANSFER_STREAM_PREFACE_LEN
+        )
+    );
 }
 
 void ChunkedTransferStreamArchiveSink::write(const char* data, std::size_t size) {

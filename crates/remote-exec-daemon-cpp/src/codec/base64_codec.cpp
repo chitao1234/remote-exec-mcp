@@ -53,7 +53,8 @@ std::vector<unsigned char> decode_base64_values(const std::string& data) {
         }
         bytes.push_back(static_cast<unsigned char>((values[0] << 2) | (values[1] >> 4)));
         if (padding < 2) {
-            bytes.push_back(static_cast<unsigned char>(((values[1] & 0x0f) << 4) | (values[2] >> 2))
+            bytes.push_back(
+                static_cast<unsigned char>(((values[1] & 0x0f) << 4) | (values[2] >> 2))
             );
         }
         if (padding < 1) {

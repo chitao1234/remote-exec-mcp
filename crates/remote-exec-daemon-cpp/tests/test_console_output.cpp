@@ -162,7 +162,8 @@ void assert_decode_split_carry(
     }
 
     std::string carry;
-    TEST_ASSERT(decode_console_output_for_test(code_page, 1252U, &carry, first_byte, false).empty()
+    TEST_ASSERT(
+        decode_console_output_for_test(code_page, 1252U, &carry, first_byte, false).empty()
     );
     TEST_ASSERT(carry == first_byte);
     TEST_ASSERT(

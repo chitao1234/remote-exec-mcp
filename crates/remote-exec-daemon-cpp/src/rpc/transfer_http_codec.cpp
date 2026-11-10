@@ -134,9 +134,9 @@ TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request
             )
         );
     }
-    metadata.create_parent =
-        parse_create_parent(required_header(request, server_contract::TRANSFER_CREATE_PARENT_HEADER)
-        );
+    metadata.create_parent = parse_create_parent(
+        required_header(request, server_contract::TRANSFER_CREATE_PARENT_HEADER)
+    );
     const std::string source_type =
         required_header(request, server_contract::TRANSFER_SOURCE_TYPE_HEADER);
     if (!parse_transfer_source_type_wire_value(source_type, &metadata.source_type)) {
@@ -181,10 +181,12 @@ void write_transfer_export_headers(HttpResponse& response, const ExportedPayload
 Json transfer_warnings_json(const std::vector<TransferWarning>& warnings) {
     Json json = Json::array();
     for (std::size_t i = 0; i < warnings.size(); ++i) {
-        json.push_back(Json{
-            {"code", warnings[i].code},
-            {"message", warnings[i].message},
-        });
+        json.push_back(
+            Json{
+                {"code", warnings[i].code},
+                {"message", warnings[i].message},
+            }
+        );
     }
     return json;
 }

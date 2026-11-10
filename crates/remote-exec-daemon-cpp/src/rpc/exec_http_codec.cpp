@@ -31,10 +31,12 @@ double wall_time_seconds(std::uint64_t started_at_ms) {
 Json exec_session_warnings_json(const std::vector<ExecSessionWarning>& warnings) {
     Json json = Json::array();
     for (std::size_t i = 0; i < warnings.size(); ++i) {
-        json.push_back(Json{
-            {"code", warnings[i].code},
-            {"message", warnings[i].message},
-        });
+        json.push_back(
+            Json{
+                {"code", warnings[i].code},
+                {"message", warnings[i].message},
+            }
+        );
     }
     return json;
 }

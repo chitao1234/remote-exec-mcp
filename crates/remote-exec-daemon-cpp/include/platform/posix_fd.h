@@ -144,8 +144,9 @@ inline int dup_to(int source_fd, int target_fd) {
 
 inline int ioctl_retry_no_arg(int fd, unsigned long request) {
 #ifdef __HAIKU__
-    return posix_eintr::retry<int>([&]() { return ioctl(fd, request, static_cast<void*>(nullptr)); }
-    );
+    return posix_eintr::retry<int>([&]() {
+        return ioctl(fd, request, static_cast<void*>(nullptr));
+    });
 #else
     return posix_eintr::retry<int>([&]() { return ioctl(fd, request, 0); });
 #endif

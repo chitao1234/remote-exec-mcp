@@ -361,7 +361,8 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
             break;
         }
         const int error = last_socket_error();
-        if (receive_timeout_error(error)
+        if (
+            receive_timeout_error(error)
 #ifndef _WIN32
             || error == ENOBUFS
 #endif

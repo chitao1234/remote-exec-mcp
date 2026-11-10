@@ -566,12 +566,14 @@ std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path) 
             (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
         const bool entry_is_directory =
             !entry_is_symlink && (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-        entries.push_back(DirectoryEntryInfo{
-            name,
-            entry_is_directory,
-            !entry_is_directory && !entry_is_symlink,
-            entry_is_symlink
-        });
+        entries.push_back(
+            DirectoryEntryInfo{
+                name,
+                entry_is_directory,
+                !entry_is_directory && !entry_is_symlink,
+                entry_is_symlink
+            }
+        );
     } while (remote_exec_win32::find_next_file_native(handle.get(), &find_data) != 0);
 
     const DWORD last_error = GetLastError();
@@ -601,12 +603,14 @@ std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path) 
         if (!path_metadata_no_follow(child, &metadata)) {
             throw std::runtime_error("unable to stat path " + child);
         }
-        entries.push_back(DirectoryEntryInfo{
-            name,
-            metadata.is_directory,
-            metadata.is_regular_file,
-            metadata.is_symlink
-        });
+        entries.push_back(
+            DirectoryEntryInfo{
+                name,
+                metadata.is_directory,
+                metadata.is_regular_file,
+                metadata.is_symlink
+            }
+        );
         errno = 0;
     }
     if (errno != 0) {

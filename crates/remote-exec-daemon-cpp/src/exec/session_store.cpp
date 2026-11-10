@@ -440,11 +440,13 @@ bool SessionStore::prune_one_session_for_start(unsigned long max_open_sessions) 
                      sessions_.begin();
                  it != sessions_.end();
                  ++it) {
-                snapshot.push_back(PruneCandidate{
-                    it->first,
-                    it->second,
-                    it->second->last_touched_order.load(),
-                });
+                snapshot.push_back(
+                    PruneCandidate{
+                        it->first,
+                        it->second,
+                        it->second->last_touched_order.load(),
+                    }
+                );
             }
         }
 

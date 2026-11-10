@@ -304,7 +304,8 @@ bool PortTunnelWorkerLease::valid() const {
     return budget_state_.get() != nullptr;
 }
 
-std::shared_ptr<PortTunnelService> create_port_tunnel_service(const PortForwardLimitConfig& limits
+std::shared_ptr<PortTunnelService> create_port_tunnel_service(
+    const PortForwardLimitConfig& limits
 ) {
     return std::shared_ptr<PortTunnelService>(new PortTunnelService(limits));
 }

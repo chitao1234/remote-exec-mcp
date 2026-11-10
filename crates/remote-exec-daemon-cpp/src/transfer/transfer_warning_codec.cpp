@@ -10,10 +10,12 @@ namespace {
 Json transfer_warnings_json(const std::vector<TransferWarning>& warnings) {
     Json json = Json::array();
     for (std::size_t i = 0; i < warnings.size(); ++i) {
-        json.push_back(Json{
-            {"code", warnings[i].code},
-            {"message", warnings[i].message},
-        });
+        json.push_back(
+            Json{
+                {"code", warnings[i].code},
+                {"message", warnings[i].message},
+            }
+        );
     }
     return json;
 }
@@ -29,10 +31,12 @@ std::vector<TransferWarning> read_transfer_summary(const std::string& body) {
     const Json summary = Json::parse(body);
     const Json raw_warnings = summary.value("warnings", Json::array());
     for (std::size_t i = 0; i < raw_warnings.size(); ++i) {
-        warnings.push_back(TransferWarning{
-            raw_warnings[i].value("code", std::string()),
-            raw_warnings[i].value("message", std::string()),
-        });
+        warnings.push_back(
+            TransferWarning{
+                raw_warnings[i].value("code", std::string()),
+                raw_warnings[i].value("message", std::string()),
+            }
+        );
     }
     return warnings;
 }

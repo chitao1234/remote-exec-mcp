@@ -238,7 +238,8 @@ std::shared_ptr<TunnelTcpStream> PortTunnelConnection::get_active_tcp_stream(uin
     return connection_local_streams_.get_tcp(stream_id);
 }
 
-std::shared_ptr<TunnelTcpStream> PortTunnelConnection::remove_active_tcp_stream(uint32_t stream_id
+std::shared_ptr<TunnelTcpStream> PortTunnelConnection::remove_active_tcp_stream(
+    uint32_t stream_id
 ) {
     std::shared_ptr<PortTunnelSessionAttachment> attachment = current_session_attachment();
     if (attachment.get() != nullptr) {

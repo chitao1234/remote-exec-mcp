@@ -600,8 +600,8 @@ ParsedPatch parse_patch(const std::string& patch_text, const std::string& window
                     && trim_patch_whitespace(lines[index]) == "*** End of File") {
                     chunk.is_end_of_file = true;
                     ++index;
-                    while (index + 1 < lines.size() && trim_patch_whitespace(lines[index]).empty()
-                    ) {
+                    while (index + 1 < lines.size()
+                           && trim_patch_whitespace(lines[index]).empty()) {
                         ++index;
                     }
                 }
