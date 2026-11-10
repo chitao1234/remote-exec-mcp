@@ -28,6 +28,7 @@
 #include "port_forward/port_tunnel_frame.h"
 #include "rpc/server_contract.h"
 #include "runtime/reactor_server.h"
+#include "test_filesystem.h"
 #include "test_tar_helpers.h"
 #include "tls/tls_connection_transport.h"
 namespace {
@@ -123,6 +124,7 @@ void test_event_loop() {
     close(fds[0]);
     close(fds[1]);
 }
+#endif
 
 struct Response {
     Response() : status(0) {}
@@ -130,8 +132,15 @@ struct Response {
     std::string body;
 };
 
-int connect_local(unsigned short port) {
-    const int fd = create_socket_cloexec(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+test_fs::path make_reactor_test_root() {
+    const test_fs::path root = test_fs::unique_test_root("remote-exec-cpp-reactor-test");
+    test_fs::remove_all(root);
+    test_fs::create_directories(root);
+    return root;
+}
+
+SOCKET connect_local(unsigned short port) {
+    const SOCKET fd = create_socket_cloexec(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     TEST_ASSERT(fd != INVALID_SOCKET);
     sockaddr_in address;
     std::memset(&address, 0, sizeof(address));
@@ -146,7 +155,7 @@ int connect_local(unsigned short port) {
     return fd;
 }
 
-void send_all_text(int fd, const std::string& text) {
+void send_all_text(SOCKET fd, const std::string& text) {
     std::size_t offset = 0U;
     while (offset < text.size()) {
         const int sent = send_bounded(fd, text.data() + offset, text.size() - offset, 0);
@@ -159,7 +168,7 @@ std::size_t find_header_end(const std::string& data) {
     return data.find("\r\n\r\n");
 }
 
-Response read_response(int fd) {
+Response read_response(SOCKET fd) {
     std::string data;
     char buffer[4096];
     std::size_t header_end = std::string::npos;
@@ -196,7 +205,7 @@ Response request_with_headers(
     const std::map<std::string, std::string>& headers,
     bool chunked
 ) {
-    const int fd = connect_local(port);
+    const SOCKET fd = connect_local(port);
     std::string request_text = std::string("POST ") + path + " HTTP/1.1\r\n";
     request_text += "Host: 127.0.0.1\r\n";
     request_text += "Connection: close\r\n";
@@ -239,7 +248,7 @@ Json response_json(const Response& response) {
     return parse_request_json_object(response.body);
 }
 
-void send_bytes(int fd, const char* data, std::size_t size) {
+void send_bytes(SOCKET fd, const char* data, std::size_t size) {
     std::size_t offset = 0U;
     while (offset < size) {
         const int sent = send_bounded(fd, data + offset, size - offset, 0);
@@ -248,7 +257,7 @@ void send_bytes(int fd, const char* data, std::size_t size) {
     }
 }
 
-bool read_exact(int fd, char* data, std::size_t size) {
+bool read_exact(SOCKET fd, char* data, std::size_t size) {
     std::size_t offset = 0U;
     while (offset < size) {
         const int received = recv_bounded(fd, data + offset, size - offset, 0);
@@ -323,7 +332,7 @@ struct TunnelClient {
         return decode_port_tunnel_frame(bytes);
     }
 
-    int fd;
+    SOCKET fd;
 };
 
 unsigned short endpoint_port(const std::string& endpoint) {
@@ -351,7 +360,7 @@ struct EchoServer {
         );
         port = ntohs(address.sin_port);
         thread = std::thread([this]() {
-            const int accepted = accept_socket_cloexec(listener, nullptr, nullptr);
+            const SOCKET accepted = accept_socket_cloexec(listener, nullptr, nullptr);
             char buffer[64];
             const int received =
                 accepted == INVALID_SOCKET ? -1 : recv_bounded(accepted, buffer, sizeof(buffer), 0);
@@ -373,7 +382,7 @@ struct EchoServer {
         }
     }
 
-    int listener;
+    SOCKET listener;
     unsigned short port;
     std::thread thread;
 };
@@ -439,7 +448,7 @@ void test_tunnel_listen(unsigned short port) {
     const unsigned short listen_port =
         endpoint_port(Json::parse(listen_ok.meta).at("endpoint").get<std::string>());
 
-    const int client = connect_local(listen_port);
+    const SOCKET client = connect_local(listen_port);
     const PortTunnelFrame accepted = tunnel.read();
     TEST_ASSERT(accepted.type == PortTunnelFrameType::TcpAccept);
     const std::uint32_t accepted_stream = accepted.stream_id;
@@ -464,7 +473,7 @@ void test_tunnel_listen(unsigned short port) {
 }
 
 void test_tunnel_bind_conflict(unsigned short port) {
-    const int occupied = create_socket_cloexec(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    const SOCKET occupied = create_socket_cloexec(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     TEST_ASSERT(occupied != INVALID_SOCKET);
     sockaddr_in address;
     std::memset(&address, 0, sizeof(address));
@@ -517,7 +526,7 @@ void test_tunnel_udp(unsigned short port) {
     const unsigned short bind_port =
         endpoint_port(Json::parse(bind_ok.meta).at("endpoint").get<std::string>());
 
-    const int udp = create_socket_cloexec(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    const SOCKET udp = create_socket_cloexec(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     TEST_ASSERT(udp != INVALID_SOCKET);
     set_socket_timeout_ms(udp, 5000);
     sockaddr_in destination;
@@ -554,7 +563,7 @@ void test_tunnel(unsigned short port) {
 }
 
 void test_reverse() {
-    const int broker_listener = create_socket_cloexec(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    const SOCKET broker_listener = create_socket_cloexec(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     TEST_ASSERT(broker_listener != INVALID_SOCKET);
     sockaddr_in broker_address;
     std::memset(&broker_address, 0, sizeof(broker_address));
@@ -582,9 +591,10 @@ void test_reverse() {
     const unsigned short broker_port = ntohs(broker_address.sin_port);
 
     DaemonConfig config;
+    const test_fs::path root = make_reactor_test_root();
     config.connection_mode = ConnectionMode::Reverse;
     config.target = "reactor-reverse-test";
-    config.default_workdir = "/tmp";
+    config.default_workdir = root.string();
     config.max_connections = 8U;
     config.blocking_workers = 2U;
     config.reverse_broker_host = "127.0.0.1";
@@ -596,7 +606,9 @@ void test_reverse() {
 
     ReactorServer server(config);
     std::string start_error;
-    TEST_ASSERT(server.start(&start_error));
+    if (!server.start(&start_error)) {
+        TEST_FAIL_MESSAGE(start_error);
+    }
     std::thread server_thread([&]() { server.run(); });
 
     std::atomic<bool> broker_ok(false);
@@ -703,12 +715,13 @@ void test_tls() {
         return;
     }
 
+    const test_fs::path root = make_reactor_test_root();
     DaemonConfig server_config;
     server_config.transport = Transport::Tls;
     server_config.target = "reactor-tls-test";
     server_config.listen_host = "127.0.0.1";
     server_config.listen_port = 0;
-    server_config.default_workdir = "/tmp";
+    server_config.default_workdir = root.string();
     server_config.max_connections = 8U;
     server_config.blocking_workers = 2U;
     server_config.tls_cert_pem = "tests/fixtures/tls/server.pem";
@@ -724,11 +737,13 @@ void test_tls() {
 
     ReactorServer server(server_config);
     std::string start_error;
-    TEST_ASSERT(server.start(&start_error));
+    if (!server.start(&start_error)) {
+        TEST_FAIL_MESSAGE(start_error);
+    }
     std::thread server_thread([&]() { server.run(); });
 
     const std::shared_ptr<TlsContext> client_context = make_tls_client_context(client_config);
-    const int raw_client = connect_local(server.bound_port());
+    const SOCKET raw_client = connect_local(server.bound_port());
     set_socket_timeout_ms(raw_client, 5000);
     std::shared_ptr<Stream> client =
         make_tls_client_stream(UniqueSocket(raw_client), client_context, "localhost");
@@ -747,11 +762,10 @@ void test_tls() {
 }
 #endif
 
-void test_transfer(unsigned short port) {
-    const std::string source =
-        "/tmp/reactor-export-" + std::to_string(static_cast<long>(getpid())) + ".txt";
+void test_transfer(unsigned short port, const test_fs::path& root) {
+    const test_fs::path source = root / "reactor-export.txt";
     {
-        std::ofstream out(source.c_str(), std::ios::binary);
+        std::ofstream out(source.string().c_str(), std::ios::binary);
         out << "exported\n";
     }
 
@@ -761,7 +775,7 @@ void test_transfer(unsigned short port) {
     const Response exported = request_with_headers(
         port,
         "/v1/transfer/export",
-        "{\"path\":\"" + source + "\"}",
+        Json{{"path", source.string()}}.dump(),
         export_headers,
         false
     );
@@ -769,7 +783,8 @@ void test_transfer(unsigned short port) {
     const std::string exported_archive = test_tar::decode_framed_transfer_archive(exported.body);
     TEST_ASSERT(exported_archive.find("exported") != std::string::npos);
 
-    const Response info = request(port, "/v1/transfer/path-info", "{\"path\":\"/tmp\"}");
+    const Response info =
+        request(port, "/v1/transfer/path-info", Json{{"path", root.string()}}.dump());
     TEST_ASSERT(info.status == 200);
     TEST_ASSERT(info.body.find("\"exists\":true") != std::string::npos);
 
@@ -777,8 +792,7 @@ void test_transfer(unsigned short port) {
     test_tar::append_tar_file(archive, ".remote-exec-file", "from-tar\n");
     test_tar::finalize_tar(archive);
     const std::string framed = test_tar::framed_transfer_body(archive);
-    const std::string destination =
-        "/tmp/reactor-import-" + std::to_string(static_cast<long>(getpid())) + ".txt";
+    const test_fs::path destination = root / "reactor-import.txt";
 
     std::map<std::string, std::string> import_headers;
     import_headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] =
@@ -786,7 +800,7 @@ void test_transfer(unsigned short port) {
     import_headers["content-type"] = server_contract::TRANSFER_STREAM_CONTENT_TYPE;
     import_headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "file";
     import_headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] =
-        base64_encode_bytes(destination);
+        base64_encode_bytes(destination.string());
     import_headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "replace";
     import_headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "true";
 
@@ -794,18 +808,25 @@ void test_transfer(unsigned short port) {
         request_with_headers(port, "/v1/transfer/import", framed, import_headers, true);
     TEST_ASSERT(imported.status == 200);
 
-    std::ifstream in(destination.c_str(), std::ios::binary);
+    std::ifstream in(destination.string().c_str(), std::ios::binary);
     const std::string content(
         (std::istreambuf_iterator<char>(in)),
         std::istreambuf_iterator<char>()
     );
     TEST_ASSERT(content == "from-tar\n");
 
-    std::remove(source.c_str());
-    std::remove(destination.c_str());
+    std::remove(source.string().c_str());
+    std::remove(destination.string().c_str());
 }
 
 void test_exec(unsigned short port) {
+#ifdef _WIN32
+    const char* background_command = "ping -n 2 127.0.0.1 >nul & echo done";
+    const char* sleep_command = "ping -n 3 127.0.0.1 >nul";
+#else
+    const char* background_command = "printf start; sleep 1; printf done";
+    const char* sleep_command = "sleep 1";
+#endif
     const Response start = request(
         port,
         "/v1/exec/start",
@@ -820,7 +841,7 @@ void test_exec(unsigned short port) {
     const Response background = request(
         port,
         "/v1/exec/start",
-        "{\"cmd\":\"printf start; sleep 1; printf done\",\"yield_time_ms\":100}"
+        Json{{"cmd", background_command}, {"yield_time_ms", 100}}.dump()
     );
     TEST_ASSERT(background.status == 200);
     Json background_body = response_json(background);
@@ -849,7 +870,7 @@ void test_exec(unsigned short port) {
     TEST_ASSERT(unknown.body.find("unknown_session") != std::string::npos);
 
     const Response sleep_start =
-        request(port, "/v1/exec/start", "{\"cmd\":\"sleep 1\",\"yield_time_ms\":50}");
+        request(port, "/v1/exec/start", Json{{"cmd", sleep_command}, {"yield_time_ms", 50}}.dump());
     TEST_ASSERT(sleep_start.status == 200);
     Json sleep_body = response_json(sleep_start);
     TEST_ASSERT(sleep_body.at("running").get<bool>());
@@ -872,6 +893,7 @@ void test_exec(unsigned short port) {
     Json sleep_poll_body = response_json(sleep_poll);
     TEST_ASSERT(!sleep_poll_body.at("running").get<bool>());
 
+#ifndef _WIN32
     const Response tty_start =
         request(port, "/v1/exec/start", "{\"cmd\":\"cat\",\"tty\":true,\"yield_time_ms\":50}");
     TEST_ASSERT(tty_start.status == 200);
@@ -889,20 +911,24 @@ void test_exec(unsigned short port) {
     TEST_ASSERT(tty_write.status == 200);
     Json tty_write_body = response_json(tty_write);
     TEST_ASSERT(tty_write_body.at("output").get<std::string>().find("hello") != std::string::npos);
+#endif
 }
 
 void test_reactor_server() {
+    const test_fs::path root = make_reactor_test_root();
     DaemonConfig config;
     config.target = "reactor-test";
     config.listen_host = "127.0.0.1";
     config.listen_port = 0;
-    config.default_workdir = "/tmp";
+    config.default_workdir = root.string();
     config.max_connections = 8U;
     config.blocking_workers = 2U;
 
     ReactorServer server(config);
     std::string start_error;
-    TEST_ASSERT(server.start(&start_error));
+    if (!server.start(&start_error)) {
+        TEST_FAIL_MESSAGE(start_error);
+    }
     TEST_ASSERT(server.shard_count() == 1U);
 
     const unsigned short port = server.bound_port();
@@ -914,7 +940,7 @@ void test_reactor_server() {
     TEST_ASSERT(health.status == 200);
     TEST_ASSERT(health.body.find("\"status\":\"ok\"") != std::string::npos);
 
-    const int keep_alive_fd = connect_local(port);
+    const SOCKET keep_alive_fd = connect_local(port);
     {
         const std::string body = "{}";
         const std::string first =
@@ -947,7 +973,7 @@ void test_reactor_server() {
     );
     TEST_ASSERT(read.status == 200);
     TEST_ASSERT(read.body.find("alpha") != std::string::npos);
-    (void)std::remove("/tmp/reactor-test-file.txt");
+    (void)std::remove((root / file_name).string().c_str());
 
     const Response malformed = request(port, "/v1/file/read", "{\"path\":");
     TEST_ASSERT(malformed.status == 400);
@@ -969,26 +995,28 @@ void test_reactor_server() {
     TEST_ASSERT(invalid_upgrade.body.find("bad_request") != std::string::npos);
 
     test_exec(port);
-    test_transfer(port);
+    test_transfer(port, root);
     test_tunnel(port);
 
     server.request_stop();
     server_thread.join();
 }
-#endif
 
 } // namespace
 
 int main() {
+#ifdef _WIN32
+    NetworkSession network_session;
+#endif
     test_byte_buffer();
     test_json_depth_limit();
 #ifndef _WIN32
     test_event_loop();
+#endif
     test_reactor_server();
     test_reverse();
 #ifdef REMOTE_EXEC_CPP_HAS_OPENSSL
     test_tls();
-#endif
 #endif
     return 0;
 }
