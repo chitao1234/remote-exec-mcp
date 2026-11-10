@@ -1,5 +1,6 @@
 #pragma once
 
+#include <exception>
 #include <functional>
 #include <string>
 
@@ -21,6 +22,11 @@ HttpResponse handle_exec_rpc_route(
     const std::string& route_name,
     ExecRouteKind kind,
     const RpcRouteBody& body
+);
+HttpResponse exec_exception_response(
+    const std::string& route_name,
+    ExecRouteKind kind,
+    std::exception_ptr error
 );
 HttpResponse handle_patch_rpc_route(const RpcRouteBody& body);
 HttpResponse make_rpc_error_response(

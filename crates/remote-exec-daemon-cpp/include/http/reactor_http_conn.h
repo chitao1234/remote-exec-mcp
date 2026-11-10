@@ -14,6 +14,7 @@
 #include "platform/socket.h"
 
 class BlockingPool;
+class ExecService;
 class ReactorRouter;
 
 // One HTTP/1.1 connection driven entirely by loop readiness. The connection
@@ -24,6 +25,7 @@ public:
         EventLoop* loop;
         BlockingPool* pool;
         const ReactorRouter* router;
+        ExecService* exec;
         std::size_t max_header_bytes;
         std::size_t max_body_bytes;
         unsigned long idle_timeout_ms;
@@ -43,6 +45,7 @@ public:
     void close();
     bool closed() const;
     std::size_t shard_index() const;
+    void finish_handler(const HttpResponse& response);
 
 private:
     enum class State {
@@ -76,6 +79,7 @@ private:
     void begin_write(const HttpResponse& response, bool keep_alive);
     void fail(int status, const char* code, const std::string& message);
     void arm_timer();
+    void arm_timer_with(unsigned long timeout_ms);
     void cancel_timer();
 
     std::uint64_t id_;
@@ -85,6 +89,7 @@ private:
     EventLoop* loop_;
     BlockingPool* pool_;
     const ReactorRouter* router_;
+    ExecService* exec_;
     std::size_t max_header_bytes_;
     std::size_t max_body_bytes_;
     unsigned long idle_timeout_ms_;

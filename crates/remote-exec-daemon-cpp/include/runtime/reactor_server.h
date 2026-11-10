@@ -15,6 +15,7 @@
 
 class EventLoop;
 class BlockingPool;
+class ExecService;
 class ReactorRouter;
 class HttpConn;
 
@@ -43,6 +44,8 @@ private:
     void on_conn_closed(std::uint64_t id);
     void stop_loops();
     void finalize();
+    void schedule_exec_tick();
+    void exec_tick();
     bool assign_shard(std::size_t* shard);
     std::size_t shard_capacity(std::size_t shard) const;
     void resume_listener();
@@ -53,6 +56,7 @@ private:
     std::vector<std::unique_ptr<EventLoop>> loops_;
     std::vector<std::thread> loop_threads_;
     std::unique_ptr<BlockingPool> pool_;
+    std::unique_ptr<ExecService> exec_;
     std::unique_ptr<ReactorRouter> router_;
     UniqueSocket listener_;
     BasicMutex connections_mutex_;

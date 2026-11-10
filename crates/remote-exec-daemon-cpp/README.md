@@ -15,6 +15,7 @@ The daemon is moving from a blocking thread-per-unit core to a readiness-driven
 reactor. The production entrypoint now uses the reactor for these routes:
 
 - `health` and `target-info`;
+- `exec/start` and `exec/write` (non-blocking sessions, bounded output ring);
 - `file/read`, `file/write`, and `file/edit`;
 - `image/read`;
 - `patch/apply`.
@@ -22,7 +23,6 @@ reactor. The production entrypoint now uses the reactor for these routes:
 Routes that have not migrated yet return `501 not_migrated`, and
 `target-info` does not advertise them:
 
-- `exec/start`, `exec/write`;
 - `transfer/export`, `transfer/path-info`, `transfer/import`;
 - the port-forward upgrade route.
 

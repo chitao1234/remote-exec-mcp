@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -31,19 +32,24 @@ double wall_time_seconds(std::uint64_t started_at_ms) {
 Json exec_session_warnings_json(const std::vector<ExecSessionWarning>& warnings) {
     Json json = Json::array();
     for (std::size_t i = 0; i < warnings.size(); ++i) {
-        json.push_back(
-            Json{
-                {"code", warnings[i].code},
-                {"message", warnings[i].message},
-            }
-        );
+        json.push_back(Json{
+            {"code", warnings[i].code},
+            {"message", warnings[i].message},
+        });
     }
     return json;
 }
 
 Json exec_session_result_json(const ExecSessionResult& result, unsigned long max_output_tokens) {
     const std::string trimmed = render_output(result.output, max_output_tokens);
-    const unsigned long original_token_count = approximate_output_token_count(result.output.size());
+    const std::uint64_t original_bytes = result.original_output_bytes > 0
+                                             ? result.original_output_bytes
+                                             : static_cast<std::uint64_t>(result.output.size());
+    const std::size_t original_size =
+        original_bytes > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+            ? std::numeric_limits<std::size_t>::max()
+            : static_cast<std::size_t>(original_bytes);
+    const unsigned long original_token_count = approximate_output_token_count(original_size);
     return Json{
         {"daemon_session_id",
          result.has_daemon_session_id ? Json(result.daemon_session_id) : Json(nullptr)},

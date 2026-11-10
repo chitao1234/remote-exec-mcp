@@ -7,6 +7,7 @@
 #include "core/blocking_pool.h"
 #include "core/logging.h"
 #include "core/text_utils.h"
+#include "exec/exec_service.h"
 #include "http/http_request.h"
 #include "platform/platform.h"
 #include "rpc/reactor_router.h"
@@ -19,6 +20,7 @@ const std::size_t READ_CHUNK_SIZE = 16U * 1024U;
 const int READ_CALLS_PER_EVENT = 8;
 const std::size_t CHUNK_LINE_LIMIT = 8U * 1024U;
 const std::size_t PIPELINE_ALLOWANCE = 64U * 1024U;
+const unsigned long EXEC_REQUEST_SAFETY_MS = 330000UL;
 
 enum ChunkState {
     CHUNK_SIZE = 0,
@@ -209,7 +211,7 @@ HttpConn::HttpConn(
 )
     : id_(id), shard_index_(shard_index), fd_(socket.get()),
       stream_(make_socket_stream(std::move(socket))), loop_(options.loop), pool_(options.pool),
-      router_(options.router), max_header_bytes_(options.max_header_bytes),
+      router_(options.router), exec_(options.exec), max_header_bytes_(options.max_header_bytes),
       max_body_bytes_(options.max_body_bytes), idle_timeout_ms_(options.idle_timeout_ms),
       shutting_down_(options.shutting_down), on_closed_(options.on_closed),
       input_(input_limit_for(options.max_header_bytes, options.max_body_bytes)), output_offset_(0U),
@@ -230,6 +232,13 @@ bool HttpConn::closed() const {
 
 std::size_t HttpConn::shard_index() const {
     return shard_index_;
+}
+
+void HttpConn::finish_handler(const HttpResponse& response) {
+    if (closed_ || state_ != State::WaitingHandler) {
+        return;
+    }
+    begin_write(response, keep_alive_);
 }
 
 void HttpConn::start() {
@@ -457,6 +466,35 @@ void HttpConn::dispatch(HttpRequest& request) {
         return;
     }
 
+    if (route == server_contract::ROUTE_EXEC_START || route == server_contract::ROUTE_EXEC_WRITE) {
+        if (exec_ == nullptr) {
+            begin_write(
+                make_rpc_error_response(500, "internal_error", "exec service unavailable"),
+                false
+            );
+            return;
+        }
+        state_ = State::WaitingHandler;
+        cancel_timer();
+        arm_timer_with(EXEC_REQUEST_SAFETY_MS);
+        (void)loop_->set_interest(fd_, 0);
+
+        std::shared_ptr<HttpRequest> shared_request(new HttpRequest());
+        *shared_request = std::move(request);
+        std::shared_ptr<HttpConn> self = shared_from_this();
+        EventLoop* owner = loop_;
+        std::function<void(HttpResponse)> done = [self, owner](HttpResponse response) {
+            std::shared_ptr<HttpResponse> held(new HttpResponse(response));
+            owner->post([self, held]() { self->finish_handler(*held); });
+        };
+        if (route == server_contract::ROUTE_EXEC_START) {
+            exec_->start_async(shared_request, done);
+        } else {
+            exec_->write_async(shared_request, done);
+        }
+        return;
+    }
+
     if (!ReactorRouter::is_migrated(route)) {
         begin_write(
             make_rpc_error_response(
@@ -471,6 +509,7 @@ void HttpConn::dispatch(HttpRequest& request) {
 
     state_ = State::WaitingHandler;
     cancel_timer();
+    (void)loop_->set_interest(fd_, 0);
     std::shared_ptr<HttpConn> self = shared_from_this();
     std::shared_ptr<HttpRequest> shared_request(new HttpRequest());
     *shared_request = std::move(request);
@@ -524,16 +563,21 @@ void HttpConn::fail(int status, const char* code, const std::string& message) {
 }
 
 void HttpConn::arm_timer() {
+    arm_timer_with(idle_timeout_ms_);
+}
+
+void HttpConn::arm_timer_with(unsigned long timeout_ms) {
     cancel_timer();
-    if (idle_timeout_ms_ == 0UL) {
+    if (timeout_ms == 0UL) {
         return;
     }
     std::weak_ptr<HttpConn> weak = shared_from_this();
     timer_ = loop_->add_timer(
-        platform::monotonic_ms() + static_cast<std::uint64_t>(idle_timeout_ms_),
+        platform::monotonic_ms() + static_cast<std::uint64_t>(timeout_ms),
         [weak]() {
             std::shared_ptr<HttpConn> self = weak.lock();
             if (self) {
+                self->timer_armed_ = false;
                 self->close();
             }
         }

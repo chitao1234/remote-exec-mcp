@@ -134,56 +134,37 @@ HttpResponse handle_file_rpc_route(const std::string& route_name, const RpcRoute
     }
 }
 
-HttpResponse handle_exec_rpc_route(
+HttpResponse exec_exception_response(
     const std::string& route_name,
     ExecRouteKind kind,
-    const RpcRouteBody& body
+    std::exception_ptr error
 ) {
     try {
-        return run_rpc_route(body);
+        if (error) {
+            std::rethrow_exception(error);
+        }
     } catch (const SessionLimitError& ex) {
         log_message(LOG_WARN, "server", route_name + " rejected: " + ex.what());
-        HttpResponse response;
-        response.status = 429;
-        write_rpc_error(response, 429, "session_limit_exceeded", ex.what());
-        return response;
+        return make_rpc_error_response(429, "session_limit_exceeded", ex.what());
     } catch (const SandboxError& ex) {
         const std::string action = kind == ExecRouteKind::Start ? " denied: " : " rejected: ";
         log_message(LOG_WARN, "server", route_name + action + ex.what());
-        HttpResponse response;
-        response.status = 400;
-        write_rpc_error(response, 400, "sandbox_denied", ex.what());
-        return response;
+        return make_rpc_error_response(400, "sandbox_denied", ex.what());
     } catch (const UnknownSessionError& ex) {
         log_message(LOG_WARN, "server", route_name + " unknown session: " + ex.what());
-        HttpResponse response;
-        response.status = 400;
-        write_rpc_error(response, 400, "unknown_session", ex.what());
-        return response;
+        return make_rpc_error_response(400, "unknown_session", ex.what());
     } catch (const StdinClosedError& ex) {
         log_message(LOG_WARN, "server", route_name + " stdin closed: " + ex.what());
-        HttpResponse response;
-        response.status = 400;
-        write_rpc_error(response, 400, "stdin_closed", ex.what());
-        return response;
+        return make_rpc_error_response(400, "stdin_closed", ex.what());
     } catch (const StdinWriteTimeoutError& ex) {
         log_message(LOG_WARN, "server", route_name + " stdin write timed out: " + ex.what());
-        HttpResponse response;
-        response.status = 408;
-        write_rpc_error(response, 408, "stdin_write_timeout", ex.what());
-        return response;
+        return make_rpc_error_response(408, "stdin_write_timeout", ex.what());
     } catch (const ProcessPtyResizeUnsupportedError& ex) {
         log_message(LOG_WARN, "server", route_name + " pty resize unsupported: " + ex.what());
-        HttpResponse response;
-        response.status = 400;
-        write_rpc_error(response, 400, "tty_unsupported", ex.what());
-        return response;
+        return make_rpc_error_response(400, "tty_unsupported", ex.what());
     } catch (const ExecRequestFailure& ex) {
         log_message(level_for_status(ex.status), "server", route_name + " rejected: " + ex.what());
-        HttpResponse response;
-        response.status = ex.status;
-        write_rpc_error(response, ex.status, ex.code, ex.message);
-        return response;
+        return make_rpc_error_response(ex.status, ex.code, ex.message);
     } catch (const JsonRequestError& ex) {
         return json_request_error_response(ex);
     } catch (const Json::exception& ex) {
@@ -191,10 +172,23 @@ HttpResponse handle_exec_rpc_route(
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_ERROR, "server", route_name + " failed: " + message);
-        HttpResponse response;
-        response.status = 500;
-        write_rpc_error(response, 500, "internal_error", message);
-        return response;
+        return make_rpc_error_response(500, "internal_error", message);
+    } catch (...) {
+        log_message(LOG_ERROR, "server", route_name + " failed with an unknown exception");
+        return make_rpc_error_response(500, "internal_error", "unknown exec failure");
+    }
+    return make_rpc_error_response(500, "internal_error", "unknown exec failure");
+}
+
+HttpResponse handle_exec_rpc_route(
+    const std::string& route_name,
+    ExecRouteKind kind,
+    const RpcRouteBody& body
+) {
+    try {
+        return run_rpc_route(body);
+    } catch (...) {
+        return exec_exception_response(route_name, kind, std::current_exception());
     }
 }
 

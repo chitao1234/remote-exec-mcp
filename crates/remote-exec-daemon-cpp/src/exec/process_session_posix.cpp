@@ -67,8 +67,7 @@ struct PosixPtyPair {
 
 void set_fd_cloexec_or_throw(int fd, const std::string& label) {
     if (!posix_fd::set_cloexec(fd)) {
-        throw std::runtime_error(
-            errno_error::operation_failed(label + " fcntl(FD_CLOEXEC)", errno)
+        throw std::runtime_error(errno_error::operation_failed(label + " fcntl(FD_CLOEXEC)", errno)
         );
     }
 }
@@ -331,10 +330,8 @@ public:
 
     void write_stdin(const std::string& chars) override {
         if (!input_write_.valid()) {
-            throw std::runtime_error(
-                "stdin is closed for this session; rerun exec_command with "
-                "tty=true to keep stdin open"
-            );
+            throw std::runtime_error("stdin is closed for this session; rerun exec_command with "
+                                     "tty=true to keep stdin open");
         }
 
         const char* data = chars.data();
@@ -343,15 +340,12 @@ public:
             const ssize_t written = posix_fd::write_retry(input_write_.get(), data, remaining);
             if (written < 0) {
                 if (errno == EPIPE || errno == EIO) {
-                    throw ProcessStdinClosedError(
-                        "stdin is closed for this session; rerun "
-                        "exec_command with tty=true to keep stdin open"
-                    );
+                    throw ProcessStdinClosedError("stdin is closed for this session; rerun "
+                                                  "exec_command with tty=true to keep stdin open");
                 }
                 if (tty_ && (errno == EAGAIN || errno == EWOULDBLOCK)) {
                     if (posix_fd::wait_until_writable_or_hangup(input_write_.get()) != 0) {
-                        throw std::runtime_error(
-                            errno_error::operation_failed("poll(stdin)", errno)
+                        throw std::runtime_error(errno_error::operation_failed("poll(stdin)", errno)
                         );
                     }
                     continue;
@@ -462,6 +456,11 @@ public:
             return true;
         }
         return false;
+    }
+
+    int output_fd() const override {
+        const int read_fd = output_read_.valid() ? output_read_.get() : input_write_.get();
+        return tty_ ? read_fd : output_read_.get();
     }
 
 private:

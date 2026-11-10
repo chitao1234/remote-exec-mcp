@@ -240,6 +240,8 @@ REACTOR_SRCS = \
 	$(SOURCE_PREFIX)src/core/socket_stream.cpp \
 	$(SOURCE_PREFIX)src/core/blocking_pool.cpp \
 	$(SOURCE_PREFIX)src/core/json_value.cpp \
+	$(SOURCE_PREFIX)src/exec/bounded_transcript.cpp \
+	$(SOURCE_PREFIX)src/exec/exec_service.cpp \
 	$(SOURCE_PREFIX)src/http/reactor_http_conn.cpp \
 	$(SOURCE_PREFIX)src/rpc/reactor_router.cpp \
 	$(SOURCE_PREFIX)src/runtime/reactor_server.cpp

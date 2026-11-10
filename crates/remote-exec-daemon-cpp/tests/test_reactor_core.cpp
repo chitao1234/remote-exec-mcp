@@ -20,7 +20,6 @@
 #include "platform/platform.h"
 #include "platform/socket.h"
 #include "runtime/reactor_server.h"
-
 namespace {
 
 void test_byte_buffer() {
@@ -193,6 +192,96 @@ Response request(unsigned short port, const char* path, const std::string& body)
     return response;
 }
 
+Json response_json(const Response& response) {
+    return parse_request_json_object(response.body);
+}
+
+void test_exec(unsigned short port) {
+    const Response start = request(
+        port,
+        "/v1/exec/start",
+        "{\"cmd\":\"echo hello\",\"yield_time_ms\":5000,\"max_output_tokens\":1000}"
+    );
+    TEST_ASSERT(start.status == 200);
+    Json start_body = response_json(start);
+    TEST_ASSERT(!start_body.at("running").get<bool>());
+    TEST_ASSERT(start_body.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(start_body.at("output").get<std::string>().find("hello") != std::string::npos);
+
+    const Response background = request(
+        port,
+        "/v1/exec/start",
+        "{\"cmd\":\"printf start; sleep 1; printf done\",\"yield_time_ms\":100}"
+    );
+    TEST_ASSERT(background.status == 200);
+    Json background_body = response_json(background);
+    TEST_ASSERT(background_body.at("running").get<bool>());
+    const std::string session_id = background_body.at("daemon_session_id").get<std::string>();
+    TEST_ASSERT(!session_id.empty());
+
+    const Response poll = request(
+        port,
+        "/v1/exec/write",
+        "{\"daemon_session_id\":\"" + session_id
+            + "\",\"chars\":\"\",\"yield_time_ms\":5000,\"max_output_tokens\":1000}"
+    );
+    TEST_ASSERT(poll.status == 200);
+    Json poll_body = response_json(poll);
+    TEST_ASSERT(!poll_body.at("running").get<bool>());
+    TEST_ASSERT(poll_body.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(poll_body.at("output").get<std::string>().find("done") != std::string::npos);
+
+    const Response unknown = request(
+        port,
+        "/v1/exec/write",
+        "{\"daemon_session_id\":\"sess_missing\",\"chars\":\"\",\"yield_time_ms\":0}"
+    );
+    TEST_ASSERT(unknown.status == 400);
+    TEST_ASSERT(unknown.body.find("unknown_session") != std::string::npos);
+
+    const Response sleep_start =
+        request(port, "/v1/exec/start", "{\"cmd\":\"sleep 1\",\"yield_time_ms\":50}");
+    TEST_ASSERT(sleep_start.status == 200);
+    Json sleep_body = response_json(sleep_start);
+    TEST_ASSERT(sleep_body.at("running").get<bool>());
+    const std::string sleep_id = sleep_body.at("daemon_session_id").get<std::string>();
+
+    const Response closed = request(
+        port,
+        "/v1/exec/write",
+        "{\"daemon_session_id\":\"" + sleep_id + "\",\"chars\":\"x\",\"yield_time_ms\":0}"
+    );
+    TEST_ASSERT(closed.status == 400);
+    TEST_ASSERT(closed.body.find("stdin_closed") != std::string::npos);
+
+    const Response sleep_poll = request(
+        port,
+        "/v1/exec/write",
+        "{\"daemon_session_id\":\"" + sleep_id + "\",\"chars\":\"\",\"yield_time_ms\":3000}"
+    );
+    TEST_ASSERT(sleep_poll.status == 200);
+    Json sleep_poll_body = response_json(sleep_poll);
+    TEST_ASSERT(!sleep_poll_body.at("running").get<bool>());
+
+    const Response tty_start =
+        request(port, "/v1/exec/start", "{\"cmd\":\"cat\",\"tty\":true,\"yield_time_ms\":50}");
+    TEST_ASSERT(tty_start.status == 200);
+    Json tty_body = response_json(tty_start);
+    TEST_ASSERT(tty_body.at("running").get<bool>());
+    const std::string tty_id = tty_body.at("daemon_session_id").get<std::string>();
+
+    const Response tty_write = request(
+        port,
+        "/v1/exec/write",
+        "{\"daemon_session_id\":\"" + tty_id
+            + "\",\"chars\":\"hello\\n\",\"yield_time_ms\":1000,"
+              "\"pty_size\":{\"rows\":30,\"cols\":90}}"
+    );
+    TEST_ASSERT(tty_write.status == 200);
+    Json tty_write_body = response_json(tty_write);
+    TEST_ASSERT(tty_write_body.at("output").get<std::string>().find("hello") != std::string::npos);
+}
+
 void test_reactor_server() {
     DaemonConfig config;
     config.target = "reactor-test";
@@ -266,9 +355,11 @@ void test_reactor_server() {
     const Response too_deep = request(port, "/v1/file/read", deep);
     TEST_ASSERT(too_deep.status == 400);
 
-    const Response unmigrated = request(port, "/v1/exec/start", "{\"cmd\":\"echo hi\"}");
+    const Response unmigrated = request(port, "/v1/transfer/path-info", "{\"path\":\"/tmp\"}");
     TEST_ASSERT(unmigrated.status == 501);
     TEST_ASSERT(unmigrated.body.find("\"not_migrated\"") != std::string::npos);
+
+    test_exec(port);
 
     server.request_stop();
     server_thread.join();

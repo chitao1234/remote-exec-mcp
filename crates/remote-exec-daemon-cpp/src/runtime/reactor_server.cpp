@@ -12,10 +12,13 @@
 #include "core/blocking_pool.h"
 #include "core/event_loop.h"
 #include "core/logging.h"
+#include "exec/exec_service.h"
+#include "exec/process_session.h"
 #include "http/reactor_http_conn.h"
 #include "platform/platform.h"
 #include "policy/filesystem_sandbox.h"
 #include "rpc/reactor_router.h"
+#include "runtime/route_context.h"
 
 #ifdef _WIN32
 #include "platform/win32_socket_compat.h"
@@ -35,10 +38,8 @@ std::string make_instance_id() {
 
 DaemonCapabilities reactor_capabilities(const DaemonConfig& config) {
     DaemonCapabilities capabilities = detect_daemon_capabilities(config);
-    // The reactor server currently implements file, image, patch, and
-    // health/target-info only. Do not advertise routes that answer 501.
-    capabilities.supports_exec = false;
-    capabilities.supports_pty = false;
+    capabilities.supports_exec = config.allow_exec;
+    capabilities.supports_pty = process_session_supports_pty();
     capabilities.supports_port_forward = false;
     capabilities.port_forward_protocol_version = 0U;
     capabilities.transfer_stream_protocol_version = 0U;
@@ -109,7 +110,7 @@ std::size_t required_shards(const DaemonConfig& config) {
 
 ReactorServer::ReactorServer(const DaemonConfig& config)
     : config_(config), metadata_(), sandbox_(), loops_(), loop_threads_(),
-      pool_(new BlockingPool(config.blocking_workers, config.blocking_workers * 8U + 8U)),
+      pool_(new BlockingPool(config.blocking_workers, config.blocking_workers * 8U + 8U)), exec_(),
       router_(), listener_(), connections_mutex_(), connections_(), shard_connections_(),
       next_shard_(0U), next_connection_id_(1U), bound_port_(0U), listener_paused_(false),
       shutting_down_(false), finalized_(false) {
@@ -130,6 +131,29 @@ ReactorServer::ReactorServer(const DaemonConfig& config)
     if (sandbox_.enabled) {
         sandbox_.compiled = compile_filesystem_sandbox(config_.sandbox);
     }
+
+    const PathResolutionContext paths(
+        config_.default_workdir,
+        config_.windows_posix_root,
+        sandbox_.active()
+    );
+    const ExecRequestContext exec_request(
+        paths,
+        metadata_.capabilities,
+        metadata_.default_shell,
+        config_.allow_login_shell
+    );
+    exec_.reset(new ExecService(
+        exec_request,
+        config_.target,
+        metadata_.daemon_instance_id,
+        config_.yield_time,
+        config_.stdin_write_timeout_ms,
+        config_.max_open_sessions,
+        config_.allow_exec,
+        loops_[0].get(),
+        pool_.get()
+    ));
     router_.reset(new ReactorRouter(config_, metadata_, sandbox_));
 }
 
@@ -231,6 +255,7 @@ bool ReactorServer::start(std::string* error) {
     }
 
     bound_port_ = socket_bound_port_or_zero(listener_.get());
+    schedule_exec_tick();
     return true;
 }
 
@@ -266,6 +291,20 @@ void ReactorServer::request_stop() {
     for (std::size_t i = 0; i < loops_.size(); ++i) {
         loops_[i]->post([this, i]() { loops_[i]->stop(); });
     }
+}
+
+void ReactorServer::schedule_exec_tick() {
+    if (shutting_down_.load() || loops_.empty()) {
+        return;
+    }
+    loops_[0]->add_timer(platform::monotonic_ms() + 20U, [this]() { exec_tick(); });
+}
+
+void ReactorServer::exec_tick() {
+    if (exec_) {
+        exec_->tick();
+    }
+    schedule_exec_tick();
 }
 
 void ReactorServer::stop_loops() {
@@ -326,6 +365,7 @@ void ReactorServer::accept_ready() {
         options.loop = loops_[shard].get();
         options.pool = pool_.get();
         options.router = router_.get();
+        options.exec = exec_.get();
         options.max_header_bytes = config_.max_request_header_bytes;
         options.max_body_bytes = config_.max_request_body_bytes;
         options.idle_timeout_ms = config_.http_connection_idle_timeout_ms;
@@ -378,6 +418,9 @@ void ReactorServer::finalize() {
         return;
     }
     finalized_ = true;
+    if (exec_) {
+        exec_->cancel_all();
+    }
     if (pool_) {
         pool_->stop();
     }

@@ -48,6 +48,9 @@ public:
     virtual bool has_exited(int* exit_code) = 0;
     virtual void terminate() = 0;
     virtual bool terminate_descendants() { return false; }
+    // Descriptor that becomes readable when output is available, or -1 when
+    // the platform cannot expose a pollable descriptor (Windows pipes/winpty).
+    virtual int output_fd() const { return -1; }
 
 protected:
     ProcessSession() {}
